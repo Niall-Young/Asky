@@ -97,6 +97,10 @@ struct AgentView: View {
     var close: () -> Void = {}
     var setPinned: (Bool) -> Void = { _ in }
     @State private var pinned = false
+    @State private var historyPressed = false
+    @State private var actionsPressed = false
+    @State private var historyHovered = false
+    @State private var actionsHovered = false
     @State private var showingHistory = false
     @State private var historyQuery = ""
     @Environment(\.colorScheme) private var colorScheme
@@ -169,9 +173,12 @@ struct AgentView: View {
             AgentToolbarControls(history: true, showingHistory: showingHistory,
                 pinned: pinned, running: model.isRunning,
                 onHistory: toggleHistory, onNew: newConversation,
-                onPin: togglePin, onClose: close)
+                onPin: togglePin, onClose: close,
+                onPressChanged: { historyPressed = $0 })
                 .fixedSize()
-                .nativeGlassBackground(in: Circle(), clear: true, glassOpacity: 0.35)
+                .nativeGlassBackground(in: Circle(), interactive: true, clear: true, glassOpacity: 0.35)
+                .modifier(AgentToolbarElasticity(pressed: historyPressed, hovered: historyHovered))
+                .onHover { historyHovered = $0 }
             if showingHistory {
                 HStack(spacing: 8) {
                     Image(mingCute: "magnifyingglass", size: 14)
@@ -188,9 +195,12 @@ struct AgentView: View {
             AgentToolbarControls(history: false, showingHistory: showingHistory,
                 pinned: pinned, running: model.isRunning,
                 onHistory: toggleHistory, onNew: newConversation,
-                onPin: togglePin, onClose: close)
+                onPin: togglePin, onClose: close,
+                onPressChanged: { actionsPressed = $0 })
                 .fixedSize()
-                .nativeGlassBackground(in: Capsule(), clear: true, glassOpacity: 0.35)
+                .nativeGlassBackground(in: Capsule(), interactive: true, clear: true, glassOpacity: 0.35)
+                .modifier(AgentToolbarElasticity(pressed: actionsPressed, hovered: actionsHovered))
+                .onHover { actionsHovered = $0 }
         }
         .padding(.horizontal, 16)
         .frame(height: AgentLayout.headerHeight)
@@ -283,6 +293,7 @@ private struct AgentToolbarControls: NSViewRepresentable {
     var onNew: () -> Void
     var onPin: () -> Void
     var onClose: () -> Void
+    var onPressChanged: (Bool) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -293,7 +304,7 @@ private struct AgentToolbarControls: NSViewRepresentable {
         stack.alignment = .centerY
         stack.detachesHiddenViews = false
         for index in 0..<(history ? 1 : 3) {
-            let button = NSButton(title: "", target: context.coordinator, action: #selector(Coordinator.activate(_:)))
+            let button = AgentToolbarPressButton(title: "", target: context.coordinator, action: #selector(Coordinator.activate(_:)))
             button.setButtonType(.momentaryPushIn)
             button.bezelStyle = .accessoryBarAction
             button.tag = index
@@ -320,6 +331,7 @@ private struct AgentToolbarControls: NSViewRepresentable {
         for (index, view) in stack.arrangedSubviews.enumerated() {
             guard let button = view as? NSButton else { continue }
             let title = NSLocalizedString(titles[index], comment: "")
+            (button as? AgentToolbarPressButton)?.onPressChanged = onPressChanged
             button.image = MingCute.image(symbols[index], size: 18)
             button.image?.accessibilityDescription = title
             button.toolTip = title
@@ -338,6 +350,33 @@ private struct AgentToolbarControls: NSViewRepresentable {
             else if sender.tag == 1 { parent.onPin() }
             else if sender.tag == 2 { parent.onClose() }
         }
+    }
+}
+
+/// Observe native mouse tracking without replacing NSButton's action, drag-out
+/// cancellation, keyboard activation or accessibility behavior.
+private final class AgentToolbarPressButton: NSButton {
+    var onPressChanged: ((Bool) -> Void)?
+
+    override func mouseDown(with event: NSEvent) {
+        guard isEnabled else { super.mouseDown(with: event); return }
+        onPressChanged?(true)
+        defer { onPressChanged?(false) }
+        super.mouseDown(with: event)
+    }
+}
+
+private struct AgentToolbarElasticity: ViewModifier {
+    let pressed: Bool
+    let hovered: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        content
+            .scaleEffect(x: reduceMotion ? 1 : pressed ? 1.045 : hovered ? 1.012 : 1,
+                         y: reduceMotion ? 1 : pressed ? 0.93 : hovered ? 1.02 : 1)
+            .animation(reduceMotion ? nil : .spring(response: 0.28, dampingFraction: 0.45), value: pressed)
+            .animation(reduceMotion ? nil : .spring(response: 0.22, dampingFraction: 0.75), value: hovered)
     }
 }
 
