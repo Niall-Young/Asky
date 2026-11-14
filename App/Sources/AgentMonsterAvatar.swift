@@ -25,32 +25,18 @@ enum AgentAvatarColor: String, CaseIterable {
         }
     }
 
-    /// Muted message fills share the avatar's hue, with readable light/dark variants.
-    func replyBubbleBackground(for scheme: ColorScheme, opaque: Bool = false) -> Color {
-        let rgb: UInt32 = switch (self, scheme) {
-        case (.blue, .dark): 0x304C60
-        case (.yellow, .dark): 0x5A5031
-        case (.purple, .dark): 0x483C5D
-        case (.green, .dark): 0x3B503D
-        case (.pink, .dark): 0x5D3B4D
-        case (.blue, _): 0xD6E9F8
-        case (.yellow, _): 0xF2E7BC
-        case (.purple, _): 0xE6DDF6
-        case (.green, _): 0xDCEBD5
-        case (.pink, _): 0xF4DFE8
+    /// A hint of the pet hue sits over the neutral user-message surface.
+    func userBubbleTint(for scheme: ColorScheme) -> Color {
+        let rgb: UInt32 = switch self {
+        case .blue: 0x73BFFF
+        case .yellow: 0xF1CB62
+        case .purple: 0xB69AF8
+        case .green: 0x87CC8A
+        case .pink: 0xECA4C4
         }
         return Color(.sRGB, red: Double((rgb >> 16) & 0xFF) / 255,
                      green: Double((rgb >> 8) & 0xFF) / 255,
-                     blue: Double(rgb & 0xFF) / 255, opacity: opaque ? 1 : 0.9)
-    }
-}
-
-struct AgentReplyBubbleStyle: ShapeStyle {
-    let color: AgentAvatarColor
-
-    func resolve(in environment: EnvironmentValues) -> Color {
-        color.replyBubbleBackground(for: environment.colorScheme,
-            opaque: environment.accessibilityReduceTransparency || environment.colorSchemeContrast == .increased)
+                     blue: Double(rgb & 0xFF) / 255, opacity: scheme == .dark ? 0.12 : 0.08)
     }
 }
 
@@ -109,7 +95,7 @@ struct AgentAvatarPicker: View {
                 }
             }
         }
-        .frame(width: 36, height: 36, alignment: .topLeading)
+        .frame(width: showing ? 184 : 36, height: showing ? 252 : 36, alignment: .topLeading)
         .animation(reduceMotion ? nil : .spring(response: 0.28, dampingFraction: 0.58), value: showing)
         .onChange(of: showing) { _, value in value ? startMonitoring() : stopMonitoring() }
         .onDisappear { showing = false; stopMonitoring() }
@@ -126,6 +112,7 @@ struct AgentAvatarPicker: View {
                 .contentShape(Circle())
         }
         .buttonStyle(GlassPressObserverStyle(pressed: $pressed))
+        .focusable(false)
         .accessibilityLabel(NSLocalizedString("头像颜色", comment: ""))
         .accessibilityValue(NSLocalizedString(color.title, comment: ""))
     }
@@ -232,6 +219,7 @@ private struct AvatarColorRow: View {
             .contentShape(RoundedRectangle(cornerRadius: 11))
         }
         .buttonStyle(.plain)
+        .focusable(false)
         .accessibilityLabel(NSLocalizedString(color.title, comment: ""))
         .accessibilityAddTraits(selected ? .isSelected : [])
     }

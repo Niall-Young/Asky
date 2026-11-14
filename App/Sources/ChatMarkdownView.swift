@@ -8,7 +8,7 @@ struct ChatMarkdownView: View {
     let text: String
     @Environment(\.colorScheme) private var colorScheme
 
-    private static let bodyStyle = TextStyle(size: 14, weight: 400, mode: .paragraph)
+    private static let bodyStyle = TextStyle(size: 14, weight: 400, mode: .default)
 
     var body: some View {
         Markdown(ChatMath.markdown(text))
@@ -254,7 +254,7 @@ private struct ChatInlineNativeText: NSViewRepresentable {
         view.isEditable = false
         view.isSelectable = true
         view.drawsBackground = false
-        view.textContainerInset = NSSize(width: 0, height: 2)
+        view.textContainerInset = .zero
         view.isHorizontallyResizable = false
         view.isVerticallyResizable = true
         view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -264,7 +264,7 @@ private struct ChatInlineNativeText: NSViewRepresentable {
     func updateNSView(_ view: NSTextView, context: Context) {
         let result = NSMutableAttributedString()
         let paragraph = NSMutableParagraphStyle()
-        paragraph.lineSpacing = 11.2
+        paragraph.lineSpacing = TextStyle(size: 14, weight: 400, mode: .default).lineHeight - 14 * 1.2
         for run in content.runs {
             let intent = run.inlinePresentationIntent ?? []
             var font = NSFont.systemFont(ofSize: 14)

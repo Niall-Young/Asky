@@ -90,6 +90,8 @@ private enum AgentLayout {
     static let radius: CGFloat = LauncherLayout.shellCornerRadius
     static let message = TextStyle(size: 14, weight: 400, mode: .default)
     static let headerHeight: CGFloat = 64
+    static let messageHorizontalInset: CGFloat = 18
+    static let messageVerticalInset: CGFloat = 14
 }
 
 struct AgentView: View {
@@ -130,6 +132,10 @@ struct AgentView: View {
                 .padding(.horizontal, 12).padding(.bottom, 12)
         }
         .overlay(alignment: .top) { header }
+        .overlay(alignment: .topLeading) {
+            AgentAvatarPicker(color: Binding(get: { model.avatarColor }, set: { model.avatarColor = $0 }))
+                .padding(.leading, 16).padding(.top, 14)
+        }
         .foregroundStyle(ThemeColor.kText.color(for: colorScheme))
         .windowSurfaceBackground(in: shape)
         .clipShape(shape)
@@ -149,8 +155,7 @@ struct AgentView: View {
 
     private var header: some View {
         HStack(spacing: 12) {
-            AgentAvatarPicker(color: Binding(get: { model.avatarColor }, set: { model.avatarColor = $0 }))
-                .frame(width: 36, height: 36)
+            Color.clear.frame(width: 36, height: 36).allowsHitTesting(false)
             Spacer(minLength: 0)
             AgentToolbarControls(
                 pinned: pinned,
@@ -609,7 +614,7 @@ private struct ResponseGroupView: View {
                     .transition(reduceMotion ? .opacity : .opacity.combined(with: .offset(y: 5)))
             }
             if group.showsThinkingIndicator {
-                ChatTypingBubble(color: model.avatarColor, bubbleMotion: bubbleMotion)
+                ChatTypingBubble(bubbleMotion: bubbleMotion)
                     .transition(.opacity)
             }
         }
@@ -631,7 +636,6 @@ private struct ResponseGroupView: View {
 
 /// Only this placeholder is visible until the complete answer is committed.
 private struct ChatTypingBubble: View {
-    let color: AgentAvatarColor
     let bubbleMotion: Namespace.ID
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -650,7 +654,7 @@ private struct ChatTypingBubble: View {
             }
             .padding(.horizontal, 16).padding(.vertical, 16)
             .background {
-                RoundedRectangle(cornerRadius: 16).fill(AgentReplyBubbleStyle(color: color))
+                RoundedRectangle(cornerRadius: 16).fill(ThemeColor.kBackgroundNeutral)
                     .matchedGeometryEffect(id: "reply-surface", in: bubbleMotion, properties: reduceMotion ? [] : .frame, anchor: .topLeading)
             }
         }
@@ -660,6 +664,7 @@ private struct ChatTypingBubble: View {
 }
 
 private struct ChatBubble: View {
+    @Environment(\.colorScheme) private var scheme
     let item: ChatItem
     let model: AgentModel
     let bubbleMotion: Namespace.ID
@@ -694,8 +699,13 @@ private struct ChatBubble: View {
                     }
                 }
                 VStack(alignment: .trailing, spacing: 4) {
-                    HStack { Spacer(minLength: 40); bubble.padding(.horizontal, 12).padding(.vertical, 10)
-                        .background(ThemeColor.kBackgroundNeutral, in: .rect(cornerRadius: 16)) }
+                    HStack { Spacer(minLength: 40); bubble.padding(.horizontal, AgentLayout.messageHorizontalInset).padding(.vertical, AgentLayout.messageVerticalInset)
+                        .background {
+                            RoundedRectangle(cornerRadius: 16).fill(ThemeColor.kBackgroundNeutral)
+                                .overlay {
+                                    RoundedRectangle(cornerRadius: 16).fill(model.avatarColor.userBubbleTint(for: scheme))
+                                }
+                        } }
                     copyButton
                         .onHover { copyHovering = $0 }
                         .opacity(hovering || copyHovering || copyFocused || copyFeedbackID != nil ? 1 : 0)
@@ -715,17 +725,17 @@ private struct ChatBubble: View {
                     active: model.formIsActive(item.id), submit: { model.submitForm(item.id) })
                     .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 12).padding(.vertical, 10)
+                    .padding(.horizontal, AgentLayout.messageHorizontalInset).padding(.vertical, AgentLayout.messageVerticalInset)
                     .background {
-                        RoundedRectangle(cornerRadius: 16).fill(AgentReplyBubbleStyle(color: model.avatarColor))
+                        RoundedRectangle(cornerRadius: 16).fill(ThemeColor.kBackgroundNeutral)
                             .matchedGeometryEffect(id: showsReplyActions ? "reply-surface" : item.id,
                                                    in: bubbleMotion, properties: reduceMotion ? [] : .frame, anchor: .topLeading)
                     }
                 if showsReplyActions {
                     HStack(spacing: 16) {
                         copyButton
-                            // The glyph shares the message text's 12 pt inset.
-                            .padding(.leading, 4)
+                            // Align the glyph with the message text inset.
+                            .padding(.leading, 10)
                         if let completed = item.completedAt {
                             TimelineView(.periodic(from: .now, by: 1)) { context in
                                 Text(ChatCompletionTime.label(completed, now: context.date))
