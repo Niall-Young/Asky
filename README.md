@@ -12,7 +12,7 @@ A native macOS launcher for local search, clipboard history, and an on-demand AI
 [![MCP](https://img.shields.io/badge/MCP-Bridge-6A1B9A)](docs/native-tools-and-mcp.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-[🌐 官方网站 / Website](https://asky.niallyoung2002.workers.dev/) · [📖 使用教程 / Docs](https://asky.niallyoung2002.workers.dev/docs) · [📦 立即下载 / Releases](https://github.com/Niall-Young/Asky/releases)
+[🌐 官方网站 / Website](https://asky.niallspace.workers.dev/) · [📖 使用教程 / Docs](https://asky.niallspace.workers.dev/docs) · [📦 立即下载 / Releases](https://github.com/Niall-Young/Asky/releases)
 
 [中文](#中文) | [English](#english)
 
@@ -27,8 +27,8 @@ A native macOS launcher for local search, clipboard history, and an on-demand AI
 
 Asky 是使用 SwiftUI 与 AppKit 构建的 macOS 原生效率入口。本地全局搜索与剪贴板历史可完全独立离线使用，AI 助手按需唤起，兼具极致轻量的系统体验与强大的扩展能力。
 
-🌐 **官方网站**：[https://asky.niallyoung2002.workers.dev/](https://asky.niallyoung2002.workers.dev/)  
-📖 **使用教程**：[功能指南与操作手册](https://asky.niallyoung2002.workers.dev/docs)
+🌐 **官方网站**：[https://asky.niallspace.workers.dev/](https://asky.niallspace.workers.dev/)  
+📖 **使用教程**：[功能指南与操作手册](https://asky.niallspace.workers.dev/docs)
 
 ### ✨ 核心功能
 
@@ -88,7 +88,7 @@ Asky 是使用 SwiftUI 与 AppKit 构建的 macOS 原生效率入口。本地全
 | **项操作菜单** | `⌘K` | 打开当前项的更多操作菜单（如展示文件简介 `⌘I`、复制文件名 `⌘⇧.` 等） |
 | **打开设置** | `⌘,`（窗口获焦时） | 呼出 Asky 设置面板 |
 
-*完整快捷键配置与高级技巧见[使用教程](https://asky.niallyoung2002.workers.dev/docs)。*
+*完整快捷键配置与高级技巧见[使用教程](https://asky.niallspace.workers.dev/docs)。*
 
 ---
 
@@ -104,7 +104,7 @@ brew install --cask niall-young/asky/asky
 支持 macOS 14+、Apple Silicon，使用与手动下载相同的正式安装包。应用内自动更新默认开启；也可运行 `brew update && brew upgrade --cask --greedy niall-young/asky/asky` 更新，或运行 `brew uninstall --cask niall-young/asky/asky` 卸载应用。卸载保留个人数据与设置。
 
 #### 下载安装
-- 前往 [GitHub Releases](https://github.com/Niall-Young/Asky/releases) 或 [官方网站](https://asky.niallyoung2002.workers.dev/) 下载最新 DMG 安装包（支持 macOS 14+，Apple Silicon）。
+- 前往 [GitHub Releases](https://github.com/Niall-Young/Asky/releases) 或 [官方网站](https://asky.niallspace.workers.dev/) 下载最新 DMG 安装包（支持 macOS 14+，Apple Silicon）。
 - 打开 DMG，将 `Asky.app` 拖入“应用程序”目录即可。Agent 已使用 Swift 原生运行时，安装包不再携带 Node.js 或 Pi。Orca、飞书插件执行器与 Text Tools 聚焦搜索示例使用 API v2 Swift 原生入口，无需 Node；CLI 自身环境由用户准备。旧版 JavaScript 插件另需本机 Node.js 22+。
 - 应用默认开启静默自动更新，可在“设置 › 关于 Asky › 软件更新”中管理。
 
@@ -191,8 +191,8 @@ python3 App/Tests/run-launcher-presentation-diagnostic.py --output build/launche
 
 Asky is a native macOS efficiency launcher built with SwiftUI and AppKit. Local global search and clipboard history work completely offline without relying on AI, while the AI assistant runs on-demand—delivering both lightweight performance and extensive expandability.
 
-🌐 **Website**: [https://asky.niallyoung2002.workers.dev/](https://asky.niallyoung2002.workers.dev/)  
-📖 **Documentation**: [User Guide & Manual](https://asky.niallyoung2002.workers.dev/docs)
+🌐 **Website**: [https://asky.niallspace.workers.dev/](https://asky.niallspace.workers.dev/)  
+📖 **Documentation**: [User Guide & Manual](https://asky.niallspace.workers.dev/docs)
 
 ### ✨ Key Features
 
@@ -252,7 +252,7 @@ Asky is a native macOS efficiency launcher built with SwiftUI and AppKit. Local 
 | **Action Menu** | `⌘K` | Open context menu (Show Get Info `⌘I`, Copy filename `⌘⇧.`, etc.) |
 | **Settings** | `⌘,` (when window is focused) | Open Asky Settings |
 
-*See the [User Guide](https://asky.niallyoung2002.workers.dev/docs) for advanced configuration and full shortcut listings.*
+*See the [User Guide](https://asky.niallspace.workers.dev/docs) for advanced configuration and full shortcut listings.*
 
 ---
 
@@ -268,7 +268,7 @@ brew install --cask niall-young/asky/asky
 Requires macOS 14+ and Apple Silicon. Homebrew uses the same official package as the manual download. In-app automatic updates are enabled by default. You can also run `brew update && brew upgrade --cask --greedy niall-young/asky/asky` to update, or `brew uninstall --cask niall-young/asky/asky` to uninstall the app. Uninstalling preserves personal data and settings.
 
 #### Download & Install
-- Download the latest DMG release from [GitHub Releases](https://github.com/Niall-Young/Asky/releases) or the [Official Website](https://asky.niallyoung2002.workers.dev/) (macOS 14+, Apple Silicon).
+- Download the latest DMG release from [GitHub Releases](https://github.com/Niall-Young/Asky/releases) or the [Official Website](https://asky.niallspace.workers.dev/) (macOS 14+, Apple Silicon).
 - Open the DMG and drag `Asky.app` into Applications. The Agent runs natively in Swift; the app no longer bundles Node.js or Pi. The Orca and Lark plugin runners and the Text Tools launcher example use native Swift API v2 executables without Node; users supply the CLI environment. Legacy JavaScript plugins require local Node.js 22+.
 - In-app automatic updates are enabled by default; configure in Settings › About Asky › Software Update.
 
