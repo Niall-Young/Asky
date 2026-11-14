@@ -9,7 +9,6 @@ struct ChatMarkdownView: View {
     @Environment(\.colorScheme) private var colorScheme
 
     private static let bodyStyle = TextStyle(size: 14, weight: 400, mode: .paragraph)
-    private static let headingStyle = TextStyle(size: 16, weight: 500, mode: .paragraph)
 
     var body: some View {
         Markdown(ChatMath.markdown(text))
@@ -99,15 +98,15 @@ struct ChatMarkdownView: View {
             .textSelection(.enabled)
     }
 
-    // Every heading uses the same visual style, including older conversations.
+    // Headings follow ordinary message typography, including reopened history.
     private static func heading(_ configuration: BlockConfiguration) -> some View {
         configuration.label
             .markdownTextStyle {
-                FontSize(headingStyle.size)
-                FontWeight(.medium)
+                FontSize(bodyStyle.size)
+                FontWeight(.regular)
             }
-            .lineSpacing(headingStyle.lineHeight - headingStyle.size * 1.2)
-            .markdownMargin(top: 16, bottom: 16)
+            .lineSpacing(bodyStyle.lineHeight - bodyStyle.size * 1.2)
+            .markdownMargin(top: 0, bottom: 14)
     }
 
 }

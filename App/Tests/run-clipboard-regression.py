@@ -32,6 +32,8 @@ binary = root / ("build/clipboard-video-regression" if video_test else "build/cl
 command += ["-lsqlite3", "-o", str(binary)]
 environment = os.environ.copy()
 environment.setdefault("DEVELOPER_DIR", "/Applications/Xcode.app/Contents/Developer")
+sdk = subprocess.check_output(["xcrun", "--sdk", "macosx", "--show-sdk-path"], env=environment, text=True).strip()
+command += ["-sdk", sdk]
 subprocess.run(command, env=environment, cwd=root, check=True)
 bundle = root / ("build/ClipboardVideoRegression.app/Contents" if video_test else "build/ClipboardRegression.app/Contents")
 (bundle / "MacOS").mkdir(parents=True, exist_ok=True)

@@ -29,7 +29,7 @@ private func host(root: URL, script: ModelScript, tools: [ToolDefinition] = [], 
 }
 
 @Suite(.timeLimit(.minutes(1))) struct NativeRuntimeTests {
-    @Test func onlyFinalAssistantReplyIsPublishedAfterToolRounds() async throws {
+    @Test func streamsReplyAndPublishesOnlyTheFinalMessage() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         let texts = ["先查看项目。", "已找到项目，接下来查看工作区。", "### 操作结果\n\n- 项目：**Asky**\n- 终端：`term_5`"]
@@ -43,7 +43,7 @@ private func host(root: URL, script: ModelScript, tools: [ToolDefinition] = [], 
         let events = await collect(agent, AgentRequest(sessionID: "s", taskID: "t", text: "查看项目"))
         let messages = events.compactMap { event -> String? in if case .message(_, let text) = event { return text }; return nil }
         #expect(messages == [texts[2]])
-        #expect(!events.contains { if case .textDelta = $0 { return true }; return false })
+        #expect(events.contains { if case .textDelta = $0 { return true }; return false })
         #expect(events.filter { if case .toolCall = $0 { return true }; return false }.count == 2)
         let history = try await AgentSessionStorage(root: root).load(sessionID: "s", legacyPath: nil)
         #expect(history.contains { $0["content"]?.stringValue == texts[0] })
@@ -216,7 +216,7 @@ server.serve_forever()
         let events = await collect(agent, AgentRequest(sessionID: "s", taskID: "t", text: "查一下"))
         #expect(clock.now - start < .seconds(4), "[DONE] must finish the response before the server closes the socket")
         #expect(events.contains(.message(taskID: "t", "原生流式完成")))
-        #expect(!events.contains { if case .textDelta = $0 { return true }; return false })
+        #expect(events.contains { if case .textDelta = $0 { return true }; return false })
         #expect(events.contains(.taskState(taskID: "t", .completed)))
         await agent.shutdown()
     }

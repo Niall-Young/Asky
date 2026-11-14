@@ -69,7 +69,7 @@ struct CalendarMonthPicker: View {
             Image(mingCute: symbol, size: 12)
                 .frame(width: 28, height: 28).contentShape(Rectangle())
         }
-        .buttonStyle(LiquidGlassPlainButtonStyle()).accessibilityLabel(Text(NSLocalizedString(title, comment: "")))
+        .buttonStyle(.plain).accessibilityLabel(Text(NSLocalizedString(title, comment: "")))
     }
 
     static func selecting(_ day: Date, preservingTimeFrom date: Date, calendar: Calendar) -> Date? {
@@ -83,16 +83,18 @@ struct CalendarMonthPicker: View {
 /// Date-only variant of the creation dialog's date row and its existing month picker.
 struct CalendarDateSelection: View {
     let label: String
+    var usesInputSurface = false
     @Binding var selection: Date
+    @Environment(\.colorScheme) private var scheme
     @State private var showingCalendar = false
 
     var body: some View {
         Button { showingCalendar = true } label: {
-            HStack(spacing: 8) {
-                Text(selection, format: .dateTime.year().month().day())
-                Spacer(minLength: 0)
+            if usesInputSurface {
+                dateLabel.settingsInputSurface(scheme: scheme, focused: showingCalendar)
+            } else {
+                dateLabel.padding(14).calendarEditorRow()
             }
-            .font(.system(size: 14)).padding(14).calendarEditorRow()
         }
         .buttonStyle(.plain).accessibilityLabel(label)
         .popover(isPresented: $showingCalendar) {
@@ -100,6 +102,15 @@ struct CalendarDateSelection: View {
                 .frame(width: 280).padding(16).fixedSize()
         }
     }
+
+    private var dateLabel: some View {
+        HStack(spacing: 8) {
+            Text(selection, format: .dateTime.year().month().day())
+            Spacer(minLength: 0)
+        }
+        .font(.system(size: 14))
+    }
+
 }
 
 

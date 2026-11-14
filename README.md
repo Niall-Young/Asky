@@ -40,7 +40,7 @@ Asky 是使用 SwiftUI 与 AppKit 构建的 macOS 原生效率入口。本地全
   - **快捷指令与终端**：集成网页搜索指令（`go`、`yt`、`x` 等预设）与终端命令执行（`> 命令`），支持系统终端、iTerm2、Ghostty 1.3+、Otty 1.2+ 和 Kero。
 
 - 📋 **强大的剪贴板历史**
-  - **多类型支持**：完整记录文本、富文本、图片与文件历史，支持关键词与来源应用组合检索。
+  - **多类型支持**：完整记录文本、富文本、图片与文件历史，支持关键词与来源应用组合检索。列表每批加载 40 条，滚动或键盘接近末尾继续加载；搜索在后台分批读取，输入防抖并取消旧查询，隐藏滚动条。
   - **智能颜色预览**：自动识别 `#RGB`、`rgb()`、`hsl()`、`oklch()` 等颜色代码并显示直观的圆形色盘预览。
   - **无缝粘贴体验**：`Return` 自动粘贴到目标应用（需辅助功能权限），`⌘ Return` 仅复制并保留窗口；支持文件与图片的平滑拖拽。
   - **灵活历史管理**：支持自定义保留期限（8 小时 ~ 30 天）与自动清理，支持快捷键 `⌘⌫` 单条删除或 `⌘K` 菜单清空历史。
@@ -48,10 +48,11 @@ Asky 是使用 SwiftUI 与 AppKit 构建的 macOS 原生效率入口。本地全
 - 🤖 **按需 AI 助手与本地记忆**
   - **图片附件**：对话消息中的多张图片默认堆叠收起，悬停展开、移开收起；展开后可横向滚动。聚焦后按 Return 或空格切换展开，Esc 收起；遵循系统“减少动态效果”。单张图片、文件附件和输入区保留原有布局。
   - **Asky 形象**：对话左上角显示小怪物头像，默认蓝色；点击头像会在原位置变形成液态玻璃菜单，可切换蓝、黄、紫、绿、粉五种配色，选择会保留。圆形头像容器与右侧按钮组同为 36 pt 高。
-  - **紧凑对话窗口**：固定 560 pt 宽、26 pt 普通圆角，默认高 560 pt，可纵向调整至最低 480 pt；紧凑玻璃输入框采用 16 pt 圆角，附件与发送按钮均为 28 pt。顶部不显示会话标题，采用向下渐隐的背景模糊；左侧为头像配色入口，右侧为无分割线的连体胶囊按钮组，常驻置顶和电源符号关闭按钮；左右两侧均复用输入框的轻透 Clear 玻璃，并提供悬停轻微放大、按下整体膨胀和松手回弹；开启“减少动态效果”时不缩放。
+  - **紧凑对话窗口**：固定 560 pt 宽、26 pt 普通圆角，默认高 560 pt，可纵向调整至最低 480 pt；紧凑玻璃输入框采用 16 pt 圆角，附件与发送按钮均为 28 pt。顶部不显示会话标题，采用向下渐隐的背景模糊；右侧为无分割线的连体胶囊按钮组，常驻置顶和电源符号关闭按钮；按钮组复用输入框的轻透 Clear 玻璃，并提供悬停轻微放大、按下整体膨胀和松手回弹；开启“减少动态效果”时不缩放。
   - **液态按钮交互**：对话、启动器、剪贴板、设置与弹窗的共用动作按钮统一采用按下整体膨胀、松手回弹；macOS 26+ 开启玻璃时，设置动作按钮使用系统玻璃控件；减少动态效果时不缩放。
-  - **Swift 原生 Agent**：模型请求、工具循环、会话恢复和上下文压缩均由 Swift 执行。运行时显示思考或当前工具，结束后一次展示完整回复；无需 Node / Pi 辅助进程，支持 OpenAI-compatible Chat Completions。
-  - **对话历史**：新保存的会话保留工具调用状态、错误、回复分组与耗时，支持分页恢复；旧会话未保存的工具展示记录不会自动补回。在“设置 › 智能配置 › 对话历史”选择保留 7 天、30 天（默认）、90 天或永久；按最后活动时间清理，启动时、每天及修改期限后检查。到期或手动删除会清理会话、执行记录、索引及无引用的自有附件，已保存记忆独立保留，失败文件自动重试。
+  - **Swift 原生 Agent**：模型请求、工具循环、会话恢复和上下文压缩均由 Swift 执行。对话采用左右气泡，仅在本轮结束后展示完整回答；等待期间显示三点加载气泡，隐藏工具调用与过程说明。回答出现或更新时保持阅读位置，仅发送新问题时定位到底部，也可手动回到底部。回复保留原生表单、复制和完成时间，Markdown 标题使用普通正文样式；无需 Node / Pi 辅助进程，支持 OpenAI-compatible Chat Completions。
+  - **持续对话**：各入口和重启后接入同一时间线，旧消息在时间线中每批加载 40 条，内存窗口最多保留 120 条；不再提供单独的历史对话页面和快捷键，滚动条隐藏；新请求按需读取保留的历史，清空聊天后保留长期记忆。
+  - **对话历史**：新保存的会话保留工具调用状态、错误、回复分组与耗时，支持分页恢复；旧会话未保存的工具展示记录不会自动补回。在“设置 › 智能配置 › 对话历史”选择保留 7 天、30 天（默认）、90 天或永久；按用户提交轮次的时间清理，启动时、每天及修改期限后检查。到期或手动删除会清理会话、执行记录、索引及无引用的自有附件，已保存记忆独立保留，失败文件自动重试。
   - **原生交互表单**：AI 回复完成后一次显示原生单选按钮组、下拉单选、多选、文本输入、日期及按需显示时、分、秒的时间/时长控件，AI 澄清需求或确认方案时可同时提供预设选项与「自己填写」，选择或自填后点击「提交回复」自动发送到同一会话并继续处理。控件复用设置页组件，日期选择复用创建日程弹窗的月历。
   - **本地记忆与上下文**：基于本地 Markdown 存储用户偏好与记忆，支持长上下文智能压缩与网络实时检索。
   - **网页来源预览**：网页来源在对应段落末尾合并为“来源名称 +N”标签；悬停或点击展开来源列表，显示来源名称、标题和可获取的发布日期，点击条目打开原文。来源较多时可在卡片内滚动。
@@ -76,7 +77,7 @@ Asky 是使用 SwiftUI 与 AppKit 构建的 macOS 原生效率入口。本地全
 | :--- | :--- | :--- |
 | **快速搜索** | 菜单栏图标 / 自定义全局快捷键 | 键入关键词，方向键选择，`Return` 打开 |
 | **剪贴板历史** | `Ctrl + Shift + C` | 浏览历史记录，`Return` 粘贴，`⌘ Return` 仅复制 |
-| **新建 AI 对话** | `Ctrl + Shift + /` | 唤出按需 AI 对话界面 |
+| **打开 AI 对话** | `Ctrl + Shift + /` | 唤出按需 AI 对话界面 |
 | **分类检索** | `file ` / `app ` / `ql ` / `sc ` | 仅搜索指定分类（文件/应用/快捷方式/快捷指令），`Esc` 退出 |
 | **文件夹浏览** | 选中文件夹按 `Tab` | 在搜索框内直接浏览或搜索该文件夹目录内容 |
 | **窗口搜索** | `sw ` 或 `sw` 后回车 | 检索应用通过辅助功能暴露的窗口并一键切换聚焦；`⌘K` 菜单提供“关闭窗口”，固定在最下方；多屏时可用“切换到上一块屏幕 / 下一块屏幕”（`⇧ ←` / `⇧ →`），横排从左到右、竖排从上到下并循环；单屏或选中的窗口处于系统全屏时隐藏这两项；屏幕切换快捷键可在“设置 › 快捷键 › 启动器”配置 |
@@ -143,8 +144,9 @@ open -n build/DerivedData/Build/Products/Debug/Asky.app --args --show-agent
 # 核心测试套件
 (cd MCPBridge && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift build)
 (cd Packages/KulaCore && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test)
-# 完整回复与活动状态回归（先完成 Debug 构建）
+# 气泡对话与等待状态回归（先完成 Debug 构建）
 python3 App/Tests/run-agent-reply-regression.py --reply-activity-preview
+python3 App/Tests/run-agent-reply-regression.py --reading-scroll
 python3 App/Tests/run-agent-reply-regression.py --forms-preview --custom-preview
 ```
 
@@ -193,6 +195,7 @@ Asky is a native macOS efficiency launcher built with SwiftUI and AppKit. Local 
 ### ✨ Key Features
 
 - 🔍 **Global Fast Search**
+  - **Continuous conversation**: All entry points resume one timeline, including after restart. Older messages load in batches of 40, with at most 120 items in the in-memory window. The separate history browser and its shortcut are removed, and scrollbars are hidden. Each request uses retained history as needed; clearing chat history preserves long-term memory.
   - **Comprehensive Retrieval**: Instantly search applications, local files, Chrome tabs and bookmarks, and active application windows (`sw`).
   - **Category Filtering & Deep Dive**: Use dedicated filters like `app `, `file `, `ql ` (quick links), and `sc ` (shortcuts). Press `Tab` on any folder to browse or search its subdirectories directly.
   - **Instant Calculations & Conversions**: Support for mathematical formulas, unit conversions, and live currency rates. Enter `calc` to view calculation history and restore expressions with one click.
@@ -200,7 +203,7 @@ Asky is a native macOS efficiency launcher built with SwiftUI and AppKit. Local 
   - **Web Commands & Terminal**: Quick web search presets (`go`, `yt`, `x`, etc.) and terminal command execution (`> command`) with Terminal, iTerm2, Ghostty 1.3+, Otty 1.2+, and Kero.
 
 - 📋 **Robust Clipboard History**
-  - **Multi-Type Support**: Records text, rich text, images, and files with combined keyword and source app search.
+  - **Multi-Type Support**: Records text, rich text, images, and files with combined keyword and source app search. The list loads 40 entries per page, fetching more near the end via scrolling or keyboard navigation. Search reads bounded batches in the background, debounces typing and cancels stale queries; scrollbars are hidden.
   - **Smart Color Previews**: Automatically detects `#RGB`, `rgb()`, `hsl()`, `oklch()`, and other CSS color formats, rendering circular color previews.
   - **Seamless Pasting**: Press `Return` to paste into the active target app (requires Accessibility permission); `⌘ Return` copies while keeping the panel open. Supports smooth drag-and-drop for files and images.
   - **Flexible Retention**: Configure history retention (8 hours to 30 days) with automatic cleanup. Delete single entries with `⌘⌫` or clear all via the More menu (`⌘K`).
@@ -208,10 +211,10 @@ Asky is a native macOS efficiency launcher built with SwiftUI and AppKit. Local 
 - 🤖 **On-Demand AI Assistant & Local Memory**
   - **Image Attachments**: Multiple images in a message form a compact stack that opens on hover and closes when the pointer leaves. Expanded stacks scroll horizontally. When focused, Return or Space toggles expansion and Escape collapses it; system Reduce Motion is respected. Single images, files, and composer attachments retain their existing layout.
   - **Asky Avatar**: The monster avatar defaults to blue. Click it to morph the avatar into a Liquid Glass menu in place and choose blue, yellow, purple, green, or pink; the choice is saved. Its 36 pt glass circle matches the height of the toolbar controls.
-  - **Compact Chat Window**: Fixed at 560 pt wide with 26 pt circular corners, a default height of 560 pt and a minimum adjustable height of 480 pt; the compact glass composer uses 16 pt corners and matching 28 pt attachment and send buttons. The title-free header uses a fading material backdrop, the avatar color picker on the left, and a joined capsule group without dividers for Pin and a power-symbol Close button on the right; both sides share the composer’s subdued Clear glass, with slight hover enlargement, uniform press expansion and a spring release; Reduce Motion disables scaling.
+  - **Compact Chat Window**: Fixed at 560 pt wide with 26 pt circular corners, a default height of 560 pt and a minimum adjustable height of 480 pt; the compact glass composer uses 16 pt corners and matching 28 pt attachment and send buttons. The title-free header uses a fading material backdrop, a joined capsule group without dividers for Pin and a power-symbol Close button on the right; the group shares the composer’s subdued Clear glass, with slight hover enlargement, uniform press expansion and a spring release; Reduce Motion disables scaling.
   - **Liquid Button Interaction**: Shared action buttons in chat, the launcher, clipboard, settings and dialogs expand uniformly on press and spring back on release. Settings action buttons use native glass controls when Liquid Glass is enabled on macOS 26+. Reduce Motion disables scaling.
-  - **Native Swift Agent**: Swift handles model requests, tool loops, session recovery, and context compaction without a Node / Pi helper. Chat shows thinking or the active tool, then presents the complete reply at once; supports OpenAI-compatible Chat Completions.
-  - **Conversation History**: Newly saved conversations retain tool statuses, errors, response groups, and elapsed time across paginated reloads. Tool display records missing from older conversations are not backfilled. Settings › AI Settings › Conversation History offers 7, 30 (default), or 90 days, or forever, based on the last activity. Cleanup runs at startup, daily, and after retention changes. Expiry and manual deletion remove sessions, execution records, indexes, and unreferenced managed attachments while preserving saved memory; failed file removals are retried.
+  - **Native Swift Agent**: Swift handles model requests, tool loops, session recovery, and context compaction without a Node / Pi helper. Chat uses left/right message bubbles and shows the complete answer after the turn finishes, with a three-dot typing bubble while waiting. Replies preserve the reading position when they appear or update; sending a new question scrolls to the bottom, with a manual return-to-bottom button available. Tool calls and progress narration are hidden; native forms, copy actions, and completion times remain, and Markdown headings use body typography; supports OpenAI-compatible Chat Completions.
+  - **Conversation History**: Newly saved conversations retain tool statuses, errors, response groups, and elapsed time across paginated reloads. Tool display records missing from older conversations are not backfilled. Settings › AI Settings › Conversation History offers 7, 30 (default), or 90 days, or forever, based on each user turn’s submission time. Cleanup runs at startup, daily, and after retention changes. Expiry and manual deletion remove sessions, execution records, indexes, and unreferenced managed attachments while preserving saved memory; failed file removals are retried.
   - **Native Interactive Forms**: Completed AI replies display structured form controls (text fields, native radio groups, dropdowns, checkboxes, date pickers and configurable hour/minute/second time or duration controls) directly in chat, which submit straight back into the conversation. Clarification and plan choices can offer both suggested answers and “Write my own”; Submit Reply sends the active answer as a message in the same conversation so the assistant can continue. Controls reuse the Settings components; date selection uses the calendar from the event creation dialog.
   - **Local Memory & Context**: Stores user preferences and context in local Markdown files with automatic context compaction and web search.
   - **Web Source Previews**: Web sources are grouped into a source-name tag with a +N count at the end of each paragraph. Hover or click to expand a list of source names, titles, and available publication dates; click a row to open the original. Longer lists scroll within the card.
@@ -303,8 +306,9 @@ open -n build/DerivedData/Build/Products/Debug/Asky.app --args --show-agent
 # Core test suites
 (cd MCPBridge && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift build)
 (cd Packages/KulaCore && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test)
-# Complete reply and activity regression (build Debug first)
+# Bubble conversation and waiting-state regression (build Debug first)
 python3 App/Tests/run-agent-reply-regression.py --reply-activity-preview
+python3 App/Tests/run-agent-reply-regression.py --reading-scroll
 python3 App/Tests/run-agent-reply-regression.py --forms-preview --custom-preview
 ```
 

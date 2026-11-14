@@ -92,4 +92,39 @@ import LocalStore
         #expect(FileManager.default.fileExists(atPath: thumb.path))
     }
 
+    @Test func pagesPassOneHundredWithoutDuplicatesOrInsertionDrift() throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = ClipboardStore(try LocalStore(inMemoryWithRoot: root))
+        let time = Date()
+        for index in 0..<165 {
+            try store.insert(ClipboardItem(id: String(format: "%04d", index), kind: .text,
+                text: "page fixture \(index)", byteSize: 1, contentHash: "page-\(index)", createdAt: time))
+        }
+        var page = ClipboardAccess.searchPage(in: store, query: "fixture", limit: 40)
+        #expect(page.items.count == 40)
+        var ids = page.items.map(\.id)
+        try store.insert(ClipboardItem(kind: .text, text: "fixture newly captured", byteSize: 1,
+            contentHash: "new", createdAt: time.addingTimeInterval(1)))
+        while page.hasMore {
+            page = ClipboardAccess.searchPage(in: store, query: "fixture", limit: 40, before: page.cursor)
+            ids += page.items.map(\.id)
+        }
+        #expect(ids.count == 165)
+        #expect(Set(ids).count == 165)
+        #expect(ids == (0..<165).reversed().map { String(format: "%04d", $0) })
+    }
+
+    @Test func cancelledSearchReturnsNoStalePage() async throws {
+        let store = ClipboardStore(try LocalStore(inMemoryWithRoot: FileManager.default.temporaryDirectory))
+        try store.insert(ClipboardItem(kind: .text, text: "cancel fixture", byteSize: 1, contentHash: "cancel"))
+        let worker = Task.detached {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return ClipboardAccess.searchPage(in: store, query: "fixture")
+        }
+        let page = await worker.value
+        #expect(page.items.isEmpty)
+        #expect(!page.hasMore)
+    }
+
 }

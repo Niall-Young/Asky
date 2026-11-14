@@ -105,7 +105,6 @@ struct LauncherActionButtonStyle: ButtonStyle {
             }
             .contentShape(.interaction, Capsule())
             .onHover { isHovered = $0 }
-            .liquidGlassInteraction(pressed: configuration.isPressed, hovered: isHovered)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: isHovered)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.10), value: configuration.isPressed)
     }

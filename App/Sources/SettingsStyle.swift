@@ -162,9 +162,31 @@ extension View {
 
     /// Low-contrast translucent field fill with a focus ring, shared by fields of any height.
     func settingsInputChrome(scheme: ColorScheme, focused: Bool, cornerRadius: CGFloat = 6) -> some View {
+        modifier(SettingsInputChrome(scheme: scheme, focused: focused, cornerRadius: cornerRadius))
+    }
+}
+
+private struct SettingsInputFillKey: EnvironmentKey {
+    static let defaultValue: Color? = nil
+}
+
+extension EnvironmentValues {
+    var settingsInputFill: Color? {
+        get { self[SettingsInputFillKey.self] }
+        set { self[SettingsInputFillKey.self] = newValue }
+    }
+}
+
+private struct SettingsInputChrome: ViewModifier {
+    let scheme: ColorScheme
+    let focused: Bool
+    let cornerRadius: CGFloat
+    @Environment(\.settingsInputFill) private var fill
+
+    func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius)
-        return background(scheme == .dark ? ThemeColor.kBackgroundNeutral.color(for: scheme)
-                            : SettingsPalette.surface(scheme), in: shape)
+        content.background(fill ?? (scheme == .dark ? ThemeColor.kBackgroundNeutral.color(for: scheme)
+                            : SettingsPalette.surface(scheme)), in: shape)
             .overlay {
                 shape.strokeBorder(focused ? Color.accentColor : ThemeColor.kBorder.color(for: scheme),
                                    lineWidth: focused ? 2 : 1)
@@ -247,7 +269,7 @@ struct SettingsIconButton: View {
                 .renderingMode(.template)
                 .foregroundStyle(.secondary)
         }
-        .buttonStyle(LiquidGlassPlainButtonStyle())
+        .buttonStyle(.plain)
         .fixedSize()
         .frame(width: 28, height: 28)
         .contentShape(RoundedRectangle(cornerRadius: 6))
@@ -269,8 +291,6 @@ private extension View {
 
 /// A native AppKit push button, including the system bezel, focus and disabled states.
 struct SettingsButton: View {
-    @State private var pressed = false
-    @State private var hovered = false
     let title: String
     let action: () -> Void
     let role: ButtonRole?
@@ -289,8 +309,7 @@ struct SettingsButton: View {
     }
     var body: some View {
         SettingsPushButton(title: title, role: role, systemImage: systemImage, assetImage: assetImage,
-                           hidesTitle: isLoading || isComplete, isBordered: isBordered, action: action,
-                           onPressChanged: { pressed = $0 })
+                           hidesTitle: isLoading || isComplete, isBordered: isBordered, action: action)
             .fixedSize()
             .overlay {
                 if isComplete { Image(mingCute: "checkmark").accessibilityHidden(true) }
@@ -299,8 +318,6 @@ struct SettingsButton: View {
                     else { ProgressView().controlSize(.small) }
                 }
             }
-            .liquidGlassInteraction(pressed: pressed, hovered: hovered)
-            .onHover { hovered = $0 }
     }
 }
 
@@ -312,21 +329,19 @@ private struct SettingsPushButton: NSViewRepresentable {
     let hidesTitle: Bool
     let isBordered: Bool
     let action: () -> Void
-    var onPressChanged: (Bool) -> Void
     @Environment(\.isEnabled) private var enabled
     @Environment(\.controlSize) private var controlSize
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
     func makeCoordinator() -> Coordinator { Coordinator(action: action) }
     func makeNSView(context: Context) -> NSButton {
-        let button = LiquidGlassPressButton(title: title, target: context.coordinator, action: #selector(Coordinator.press))
+        let button = NSButton(title: title, target: context.coordinator, action: #selector(Coordinator.press))
         button.bezelStyle = .rounded
         button.controlSize = .regular
         button.font = .systemFont(ofSize: 14)
         return button
     }
     func updateNSView(_ button: NSButton, context: Context) {
-        (button as? LiquidGlassPressButton)?.onPressChanged = onPressChanged
         if #available(macOS 26, *), !SurfaceCompatibility.useLegacyMaterial,
            isBordered, !reduceTransparency, contrast != .increased {
             button.bezelStyle = .glass

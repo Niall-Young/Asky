@@ -38,7 +38,6 @@
 "内容" = "Content";
 "创建" = "Create";
 "删除" = "Delete";
-"删除对话" = "Delete Conversation";
 "别名" = "Alias";
 "别名不能为空、包含空格，或使用保留命令 bm、%@。" = "Aliases can't be empty, contain spaces, or use the reserved commands bm or %@.";
 "别名与快捷指令" = "Aliases and Shortcuts";
@@ -50,7 +49,6 @@
 "剪贴板历史" = "Clipboard History";
 "剪贴板完整预览" = "Clipboard Preview";
 "加载更早的消息" = "Load Earlier Messages";
-"历史对话" = "Conversation history";
 "原始图片已不可用" = "The original image is no longer available";
 "发送消息" = "Send message";
 "取消" = "Cancel";
@@ -134,7 +132,6 @@
 "搜索书签" = "Search bookmarks";
 "搜索剪贴板内容" = "Search clipboard content";
 "搜索剪贴板历史" = "Search clipboard history";
-"搜索对话" = "Search conversations";
 "搜索应用、文件、标签页或命令" = "Search apps, files, tabs, or commands";
 "撤销" = "Undo";
 "数据来源" = "Data Sources";
@@ -240,7 +237,6 @@
 "路线时间（MapKit）" = "Travel time (MapKit)";
 "辅助功能（自动粘贴）" = "Accessibility (automatic paste)";
 "输入你的任务" = "Enter your task";
-"返回对话" = "Back to conversation";
 "这个关键词已存在，请换一个。" = "This keyword already exists. Choose another one.";
 "这个别名已被应用或快捷指令使用。" = "This alias is already used by an app or shortcut.";
 "这个别名或关键词已存在。" = "This alias or keyword already exists.";
@@ -826,7 +822,6 @@
 
 "输入换行" = "Insert line break";
 
-"返回对话或关闭窗口" = "Return to conversation or close window";
 
 "复制文件" = "Copy file";
 
@@ -891,12 +886,19 @@
 
 "思考中…" = "Thinking…";
 
-"正在使用 %@…" = "Using %@…";
 
 "信息" = "Messages";
 
 "自己填写" = "Write my own";
 "输入你的回答" = "Enter your answer";
+
+"清空对话历史" = "Clear Chat History";
+
+"清空对话历史？" = "Clear chat history?";
+
+"删除全部聊天和附件，保留已保存的长期记忆。" = "Delete all chats and attachments. Saved long-term memory is kept.";
+
+"清空" = "Clear";
 
 /* Conversation avatar palette */
 "头像颜色" = "Avatar color";

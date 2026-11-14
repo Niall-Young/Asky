@@ -255,6 +255,21 @@ public struct ConversationStore: Sendable {
         return rows.map(Self.decode)
     }
 
+    /// Global transcript projection; IDs remain owned by their original storage segment.
+    public func timeline(limit: Int = 40, before: StoredMessage? = nil) -> [StoredMessage] {
+        let rows = (try? db.query("""
+            SELECT * FROM messages WHERE created_at < ? OR
+              (created_at = ? AND id < ?) ORDER BY created_at DESC, id DESC LIMIT ?
+            """, [before?.createdAt ?? .distantFuture, before?.createdAt ?? .distantFuture,
+                   before?.id ?? "", limit])) ?? []
+        return rows.reversed().map(Self.decode)
+    }
+
+    public func after(conversationID: String, seq: Int, limit: Int) -> [StoredMessage] {
+        ((try? db.query("SELECT * FROM messages WHERE conversation_id = ? AND seq > ? AND role IN ('user','assistant') ORDER BY seq LIMIT ?",
+                       [conversationID, seq, limit])) ?? []).map(Self.decode)
+    }
+
     public func delete(_ id: String) throws {
         try db.transaction {
             try db.run("DELETE FROM messages_fts WHERE conversation_id = ?", [id])
@@ -354,6 +369,19 @@ public struct ClipboardStore: Sendable {
     public func recent(limit: Int, before: Date? = nil, offset: Int = 0) -> [ClipboardItem] {
         ((try? db.query("SELECT * FROM clipboard WHERE created_at < ? ORDER BY pinned DESC, created_at DESC, id DESC LIMIT ? OFFSET ?",
                         [before ?? .distantFuture, limit, max(0, offset)])) ?? []).map(Self.decode)
+    }
+
+    public var changeRevision: Int { (try? db.query("SELECT total_changes() AS revision"))?.first?.int("revision") ?? 0 }
+
+    /// Stable keyset pages; new captures do not shift an older page's boundary.
+    public func page(limit: Int, before: ClipboardItem? = nil) -> [ClipboardItem] {
+        let cutoff = Date().addingTimeInterval(-retentionInterval)
+        let boundary = before == nil ? "" : " AND (created_at < ? OR (created_at = ? AND id < ?))"
+        var arguments: [any SQLBindable] = [cutoff]
+        if let before { arguments += [before.createdAt, before.createdAt, before.id] }
+        arguments.append(limit)
+        return ((try? db.query("SELECT * FROM clipboard WHERE created_at > ?" + boundary
+            + " ORDER BY created_at DESC, id DESC LIMIT ?", arguments)) ?? []).map(Self.decode)
     }
 
     public func search(_ text: String, limit: Int = 20) -> [ClipboardItem] {

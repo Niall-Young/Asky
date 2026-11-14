@@ -140,7 +140,7 @@ struct MessageCalendarEditorView: View {
                     Image(mingCute: "xmark.circle.fill", size: 18)
                         .foregroundStyle(.secondary)
                 }
-                .buttonStyle(LiquidGlassPlainButtonStyle()).accessibilityLabel("取消").disabled(model.saving)
+                .buttonStyle(.plain).accessibilityLabel("取消").disabled(model.saving)
                 Spacer()
                 Text("新建日程").font(.system(size: 13, weight: .medium)).foregroundStyle(.secondary)
                 Spacer()

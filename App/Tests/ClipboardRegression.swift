@@ -20,6 +20,10 @@ enum ClipboardRegression {
         }
         Task { @MainActor in
             do {
+                if CommandLine.arguments.contains("--pagination") {
+                    try await verifyPagination()
+                    exit(0)
+                }
                 if CommandLine.arguments.contains("--availability") {
                     try await verifyAvailability()
                     exit(0)
@@ -106,6 +110,7 @@ enum ClipboardRegression {
                     let controller = ClipboardController(app: app)
                     controller.pinned = true
                     controller.show()
+                    try await waitForSearch(controller)
                     try await Task.sleep(for: .milliseconds(500))
                     let view = application.windows.first { $0.title == "剪贴板历史" }!.contentView!
                     view.layoutSubtreeIfNeeded()
@@ -183,6 +188,7 @@ enum ClipboardRegression {
                 let dragTest = CommandLine.arguments.contains("--drag") || fileTest
                 if CommandLine.arguments.contains("--preview") || CommandLine.arguments.contains("--layouts") || dragPreview || dragTest { controller.pinned = true }
                 controller.show()
+                try await waitForSearch(controller)
                 if !CommandLine.arguments.contains("--preview"), !dragPreview { controller.pinned = true }
                 try await Task.sleep(for: .milliseconds(400))
                 @MainActor func panel() -> NSWindow { application.windows.first { $0.title == "剪贴板历史" }! }
@@ -211,26 +217,32 @@ enum ClipboardRegression {
                                                     contentHash: "literal-\(word)-list")
                         try store.insert(literal)
                         controller.query = word + " literal"
+                        try await waitForSearch(controller)
                         precondition(controller.query == word + " literal")
                         precondition(controller.items.contains { $0.id == literal.id }, "former commands search as literal text")
                         controller.query = word
+                        try await waitForSearch(controller)
                         precondition(controller.items.contains { $0.id == literal.id }, "bare keywords show history results")
                     }
                     for query in [String(picture.imageTitle.prefix(4)), String(picture.imageTitle.prefix(10)),
                                   picture.imageTitle, "\(picture.imageTitle) Safari"] {
                         controller.query = query
+                        try await waitForSearch(controller)
                         precondition(controller.items.contains { $0.id == picture.id },
                                      "image names must be searchable by year, partial/full timestamp and source")
                     }
                     try await Task.sleep(for: .milliseconds(250))
                     try snapshot(panel(), "image-name-search-list")
                     controller.query = ""
+                    try await waitForSearch(controller)
                     try await Task.sleep(for: .milliseconds(250))
                     try snapshot(panel(), "search-only-list")
                     controller.query = "img literal"
+                    try await waitForSearch(controller)
                     controller.escape()
                     precondition(!controller.isVisible, "Escape closes clipboard without a type scope")
                     controller.show()
+                    try await waitForSearch(controller)
                     precondition(controller.query.isEmpty && !controller.items.isEmpty)
                     controller.hide()
                     print("Clipboard search-only passed: list layout, literal keywords, Escape and reopen")
@@ -242,6 +254,7 @@ enum ClipboardRegression {
                         app.preferences.appearance = appearance
                         controller.updateLayout()
                         controller.query = "rgb(255, 147, 23)"
+                        try await waitForSearch(controller)
                         try await Task.sleep(for: .milliseconds(350))
                         try snapshot(panel(), "color-\(appearance)-list")
                     }
@@ -255,6 +268,7 @@ enum ClipboardRegression {
                         filePaths: [url.path], byteSize: 220, sourceApp: "微信", contentHash: "movie")
                     try store.insert(movie)
                     controller.query = url.lastPathComponent
+                    try await waitForSearch(controller)
                     precondition(controller.selectedItem?.id == movie.id)
                     func previews(in view: NSView) -> [AVPlayerView] {
                         (view as? AVPlayerView).map { [$0] } ?? view.subviews.flatMap { previews(in: $0) }
@@ -331,11 +345,14 @@ enum ClipboardRegression {
                     print("Stable list video size: \(listSize)")
                     try snapshot(panel(), "video-list")
                     controller.query = "Another"
+                    try await waitForSearch(controller)
                     try await Task.sleep(for: .milliseconds(300))
                     precondition(previews(in: panel().contentView!).isEmpty && player.currentItem == nil,
                         "switching selection removes movie preview and releases its asset")
                     controller.query = url.lastPathComponent
+                    try await waitForSearch(controller)
                     controller.copySelection()
+                    try await waitForSearch(controller)
                     precondition(ClipboardAccess.snapshot().fileURLs == [url], "video copies as original file")
                     controller.hide()
                     print("Video list previews, selection switching, dismissal and original-file copy passed")
@@ -350,6 +367,7 @@ enum ClipboardRegression {
                             createdAt: Date().addingTimeInterval(Double(100 - index))))
                     }
                     controller.refresh()
+                    try await waitForSearch(controller)
                     controller.updateLayout()
                     controller.pinned = true
                     panel().makeFirstResponder(nil)
@@ -391,6 +409,7 @@ enum ClipboardRegression {
                     panel().resignKey()
                     panel().ignoresMouseEvents = true
                     controller.query = ""
+                    try await waitForSearch(controller)
                     controller.selection = 1
                     let selectedID = controller.selectedItem!.id
                     controller.updateLayout()
@@ -516,6 +535,7 @@ enum ClipboardRegression {
                     precondition(!controller.isActionsMenuPresented, "Cmd K toggles the menu")
                     key(40, .command)
                     controller.query = "Another"
+                    try await waitForSearch(controller)
                     precondition(!controller.isActionsMenuPresented)
                     key(40, .command)
                     key(125)
@@ -525,7 +545,9 @@ enum ClipboardRegression {
                     precondition(!controller.isActionsMenuPresented, "empty results have no actions")
                     try store.insert(ClipboardItem(kind: .text, text: "Another clipboard card", byteSize: 22, contentHash: "replacement"))
                     controller.refresh()
+                    try await waitForSearch(controller)
                     controller.query = "Another"
+                    try await waitForSearch(controller)
                     try await Task.sleep(for: .milliseconds(200))
                     controller.status = nil
                     NSPasteboard.general.clearContents()
@@ -545,6 +567,7 @@ enum ClipboardRegression {
                     try snapshot(panel(), "layout-list-copy")
                     try await Task.sleep(for: .milliseconds(1000))
                     controller.copySelection()
+                    try await waitForSearch(controller)
                     try await Task.sleep(for: .milliseconds(1000))
                     precondition(controller.status != nil && toast!.isVisible,
                                  "repeated copies must restart the toast lifetime")
@@ -553,6 +576,7 @@ enum ClipboardRegression {
                                  "toast must disappear automatically without closing the list")
                     precondition(controller.items.count == 1)
                     controller.copySelection()
+                    try await waitForSearch(controller)
                     precondition(NSPasteboard.general.string(forType: .string) == "Another clipboard card")
                     try snapshot(panel(), "layout-list")
                     print("Clipboard list selection, filtering, copy and More passed")
@@ -677,6 +701,7 @@ enum ClipboardRegression {
                 panel().resignKey()
                 panel().ignoresMouseEvents = true
                 controller.query = ""
+                try await waitForSearch(controller)
                 var settingsOpened = 0
                 app.onOpenSettings = { settingsOpened += 1 }
                 let comma = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command,
@@ -711,13 +736,16 @@ enum ClipboardRegression {
                 panel().makeFirstResponder(nil)
                 for appearance in ["light", "dark"] {
                     controller.query = ""
+                    try await waitForSearch(controller)
                     app.preferences.appearance = appearance
                     try await Task.sleep(for: .milliseconds(250))
                     try snapshot(panel(), appearance)
                 }
                 controller.query = "example"
+                try await waitForSearch(controller)
                 precondition(controller.items.count == 1 && controller.items.first?.id == text.id)
                 controller.query = ""
+                try await waitForSearch(controller)
                 controller.pinned = false
                 controller.togglePinned()
                 precondition(panel().level == .floating)
@@ -729,6 +757,45 @@ enum ClipboardRegression {
             } catch { fputs("Clipboard regression failed: \(error)\n", stderr); exit(1) }
         }
         application.run()
+    }
+
+    private static func waitForSearch(_ controller: ClipboardController) async throws {
+        let deadline = Date().addingTimeInterval(10)
+        while controller.isLoading, Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
+        precondition(!controller.isLoading, "Background clipboard search timed out")
+    }
+
+    private static func verifyPagination() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: "Asky-pages-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let app = try AppModel(root: root)
+        let store = ClipboardStore(app.store)
+        for index in 0..<165 {
+            try store.insert(ClipboardItem(kind: .text, text: "fixture \(index)", byteSize: 1,
+                contentHash: "page-\(index)", createdAt: Date().addingTimeInterval(Double(-index))))
+        }
+        let controller = ClipboardController(app: app, pasteTargetProvider: { .unavailable })
+        // No visible list: exercise exactly one page request at a time.
+        controller.refresh()
+        try await waitForSearch(controller)
+        precondition(controller.items.count == 40 && controller.hasMore)
+        let selected = controller.selectedItem?.id
+        while controller.hasMore {
+            controller.loadMore()
+            try await waitForSearch(controller)
+        }
+        precondition(controller.items.count == 165 && Set(controller.items.map(\.id)).count == 165)
+        precondition(controller.selectedItem?.id == selected)
+        controller.query = "no match"
+        controller.query = "fixture 164"
+        try await waitForSearch(controller)
+        precondition(controller.items.count == 1 && controller.items[0].text == "fixture 164")
+        controller.query = "obsolete"
+        controller.hide()
+        try await Task.sleep(for: .milliseconds(200))
+        precondition(controller.items.isEmpty && !controller.isLoading)
+        precondition(!LocalShortcutAction.allCases.contains { $0.rawValue == "history" })
+        print("Clipboard pagination passed: 165 records, stable selection, latest query wins, hide cancels search")
     }
 
     private static func verifyAvailability() async throws {
@@ -745,6 +812,7 @@ enum ClipboardRegression {
         let controller = ClipboardController(app: app, pasteTargetProvider: { .unavailable })
         controller.pinned = true
         controller.show()
+        try await waitForSearch(controller)
         precondition(controller.items.map(\.id) == [text.id])
         try await Task.sleep(for: .milliseconds(150))
         let panel = NSApp.windows.first { $0.title == "剪贴板历史" }!
@@ -756,6 +824,7 @@ enum ClipboardRegression {
             to: URL(filePath: "build/clipboard-availability-list.png"))
         try Data("restored".utf8).write(to: file)
         controller.refresh()
+        try await waitForSearch(controller)
         precondition(controller.items.count == 2 && controller.selectedItem?.id == text.id,
                      "returning file must not change the selected text")
         controller.selection = controller.items.firstIndex { $0.id == item.id }!
@@ -764,10 +833,13 @@ enum ClipboardRegression {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString("keep", forType: .string)
         controller.copySelection()
+        try await waitForSearch(controller)
         precondition(controller.items.map(\.id) == [text.id])
         precondition(NSPasteboard.general.string(forType: .string) == "keep")
         controller.query = "fixture.txt"
+        try await waitForSearch(controller)
         controller.refresh()
+        try await waitForSearch(controller)
         precondition(controller.items.isEmpty)
         precondition(store.recent(limit: 10).count == 2, "hidden rows must remain recoverable")
         controller.hide()
@@ -795,7 +867,9 @@ enum ClipboardRegression {
                 contentHash: "list-\(i)"))
         }
         controller.show()
+        try await waitForSearch(controller)
         controller.query = "delete fixture"
+        try await waitForSearch(controller)
         let panel = NSApp.windows.first { $0.title == "剪贴板历史" }!
         @MainActor func key(_ modifiers: NSEvent.ModifierFlags, repeatKey: Bool = false) -> NSEvent {
             NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: modifiers,
@@ -843,7 +917,9 @@ enum ClipboardRegression {
             byteSize: 1, contentHash: "image"))
         try store.insert(ClipboardItem(kind: .file, filePath: original.path, byteSize: 4, contentHash: "file"))
         controller.show()
+        try await waitForSearch(controller)
         controller.query = "history 124"
+        try await waitForSearch(controller)
         let panel = NSApp.windows.first { $0.title == "剪贴板历史" }!
         for approved in [false, true] {
             let task = Task { await controller.clearAll() }
@@ -957,6 +1033,7 @@ enum ClipboardRegression {
         try ClipboardStore(app.store).insert(item)
         let controller = ClipboardController(app: app)
         controller.show()
+        try await waitForSearch(controller)
         controller.pinned = true
         try await Task.sleep(for: .milliseconds(150))
         precondition(controller.hasPasteTarget && controller.actionKinds.first == .copy)
@@ -982,6 +1059,7 @@ enum ClipboardRegression {
         // Use the menu with an unpinned panel: releasing key focus must not destroy it.
         controller.pinned = false
         controller.query = "PASTE"
+        try await waitForSearch(controller)
         let keptFrame = panel.frame
         let keptItem = controller.selectedItem?.id
         controller.toggleActionsMenu()
@@ -1031,6 +1109,7 @@ enum ClipboardRegression {
             try await Task.sleep(for: .milliseconds(30))
         }
         controller.show()
+        try await waitForSearch(controller)
         precondition(!controller.hasPasteTarget && controller.actionKinds == [.copy, .delete, .clearAll],
                      "no input must retain Copy and omit automatic paste in More")
         let before = ClipboardAccess.changeCount
@@ -1091,6 +1170,7 @@ enum ClipboardRegression {
         editor.setSelectedRange(NSRange(location: 4, length: 0))
         let controller = ClipboardController(app: app)
         controller.show()
+        try await waitForSearch(controller)
         try await Task.sleep(for: .milliseconds(100))
         precondition(controller.hasPasteTarget, "our own composer must be a paste target")
         controller.submitSelection(copyOnly: false)
@@ -1099,6 +1179,7 @@ enum ClipboardRegression {
                      "Return must insert at the composer cursor and update its draft binding")
         editor.setSelectedRange(NSRange(location: 4, length: 5))
         controller.show()
+        try await waitForSearch(controller)
         controller.pasteSelection(keepingOpen: true)
         try await Task.sleep(for: .milliseconds(350))
         precondition(controller.isVisible && editor.string == "LeftPASTERight",
@@ -1173,6 +1254,7 @@ enum ClipboardRegression {
             let end = scenario == "button" ? buttonPoint : inputPoint
             controller.pinned = true
             controller.show()
+            try await waitForSearch(controller)
             try await Task.sleep(for: .milliseconds(300))
             let panel = NSApp.windows.first { $0.title == "剪贴板历史" }!
             panel.makeKeyAndOrderFront(nil)
@@ -1253,6 +1335,7 @@ enum ClipboardRegression {
         let controller = ClipboardController(app: app)
         controller.pinned = true
         controller.show()
+        try await waitForSearch(controller)
         try await Task.sleep(for: .milliseconds(300))
         let panel = NSApp.windows.first { $0.title == "剪贴板历史" }!
         controller.pinned = false
@@ -1346,6 +1429,7 @@ enum ClipboardRegression {
         try ClipboardStore(app.store).insert(ClipboardItem(kind: .text, text: "AskyPasteProbe", byteSize: 14, contentHash: "live-paste"))
         let controller = ClipboardController(app: app)
         controller.show()
+        try await waitForSearch(controller)
         controller.pinned = true
         try await Task.sleep(for: .milliseconds(250))
         precondition(controller.hasPasteTarget)

@@ -149,7 +149,10 @@ private actor NativeAgentEngine {
                     file = try await storage.save(sessionID: request.sessionID, messages: messages)
                     state(id, .running, file: file)
                 }
-                let response = try await client.complete(config: config, messages: [system] + (try await storage.materialize(messages)), tools: available, delta: { _ in })
+                let response = try await client.complete(config: config, messages: [system] + (try await storage.materialize(messages)), tools: available) { [events] text in
+                    var frame = JSONValue.object(["type": "textDelta", "taskID": .string(id), "text": .string(text)]).canonicalData()
+                    frame.append(10); events.yield(frame)
+                }
                 try Task.checkCancellation()
                 messages.append(response.message)
                 file = try await storage.save(sessionID: request.sessionID, messages: messages)

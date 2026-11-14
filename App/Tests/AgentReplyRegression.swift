@@ -538,7 +538,7 @@ enum AgentReplyRegression {
         print("Historical transcript regression passed: tools, failure/permission state, interrupted tool, notices, errors, grouping, timing and pagination")
     }
 
-    static func completeReplyRegression(app: AppModel, capture: Bool = false) async throws {
+    static func toolRepliesRegression(app: AppModel, capture: Bool = false) async throws {
         let model = AgentModel(app: app)
         let store = ConversationStore(app.store)
         let cid = try store.create(title: "打开 Claude Code")
@@ -549,11 +549,11 @@ enum AgentReplyRegression {
         let controller = capture ? AgentWindowController(model: model, presentation: WindowPresentation()) : nil
         if let controller { controller.show() }
         func group() -> ChatResponseGroup {
-            ChatResponseGroup(id: "complete-reply", items: model.items.filter { $0.responseID == "complete-reply" }, isRunning: model.isRunning, state: model.state)
+            ChatResponseGroup(id: "complete-reply", items: model.items.filter { $0.responseID == "complete-reply" }, isRunning: model.isRunning, state: model.state, streaming: model.streaming)
         }
-        func snapshot(_ name: String) async throws {
+        func snapshot(_ name: String, delay: Duration = .milliseconds(300)) async throws {
             guard capture else { return }
-            try await Task.sleep(for: .milliseconds(300))
+            try await Task.sleep(for: delay)
             let view = NSApplication.shared.windows.first { $0.title == "Asky AI" }!.contentView!
             view.layoutSubtreeIfNeeded()
             let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds)!
@@ -562,35 +562,102 @@ enum AgentReplyRegression {
         }
         precondition(group().activityLabel == NSLocalizedString("思考中…", comment: ""))
         try await snapshot("thinking")
+        try await snapshot("thinking-pulse", delay: .milliseconds(150))
         for (index, text) in ["先查看项目。", "已找到项目，继续查看工作区。"].enumerated() {
-            model.handle(.textDelta(taskID: "complete-reply", text), conversationID: cid)
-            model.handle(.message(taskID: "complete-reply", text), conversationID: cid)
-            precondition(!model.items.contains { $0.kind == .assistant }, "Progress narration must never enter the transcript")
-            let request = ActionRequest(requestID: "activity-tool-\(index)", tool: "plugin_orca__cli_query", arguments: [:], origin: .agent(sessionID: cid), intent: .explicitRequest)
+            let midpoint = text.count / 2
+            model.handle(.textDelta(taskID: "complete-reply", String(text.prefix(midpoint))), conversationID: cid)
+            model.handle(.textDelta(taskID: "complete-reply", String(text.dropFirst(midpoint))), conversationID: cid)
+            if index == 1 { model.handle(.message(taskID: "complete-reply", text), conversationID: cid) }
+            precondition(model.streaming == text)
+            precondition(!model.items.contains { $0.kind == .assistant }, "Progress narration must not be persisted as a final answer")
+            if index == 0 { try await snapshot("before-tool") }
+            let request = ActionRequest(requestID: "activity-tool-\(index)", tool: index == 0 ? "plugin_orca__cli_query" : "web_search", arguments: [:], origin: .agent(sessionID: cid), intent: .explicitRequest)
             model.handle(.toolCall(taskID: "complete-reply", request), conversationID: cid)
-            precondition(group().activityLabel == String(format: NSLocalizedString("正在使用 %@…", comment: ""), "Orca"))
+            precondition(group().tools.last?.kind == .tool(nil))
+            precondition(group().showsThinkingIndicator && group().content.isEmpty, "Tool execution must retain only the typing bubble")
+            precondition(model.streaming.isEmpty, "The next model completion must start with an empty stream")
+            precondition(model.items.last(where: { $0.kind == .toolNarration })?.text == text,
+                         "Pre-tool text remains stored without becoming visible dialogue")
+            precondition(group().steps.filter { $0.kind == .toolNarration }.count == index + 1)
+            precondition(!group().content.contains { $0.text == text }, "Progress belongs to the tool timeline, not the final answer")
             if index == 0 { try await snapshot("tool") }
-            model.handle(.toolResult(taskID: "complete-reply", ExecutionResult(requestID: request.requestID, status: .completed)), conversationID: cid)
+            if index == 1 { try await snapshot("tool-states") }
+            let result = index == 0 ? ExecutionResult(requestID: request.requestID, status: .completed)
+                : ExecutionResult.failure(request.requestID, .unavailable, "搜索暂不可用")
+            model.handle(.toolResult(taskID: "complete-reply", result), conversationID: cid)
+            if index == 1 { try await snapshot("tool-failed") }
             precondition(group().activityLabel == NSLocalizedString("思考中…", comment: ""))
         }
         model.handle(.taskState(taskID: "complete-reply", .compacting), conversationID: cid)
         precondition(group().activityLabel == NSLocalizedString("正在压缩上下文…", comment: ""))
         model.handle(.taskState(taskID: "complete-reply", .running), conversationID: cid)
         let final = "### 已启动 Claude Code\n\n- 项目：**Asky**\n- 打开方式：CLI 终端窗口\n- 终端句柄：`term_5`"
-        model.handle(.textDelta(taskID: "complete-reply", final), conversationID: cid)
+        let prefix = "### 已启动 Claude Code\n\n- 项目：**Asky**\n"
+        model.handle(.textDelta(taskID: "complete-reply", prefix), conversationID: cid)
+        precondition(model.streaming == prefix && model.isRunning, "Partial final text must be available before the response finishes")
+        try await snapshot("streaming-start")
+        model.handle(.textDelta(taskID: "complete-reply", String(final.dropFirst(prefix.count))), conversationID: cid)
         model.handle(.message(taskID: "complete-reply", final), conversationID: cid)
-        precondition(!model.items.contains { $0.kind == .assistant }, "The complete reply must appear atomically after completion")
-        try await snapshot("pending-result")
+        precondition(!model.items.contains { $0.kind == .assistant })
+        precondition(model.streaming == final, "The complete answer remains buffered until completion")
+        precondition(group().showsThinkingIndicator && group().content.isEmpty, "Partial text must stay hidden behind the typing bubble")
+        try await snapshot("streaming-result")
         model.handle(.taskState(taskID: "complete-reply", .completed), conversationID: cid)
         model.finishTask(conversationID: cid)
         precondition(!model.isRunning)
         precondition(model.items.filter { $0.kind == .assistant }.count == 1)
         precondition(model.items.last?.text == final)
+        precondition(!group().showsThinkingIndicator && group().content.map(\.text) == [final])
+        try await snapshot("transition", delay: .milliseconds(70))
         try await snapshot("completed")
         model.open(cid)
-        precondition(model.items.filter { $0.kind == .assistant }.count == 1, "History must contain only the completed answer")
+        precondition(model.items.filter { $0.kind == .assistant }.count == 1, "Only the final answer is an assistant reply")
+        precondition(model.items.filter { $0.kind == .toolNarration }.map(\.text) == ["先查看项目。", "已找到项目，继续查看工作区。"],
+                     "Tool narration must survive reopening without becoming final-answer text")
+        let dialogue = store.messages(conversationID: cid, limit: 30, dialogueOnly: true)
+        precondition(!dialogue.contains { $0.role == "tool_narration" }, "Progress notes must not enter dialogue-only memory extraction")
         if capture { NSApplication.shared.windows.first { $0.title == "Asky AI" }?.close() }
-        print("Complete reply regression passed: thinking/tool/context activity, no partial text, one final answer and history")
+        print("Bubble reply regression passed: hidden tools and partial text, typing placeholder, complete answer and history")
+    }
+
+    static func readingScrollRegression(app: AppModel) async throws {
+        let model = AgentModel(app: app)
+        let store = ConversationStore(app.store)
+        let cid = try store.create(title: "Reading position")
+        try store.append(conversationID: cid, role: "user", text: "请给我一篇长回答")
+        model.open(cid)
+        model.beginResponse(taskID: "reading-scroll")
+        let controller = AgentWindowController(model: model, presentation: WindowPresentation())
+        controller.show()
+        let window = NSApplication.shared.windows.first { $0.title == "Asky AI" }!
+        defer { window.orderOut(nil) }
+        window.setContentSize(NSSize(width: 640, height: 600))
+        try await Task.sleep(for: .milliseconds(500))
+        func findScroll(_ view: NSView) -> NSScrollView? {
+            if let scroll = view as? NSScrollView, scroll.contentSize.height > 200 { return scroll }
+            return view.subviews.compactMap(findScroll).first
+        }
+        let scroll = findScroll(window.contentView!)!
+        precondition(!scroll.hasVerticalScroller, "Transcript hides its scrollbar")
+        func historyButtonExists(_ view: NSView) -> Bool {
+            if let button = view as? NSButton, button.toolTip == "历史对话" || button.toolTip == "Conversation history" { return true }
+            return view.subviews.contains(where: historyButtonExists)
+        }
+        precondition(!historyButtonExists(window.contentView!), "Retired history entry must be absent")
+        let before = scroll.contentView.bounds.minY
+        let answer = (1...70).map { "第 \($0) 段：这是一篇需要从上往下阅读的长回答。" }.joined(separator: "\n\n")
+        model.handle(.message(taskID: "reading-scroll", answer), conversationID: cid)
+        model.handle(.taskState(taskID: "reading-scroll", .completed), conversationID: cid)
+        model.finishTask(conversationID: cid)
+        try await Task.sleep(for: .milliseconds(900))
+        window.contentView!.layoutSubtreeIfNeeded()
+        precondition(scroll.documentView!.bounds.height > scroll.contentSize.height * 2, "Fixture must overflow")
+        precondition(abs(scroll.contentView.bounds.minY - before) < 2, "Long answer must retain the reading position: before=\(before), after=\(scroll.contentView.bounds.minY)")
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: 200))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        try await Task.sleep(for: .milliseconds(150))
+        precondition(abs(scroll.contentView.bounds.minY - 200) < 2, "Reader must be able to scroll down manually")
+        print("Reading scroll regression passed: long answer preserves offset and manual scrolling works")
     }
 
     static func main() async throws {
@@ -608,7 +675,11 @@ enum AgentReplyRegression {
         defer { try? FileManager.default.removeItem(at: root) }
         let app = try AppModel(root: root)
         let model = AgentModel(app: app)
-        try await completeReplyRegression(app: app, capture: CommandLine.arguments.contains("--reply-activity-preview"))
+        if CommandLine.arguments.contains("--reading-scroll") {
+            try await readingScrollRegression(app: app)
+            return
+        }
+        try await toolRepliesRegression(app: app, capture: CommandLine.arguments.contains("--reply-activity-preview"))
         if CommandLine.arguments.contains("--reply-activity-preview") { return }
         try historyRegression(app: app)
         if CommandLine.arguments.contains("--forms-preview") {
@@ -808,6 +879,18 @@ enum AgentReplyRegression {
         precondition(model.state == nil && model.newConversationRevision == revision + 1)
         precondition(!store.messages(conversationID: attachmentID, limit: 40).isEmpty, "new conversation preserves old history")
         print("New conversation regression passed: blank draft, cleared attachments, preserved history")
+        let continuous = AgentModel(app: app)
+        let timelineID = try store.create(title: "持续对话回归")
+        let timelineMessage = try store.append(conversationID: timelineID, role: "user", text: "持续历史搜索标记")
+        continuous.resumeTimeline()
+        precondition(continuous.conversationID == nil)
+        precondition(continuous.items.contains { $0.id == timelineMessage.id })
+        precondition(store.search("持续历史搜索标记").contains { $0.id == timelineMessage.id })
+        await app.deleteConversationRound(timelineMessage)
+        precondition(store.search("持续历史搜索标记").isEmpty)
+        precondition(!continuous.items.contains { $0.id == timelineMessage.id })
+        print("Continuous timeline regression passed: resume, native search and deletion refresh")
+
         if CommandLine.arguments.contains("--tool-preview") {
             let toolID = try store.create(title: "工具调用样式")
             model.open(toolID)

@@ -3,7 +3,7 @@ import SwiftUI
 
 /// Stored by stable action ID; missing IDs retain their defaults on older installations.
 enum LocalShortcutAction: String, CaseIterable, Identifiable {
-    case windowPreviousDisplay, windowNextDisplay, reveal, copyPath, copyFile, copyName, fileInfo, execute, askAI, launcherMore, launcherUp, launcherDown, enterFolder, back, launcherEscape, settings, paste, clipboardCopy, delete, clipboardMore, clipboardUp, clipboardDown, clipboardLeft, clipboardRight, clipboardEscape, send, newline, newChat, history, closeChat, agentEscape
+    case windowPreviousDisplay, windowNextDisplay, reveal, copyPath, copyFile, copyName, fileInfo, execute, askAI, launcherMore, launcherUp, launcherDown, enterFolder, back, launcherEscape, settings, paste, clipboardCopy, delete, clipboardMore, clipboardUp, clipboardDown, clipboardLeft, clipboardRight, clipboardEscape, send, newline, newChat, closeChat, agentEscape
     var id: String { rawValue }
     var isConfigurable: Bool {
         switch self {
@@ -43,9 +43,8 @@ enum LocalShortcutAction: String, CaseIterable, Identifiable {
         case .send: "发送消息"
         case .newline: "输入换行"
         case .newChat: "新对话"
-        case .history: "历史对话"
         case .closeChat: "关闭对话窗口"
-        case .agentEscape: "返回对话或关闭窗口"
+        case .agentEscape: "关闭对话窗口"
         }
     }
     var scope: String {
@@ -77,7 +76,6 @@ enum LocalShortcutAction: String, CaseIterable, Identifiable {
         case .send: "agent"
         case .newline: "agent"
         case .newChat: "agent"
-        case .history: "agent"
         case .closeChat: "agent"
         case .agentEscape: "agent"
         }
@@ -112,7 +110,6 @@ enum LocalShortcutAction: String, CaseIterable, Identifiable {
         case .send: .init(code: 36, modifiers: 0, label: "↵")
         case .newline: .init(code: 36, modifiers: 512, label: "⇧ ↵")
         case .newChat: .init(code: 45, modifiers: 256, label: "⌘ N")
-        case .history: .init(code: 4, modifiers: 768, label: "⌘⇧ H")
         case .closeChat: .init(code: 13, modifiers: 256, label: "⌘ W")
         case .agentEscape: .init(code: 53, modifiers: 0, label: "Esc")
         }

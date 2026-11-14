@@ -75,6 +75,15 @@ final class ClipboardController {
     private let panel: ClipboardPanel
     private let dragSource = ClipboardDragSource()
     private var refreshTimer: Timer?
+    private var searchTask: Task<Void, Never>?
+    private var searchWorker: Task<(ClipboardAccess.SearchPage?, Int), Never>?
+    private var searchGeneration = 0
+    private var searchRevision: Int?
+    private var lastFullRefresh = Date.distantPast
+    private var pageCursor: ClipboardItem?
+    private(set) var hasMore = false
+    private(set) var isLoading = false
+    private static let pageSize = 40
     private let outsideClickDismissal = OutsideClickDismissal()
     private let toastPanel = SurfacePanel()
     private var toastDismissTask: Task<Void, Never>?
@@ -118,7 +127,16 @@ final class ClipboardController {
     var selectedItem: ClipboardItem? { items.indices.contains(selection) ? items[selection] : nil }
 
     var query = "" {
-        didSet { isActionsMenuPresented = false; selection = 0; refresh() }
+        didSet {
+            guard query != oldValue else { return }
+            isActionsMenuPresented = false
+            selection = 0
+            items = []
+            pageCursor = nil
+            hasMore = false
+            searchRevision = nil
+            requestPage(append: false, debounce: true)
+        }
     }
 
     func escape() {
@@ -196,6 +214,11 @@ final class ClipboardController {
         pasteTarget = pasteTargetProvider()
         hasPasteTarget = pasteTarget?.canPaste == true
         query = ""
+        items = []
+        selection = 0
+        pageCursor = nil
+        hasMore = false
+        searchRevision = nil
         status = nil
         refresh()
         // Every opening starts from the default spot; a drag only moves this session.
@@ -219,7 +242,7 @@ final class ClipboardController {
         updateOutsideClickDismissal()
         refreshTimer?.invalidate()
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 0.75, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.refresh() }
+            MainActor.assumeIsolated { self?.refresh(onlyIfChanged: true) }
         }
     }
 
@@ -235,6 +258,10 @@ final class ClipboardController {
         toastPanel.remove()
         refreshTimer?.invalidate()
         refreshTimer = nil
+        searchTask?.cancel()
+        searchWorker?.cancel()
+        searchGeneration += 1
+        isLoading = false
         panel.orderOut(nil)
         panel.contentView = nil
         items = []
@@ -321,21 +348,61 @@ final class ClipboardController {
 
     var shortcutPreferences: SettingsPreferences { app.preferences }
 
-    func refresh() {
+    func refresh(onlyIfChanged: Bool = false) {
+        if onlyIfChanged && isLoading { return }
+        requestPage(append: false, onlyIfChanged: onlyIfChanged)
+    }
+
+    func loadMore() {
+        guard hasMore, !isLoading else { return }
+        requestPage(append: true)
+    }
+
+    private func requestPage(append: Bool, debounce: Bool = false, onlyIfChanged: Bool = false) {
+        searchTask?.cancel()
+        searchWorker?.cancel()
+        searchGeneration += 1
+        let generation = searchGeneration
         let store = app.clipboardStore
         let value = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        let next = ClipboardAccess.search(in: store, query: value, limit: 100)
-        if next != items {
-            let selectedID = selectedItem?.id
-            isActionsMenuPresented = false
-            items = next
-            selection = next.firstIndex { $0.id == selectedID } ?? min(selection, max(0, next.count - 1))
+        let cursor = append ? pageCursor : nil
+        let limit = append ? Self.pageSize : max(Self.pageSize, items.count)
+        // Periodically recheck external files even when the database did not change.
+        let previousRevision = onlyIfChanged && Date().timeIntervalSince(lastFullRefresh) < 3 ? searchRevision : nil
+        isLoading = true
+        searchTask = Task { [weak self] in
+            if debounce {
+                do { try await Task.sleep(for: .milliseconds(150)) } catch { return }
+            }
+            guard !Task.isCancelled, let self else { return }
+            let worker = Task.detached(priority: .userInitiated) {
+                let revision = store.changeRevision
+                if revision == previousRevision { return (nil as ClipboardAccess.SearchPage?, revision) }
+                return (ClipboardAccess.searchPage(in: store, query: value, limit: limit, before: cursor), revision)
+            }
+            self.searchWorker = worker
+            let (page, revision) = await worker.value
+            guard !Task.isCancelled, generation == self.searchGeneration else { return }
+            self.isLoading = false
+            guard let page else { return }
+            // Capture before the next refresh; a write during the scan must trigger another read.
+            if !append { self.searchRevision = revision; self.lastFullRefresh = Date() }
+            let selectedID = self.selectedItem?.id
+            let next = append ? self.items + page.items : page.items
+            if next != self.items {
+                self.isActionsMenuPresented = false
+                self.items = next
+                self.selection = next.firstIndex { $0.id == selectedID } ?? min(self.selection, max(0, next.count - 1))
+            }
+            self.pageCursor = page.cursor
+            self.hasMore = page.hasMore
         }
     }
 
     func moveSelection(_ delta: Int) {
         guard !items.isEmpty else { return }
         selection = min(max(0, selection + delta), items.count - 1)
+        if delta > 0, selection >= items.count - 3 { loadMore() }
     }
 
     func copySelection() {
@@ -511,6 +578,10 @@ final class ClipboardController {
         do {
             let paths = try app.clipboardStore.clearAll()
             ClipboardMonitor.removeFiles(paths)
+            items = []
+            selection = 0
+            pageCursor = nil
+            hasMore = false
             refresh()
         } catch {
             status = NSLocalizedString("无法清空剪贴板历史", tableName: "Clipboard", comment: "")
@@ -521,6 +592,10 @@ final class ClipboardController {
         do {
             let paths = try app.clipboardStore.delete(ids: [item.id])
             ClipboardMonitor.removeFiles(paths)
+            let selectedID = selectedItem?.id
+            items.removeAll { $0.id == item.id }
+            selection = items.firstIndex { $0.id == selectedID } ?? min(selection, max(0, items.count - 1))
+            isActionsMenuPresented = false
             refresh()
         } catch { status = NSLocalizedString("无法删除这条记录", comment: "") }
     }
@@ -777,7 +852,6 @@ private struct ClipboardHeaderButtonStyle: ButtonStyle {
             }
             .contentShape(.interaction, Circle())
             .onHover { isHovered = $0 }
-            .liquidGlassInteraction(pressed: configuration.isPressed, hovered: isHovered)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: isHovered)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.10), value: configuration.isPressed)
     }
@@ -793,11 +867,15 @@ private struct ClipboardListView: View {
                     LazyVStack(spacing: LauncherLayout.rowSpacing) {
                         ForEach(controller.items) { item in
                             ClipboardHistoryRow(item: item, controller: controller).id(item.id)
+                                .onAppear {
+                                    if item.id == controller.items.last?.id { controller.loadMore() }
+                                }
                         }
                     }.padding(.horizontal, LauncherLayout.listHorizontalPadding)
                         .padding(.top, LauncherLayout.listBottomPadding)
                         .padding(.bottom, LauncherLayout.listBottomPadding + LauncherLayout.actionBarHeight)
                 }
+                .scrollIndicators(.hidden)
                 .onChange(of: controller.selection) { _, _ in
                     if let item = controller.selectedItem { proxy.scrollTo(item.id, anchor: .center) }
                 }

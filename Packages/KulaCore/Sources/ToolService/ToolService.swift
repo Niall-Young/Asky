@@ -152,7 +152,7 @@ public actor ToolService {
             return .failure(request.requestID, err.code, err.message, status: .rejected)
         }
         do {
-            try await authorize(def.source, request.origin)
+            if def.name != "history_search" && def.name != "history_read" { try await authorize(def.source, request.origin) }
         } catch { return failure(request, error) }
         if let err = exposureError(def, origin: request.origin, policy: policy()) {
             return .failure(request.requestID, err.code, err.message, status: .rejected)
@@ -249,6 +249,10 @@ public actor ToolService {
     // MARK: policy
 
     nonisolated func exposureError(_ def: ToolDefinition, origin: CallerOrigin, policy p: PolicySnapshot) -> ToolError? {
+        if def.name == "history_search" || def.name == "history_read" {
+            if case .agent = origin { return nil }
+            return ToolError(.notExposed, "聊天历史仅向应用内 Agent 开放")
+        }
         guard p.enabledSources.contains(def.source) else {
             return ToolError(.sourceDisabled, CoreLocalization.format("数据源未启用：%@", String(describing: def.source.rawValue)))
         }

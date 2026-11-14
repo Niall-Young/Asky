@@ -46,17 +46,18 @@ public struct MemoryExtractor: Sendable {
         guard sourceID.hasPrefix(Self.conversationPrefix) else { return [] }
         let cid = String(sourceID.dropFirst(Self.conversationPrefix.count))
         let after = Int(store.setting(Self.cursorKey(sourceID)) ?? "") ?? 0
-        let messages = ConversationStore(store).messages(conversationID: cid, limit: maxMessages, dialogueOnly: true)
+        let messages = ConversationStore(store).after(conversationID: cid, seq: after, limit: maxMessages)
             .filter { $0.seq > after && ($0.role == "user" || $0.role == "assistant") }
         guard let last = messages.last?.seq else { return [] }
         guard messages.contains(where: { $0.role == "user" }) else {
             store.setSetting(Self.cursorKey(sourceID), String(last))
             return []
         }
+        let revision = store.setting("history.revision")
         let reply = try await complete(Self.systemPrompt, Self.prompt(messages, memory: memory))
         // The source may have been deleted or lost extraction permission while the model was running.
         let sources = SourceStore(store)
-        guard !sources.isDeleted(sourceID), sources.permissions(sourceID).contains(.extraction) else { return [] }
+        guard revision == store.setting("history.revision"), !sources.isDeleted(sourceID), sources.permissions(sourceID).contains(.extraction) else { return [] }
         let result = Self.parse(reply)
         var out: [String] = []
         var removed = false

@@ -35,6 +35,7 @@ python3 App/Tests/run-launcher-window-regression.py --alias-routing
 python3 App/Tests/run-launcher-window-regression.py --bookmarks
 python3 App/Tests/run-launcher-window-regression.py --plugins
 python3 App/Tests/run-clipboard-regression.py
+python3 App/Tests/run-clipboard-regression.py --pagination
 python3 App/Tests/run-clipboard-regression.py --paste-target
 python3 App/Tests/run-clipboard-regression.py --drag-paste-target
 python3 App/Tests/run-clipboard-regression.py --drag-paste-target --list-drag --pinned-drag
@@ -84,8 +85,6 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun swiftc App/Source
 build/launcher-input-regression
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun swiftc App/Sources/HotKey.swift App/Tests/HotKeyRegression.swift -o build/hotkey-regression
 build/hotkey-regression
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun swiftc App/Sources/ConversationSearchField.swift App/Tests/ConversationSearchFieldRegression.swift -o build/conversation-search-regression
-build/conversation-search-regression
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun swiftc -parse-as-library -swift-version 6 App/Sources/OutsideClickDismissal.swift App/Tests/OutsideClickDismissalRegression.swift -o build/outside-click-regression
 build/outside-click-regression
 ```
@@ -194,6 +193,7 @@ python3 App/Tests/run-launcher-window-regression.py --alias-routing
 python3 App/Tests/run-launcher-window-regression.py --bookmarks
 python3 App/Tests/run-launcher-window-regression.py --plugins
 python3 App/Tests/run-clipboard-regression.py
+python3 App/Tests/run-clipboard-regression.py --pagination
 python3 App/Tests/run-clipboard-regression.py --paste-target
 python3 App/Tests/run-clipboard-regression.py --drag-paste-target
 python3 App/Tests/run-clipboard-regression.py --drag-paste-target --list-drag --pinned-drag
@@ -241,8 +241,6 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun swiftc App/Source
 build/launcher-input-regression
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun swiftc App/Sources/HotKey.swift App/Tests/HotKeyRegression.swift -o build/hotkey-regression
 build/hotkey-regression
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun swiftc App/Sources/ConversationSearchField.swift App/Tests/ConversationSearchFieldRegression.swift -o build/conversation-search-regression
-build/conversation-search-regression
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun swiftc -parse-as-library -swift-version 6 App/Sources/OutsideClickDismissal.swift App/Tests/OutsideClickDismissalRegression.swift -o build/outside-click-regression
 build/outside-click-regression
 ```

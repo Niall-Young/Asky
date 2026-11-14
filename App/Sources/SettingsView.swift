@@ -80,7 +80,7 @@ private struct HotKeySettings: View {
                 Text(NSLocalizedString("剪贴板历史", comment: ""))
             }
             Section {
-                localRows([.newChat, .history, .closeChat])
+                localRows([.closeChat])
             } header: {
                 Text(NSLocalizedString("AI 对话", comment: ""))
             }
@@ -150,15 +150,10 @@ private struct HotKeyRecorder: View {
     let label: String
     let allowsPlainKey: Bool
     let apply: (UInt32, UInt32, String) -> Bool
-    @State private var pressed = false
-    @State private var hovered = false
 
     var body: some View {
-        HotKeyRecorderControl(label: label, allowsPlainKey: allowsPlainKey, apply: apply,
-                              onPressChanged: { pressed = $0 })
+        HotKeyRecorderControl(label: label, allowsPlainKey: allowsPlainKey, apply: apply)
             .fixedSize()
-            .liquidGlassInteraction(pressed: pressed, hovered: hovered)
-            .onHover { hovered = $0 }
     }
 }
 
@@ -166,12 +161,10 @@ private struct HotKeyRecorderControl: NSViewRepresentable {
     let label: String
     let allowsPlainKey: Bool
     let apply: (UInt32, UInt32, String) -> Bool
-    let onPressChanged: (Bool) -> Void
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
     func makeNSView(context: Context) -> Recorder { Recorder(label: label, allowsPlainKey: allowsPlainKey, apply: apply) }
     func updateNSView(_ view: Recorder, context: Context) {
-        view.onPressChanged = onPressChanged
         if #available(macOS 26, *), !SurfaceCompatibility.useLegacyMaterial,
            !reduceTransparency, contrast != .increased {
             view.bezelStyle = .glass
@@ -186,7 +179,7 @@ private struct HotKeyRecorderControl: NSViewRepresentable {
         if !view.recording { view.title = label }
         view.setAccessibilityLabel(String(format: NSLocalizedString("快捷键 %@，点击录制", comment: ""), label))
     }
-    final class Recorder: LiquidGlassPressButton {
+    final class Recorder: NSButton {
         var label: String
         var apply: (UInt32, UInt32, String) -> Bool
         var allowsPlainKey: Bool
@@ -700,6 +693,9 @@ private struct ConversationHistorySettings: View {
                     (.forever, NSLocalizedString("永久", comment: ""))
                 ]).fixedSize()
             }
+            SettingsButton(NSLocalizedString("清空对话历史", comment: ""), role: .destructive) {
+                Task { await app.clearConversationHistory() }
+            }.disabled(app.isCleaningConversationHistory || !app.activeConversationIDs.isEmpty)
             if let error = app.conversationCleanupError {
                 Text(error).foregroundStyle(.red)
             }

@@ -128,14 +128,14 @@ public enum ClipboardAccess {
         return url
     }
 
-    public struct Information {
+    public struct Information: Sendable {
         public let typeName: String?
         public let pixelDimensions: String?
         public let byteSize: Int?
     }
 
     /// Read original metadata, never thumbnail point sizes or serialized file-path bytes.
-    public static func information(for item: ClipboardItem) -> Information {
+    nonisolated public static func information(for item: ClipboardItem) -> Information {
         if item.kind == .text {
             return Information(typeName: nil, pixelDimensions: nil, byteSize: item.byteSize)
         }

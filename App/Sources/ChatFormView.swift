@@ -4,17 +4,18 @@ import Theme
 
 struct ChatReplyView: View {
     let text: String
+    var isStreaming = false
     var values: Binding<[String: [String]]> = .constant([:])
     var active = false
     var submit: () -> Void = {}
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            ForEach(ChatFormParser.parse(text, streaming: false)) { part in
+            ForEach(ChatFormParser.parse(text, streaming: isStreaming)) { part in
                 switch part.content {
                 case .markdown(let text): ChatMarkdownView(text: text)
                 case .form(let form):
-                    ChatFormView(form: form, values: values, active: active, submit: submit)
+                    if !isStreaming { ChatFormView(form: form, values: values, active: active, submit: submit) }
                 }
             }
         }
@@ -26,6 +27,7 @@ struct ChatFormView: View {
     @Binding var values: [String: [String]]
     let active: Bool
     let submit: () -> Void
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -52,10 +54,9 @@ struct ChatFormView: View {
         }
         .font(.system(size: 14))
         .foregroundStyle(ThemeColor.kText)
-        .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(ThemeColor.kBackgroundNeutral, in: .rect(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(ThemeColor.kBorder, lineWidth: 1))
+        .environment(\.settingsInputFill, scheme == .light ? Color.white.opacity(0.55)
+                     : ThemeColor.kBackgroundNeutral.color(for: scheme))
     }
 
     @ViewBuilder private func control(_ field: ChatForm.Field) -> some View {
@@ -95,7 +96,6 @@ struct ChatFormView: View {
                 TimeComponentsPicker(units: field.timeUnits, values: Binding(get: {
                     field.temporalValues(values[field.id]?.first ?? "") ?? field.initialTemporalValues()
                 }, set: { values[field.id] = [field.temporalString($0)] }), duration: field.type == .duration)
-                    .padding(14).calendarEditorRow()
                     .onChange(of: active, initial: true) {
                         if active, values[field.id] == nil { values[field.id] = [field.temporalString(field.initialTemporalValues())] }
                     }
@@ -104,7 +104,7 @@ struct ChatFormView: View {
             if !active, values[field.id] == nil {
                 Text(verbatim: "—").foregroundStyle(ThemeColor.kTextSubtle)
             } else {
-                CalendarDateSelection(label: field.label, selection: Binding(get: {
+                CalendarDateSelection(label: field.label, usesInputSurface: true, selection: Binding(get: {
                     ChatForm.date(values[field.id]?.first ?? "") ?? Date()
                 }, set: { values[field.id] = [ChatForm.dateString($0)] }))
                     .onChange(of: active, initial: true) {

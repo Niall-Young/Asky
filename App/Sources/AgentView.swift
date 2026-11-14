@@ -52,9 +52,9 @@ final class AgentWindowController {
         }
         bringToFront()
         model.reloadConversations()
+        model.resumeTimeline()
         if let prompt {
             if model.isRunning { model.draft = prompt } else {
-                model.open(nil)
                 model.draft = prompt
                 model.send()
             }
@@ -65,7 +65,7 @@ final class AgentWindowController {
 
     func showNewConversation() {
         show()
-        Task { await model.startNewConversation() }
+        model.resumeTimeline()
     }
 
     func prepareForAuthentication() {
@@ -86,7 +86,7 @@ final class AgentWindowController {
 }
 
 private enum AgentLayout {
-    // Figma UI page 22:293, new chat 43:1072, conversation 42:761 and history 38:654.
+    // Figma UI page 22:293, new chat 43:1072, conversation 42:761.
     static let radius: CGFloat = LauncherLayout.shellCornerRadius
     static let message = TextStyle(size: 14, weight: 400, mode: .default)
     static let headerHeight: CGFloat = 64
@@ -97,20 +97,11 @@ struct AgentView: View {
     var close: () -> Void = {}
     var setPinned: (Bool) -> Void = { _ in }
     @State private var pinned = false
-    @State private var historyPressed = false
-    @State private var actionsPressed = false
-    @State private var historyHovered = false
-    @State private var actionsHovered = false
-    @State private var showingHistory = false
-    @State private var historyQuery = ""
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: AgentLayout.radius, style: .circular) }
     private var navigationAnimation: Animation { .easeInOut(duration: reduceMotion ? 0.15 : 0.24) }
-    private var historyTransition: AnyTransition {
-        reduceMotion ? .opacity : .opacity.combined(with: .offset(x: -16))
-    }
     private var conversationTransition: AnyTransition {
         reduceMotion ? .opacity : .opacity.combined(with: .offset(y: 8))
     }
@@ -119,44 +110,31 @@ struct AgentView: View {
     var body: some View {
         VStack(spacing: 0) {
             ZStack {
-                if showingHistory {
-                    history.transition(historyTransition).zIndex(1)
-                } else {
-                    VStack(spacing: 0) {
-                        ZStack {
-                            if isEmptyConversation {
-                                AgentGreeting()
-                                    .padding(.top, AgentLayout.headerHeight)
-                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                    .transition(conversationTransition).zIndex(1)
-                            } else {
-                                Transcript(model: model)
-                                    .id(model.conversationID)
-                                    .transition(conversationTransition).zIndex(1)
-                            }
-                        }
+                if isEmptyConversation {
+                    AgentGreeting()
+                        .padding(.top, AgentLayout.headerHeight)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        // Animate navigation and the empty-state boundary, never token updates.
-                        .animation(navigationAnimation, value: model.conversationID)
-                        .animation(navigationAnimation, value: isEmptyConversation)
-                        Composer(model: model)
-                            .padding(.horizontal, 12).padding(.bottom, 12)
-                    }
-                    .transition(reduceMotion ? .opacity : .opacity.combined(with: .offset(x: 16)))
+                        .transition(conversationTransition).zIndex(1)
+                } else {
+                    Transcript(model: model)
+                        .id("continuous-transcript")
+                        .transition(conversationTransition).zIndex(1)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .clipped()
-            .animation(navigationAnimation, value: showingHistory)
+            .animation(navigationAnimation, value: model.conversationID)
+            .animation(navigationAnimation, value: isEmptyConversation)
+            Composer(model: model)
+                .padding(.horizontal, 12).padding(.bottom, 12)
         }
         .overlay(alignment: .top) { header }
         .foregroundStyle(ThemeColor.kText.color(for: colorScheme))
         .windowSurfaceBackground(in: shape)
         .clipShape(shape)
         .ignoresSafeArea()
-        .onChange(of: model.newConversationRevision) { showingHistory = false; historyQuery = "" }
         .background {
-            Button("") { if showingHistory { showingHistory = false } else { close() } }
+            Button("", action: close)
                 .keyboardShortcut(model.shortcutPreferences.shortcut(.agentEscape).keyEquivalent,
                                   modifiers: model.shortcutPreferences.shortcut(.agentEscape).eventModifiers)
                 .hidden().accessibilityHidden(true)
@@ -172,28 +150,12 @@ struct AgentView: View {
         HStack(spacing: 12) {
             AgentAvatarPicker(color: Binding(get: { model.avatarColor }, set: { model.avatarColor = $0 }))
                 .frame(width: 36, height: 36)
-            if showingHistory {
-                HStack(spacing: 8) {
-                    Image(mingCute: "magnifyingglass", size: 14)
-                        .foregroundStyle(ThemeColor.kIconSubtle.color(for: colorScheme))
-                    ConversationSearchField(text: $historyQuery,
-                        textColor: NSColor(ThemeColor.kText.color(for: colorScheme)),
-                        placeholderColor: NSColor(ThemeColor.kTextSubtlest.color(for: colorScheme)))
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .frame(maxWidth: .infinity)
-            } else {
-                Spacer(minLength: 0)
-            }
-            AgentToolbarControls(history: false, showingHistory: showingHistory,
-                pinned: pinned, running: model.isRunning,
-                onHistory: toggleHistory, onNew: newConversation,
-                onPin: togglePin, onClose: close,
-                onPressChanged: { actionsPressed = $0 })
+            Spacer(minLength: 0)
+            AgentToolbarControls(
+                pinned: pinned,
+                onPin: togglePin, onClose: close)
                 .fixedSize()
                 .nativeGlassBackground(in: Capsule(), interactive: true, clear: true, glassOpacity: 0.35)
-                .liquidGlassInteraction(pressed: actionsPressed, hovered: actionsHovered)
-                .onHover { actionsHovered = $0 }
         }
         .padding(.horizontal, 16)
         .frame(height: AgentLayout.headerHeight)
@@ -202,13 +164,6 @@ struct AgentView: View {
         .background(alignment: .top) { AgentHeaderBackdrop().allowsHitTesting(false) }
         .background {
             Group {
-                Button("") { toggleHistory() }
-                    .keyboardShortcut(model.shortcutPreferences.shortcut(.history).keyEquivalent,
-                                      modifiers: model.shortcutPreferences.shortcut(.history).eventModifiers)
-                Button("") { newConversation() }
-                    .disabled(model.isRunning)
-                    .keyboardShortcut(model.shortcutPreferences.shortcut(.newChat).keyEquivalent,
-                                      modifiers: model.shortcutPreferences.shortcut(.newChat).eventModifiers)
                 Button("", action: close)
                     .keyboardShortcut(model.shortcutPreferences.shortcut(.closeChat).keyEquivalent,
                                       modifiers: model.shortcutPreferences.shortcut(.closeChat).eventModifiers)
@@ -217,34 +172,7 @@ struct AgentView: View {
         }
     }
 
-    private func toggleHistory() { showingHistory.toggle(); model.reloadConversations() }
-    private func newConversation() { model.open(nil); showingHistory = false }
     private func togglePin() { pinned.toggle(); setPinned(pinned) }
-
-    private var history: some View {
-        ScrollView {
-            LazyVStack(spacing: 0) {
-                ForEach(model.conversations.filter { historyQuery.isEmpty || $0.title.localizedCaseInsensitiveContains(historyQuery) }) { c in
-                    Button { model.open(c.id); showingHistory = false } label: {
-                        HStack(spacing: 12) {
-                            Text(c.title).lineLimit(1).truncationMode(.tail)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            Text(c.updatedAt, format: .dateTime.year().month(.twoDigits).day(.twoDigits))
-                                .foregroundStyle(ThemeColor.kTextSubtlest).fixedSize()
-                        }
-                    }
-                    .buttonStyle(AgentHistoryRowStyle(selected: model.conversationID == c.id))
-                    .disabled(model.isRunning)
-                    .contextMenu {
-                        Button(NSLocalizedString("删除对话", comment: ""), role: .destructive) { model.delete(c.id) }.disabled(model.isRunning)
-                    }
-                }
-            }
-            .textStyle(AgentLayout.message).padding(.horizontal, 12).padding(.vertical, 12)
-            .padding(.top, AgentLayout.headerHeight)
-        }
-        .frame(maxHeight: .infinity)
-    }
 }
 
 private struct AgentGreeting: View {
@@ -278,15 +206,9 @@ private struct AgentGreeting: View {
 
 /// Native image buttons share the composer's subdued glass surface.
 private struct AgentToolbarControls: NSViewRepresentable {
-    var history: Bool
-    var showingHistory: Bool
     var pinned: Bool
-    var running: Bool
-    var onHistory: () -> Void
-    var onNew: () -> Void
     var onPin: () -> Void
     var onClose: () -> Void
-    var onPressChanged: (Bool) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -296,8 +218,8 @@ private struct AgentToolbarControls: NSViewRepresentable {
         stack.spacing = 0
         stack.alignment = .centerY
         stack.detachesHiddenViews = false
-        for index in 0..<(history ? 1 : 3) {
-            let button = LiquidGlassPressButton(title: "", target: context.coordinator, action: #selector(Coordinator.activate(_:)))
+        for index in 0..<2 {
+            let button = NSButton(title: "", target: context.coordinator, action: #selector(Coordinator.activate(_:)))
             button.setButtonType(.momentaryPushIn)
             button.bezelStyle = .accessoryBarAction
             button.tag = index
@@ -317,19 +239,16 @@ private struct AgentToolbarControls: NSViewRepresentable {
 
     func updateNSView(_ stack: NSStackView, context: Context) {
         context.coordinator.parent = self
-        let symbols = history ? [showingHistory ? "chevron.left" : "line.2.horizontal"]
-            : ["pencil", pinned ? "pin.fill" : "pin", "power"]
-        let titles = history ? [showingHistory ? "返回对话" : "历史对话"]
-            : ["新对话", pinned ? "取消置顶" : "置顶窗口", "关闭对话窗口"]
+        let symbols = [pinned ? "pin.fill" : "pin", "power"]
+        let titles = [pinned ? "取消置顶" : "置顶窗口", "关闭对话窗口"]
         for (index, view) in stack.arrangedSubviews.enumerated() {
             guard let button = view as? NSButton else { continue }
             let title = NSLocalizedString(titles[index], comment: "")
-            (button as? LiquidGlassPressButton)?.onPressChanged = onPressChanged
             button.image = MingCute.image(symbols[index], size: 18)
             button.image?.accessibilityDescription = title
             button.toolTip = title
             button.setAccessibilityLabel(title)
-            button.isEnabled = history || index != 0 || !running
+            button.isEnabled = true
         }
 
     }
@@ -338,10 +257,8 @@ private struct AgentToolbarControls: NSViewRepresentable {
         var parent: AgentToolbarControls
         init(_ parent: AgentToolbarControls) { self.parent = parent }
         @objc func activate(_ sender: NSButton) {
-            if parent.history { parent.onHistory() }
-            else if sender.tag == 0 { parent.onNew() }
-            else if sender.tag == 1 { parent.onPin() }
-            else if sender.tag == 2 { parent.onClose() }
+            if sender.tag == 0 { parent.onPin() }
+            else if sender.tag == 1 { parent.onClose() }
         }
     }
 }
@@ -389,25 +306,6 @@ private struct AgentHeaderButtonStyle: ButtonStyle {
             .contentShape(.interaction, Circle())
             .opacity(isEnabled && configuration.isPressed ? 0.7 : 1)
             .onHover { hovering = $0 }
-            .liquidGlassInteraction(pressed: configuration.isPressed, hovered: hovering)
-    }
-}
-
-private struct AgentHistoryRowStyle: ButtonStyle {
-    var selected = false
-    @Environment(\.isEnabled) private var isEnabled
-    @State private var hovering = false
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label.padding(.horizontal, 16).frame(height: 48)
-            .contentShape(.rect(cornerRadius: 12))
-            .background {
-                if isEnabled && (hovering || configuration.isPressed) {
-                    RoundedRectangle(cornerRadius: 12).fill(ThemeColor.kInteractionHover)
-                } else if selected {
-                    RoundedRectangle(cornerRadius: 12).fill(ThemeColor.kBackgroundNeutral)
-                }
-            }
-            .onHover { hovering = $0 }
     }
 }
 
@@ -425,7 +323,6 @@ struct AgentIconButtonStyle: ButtonStyle {
                 }
             }
             .onHover { hovering = $0 }
-            .liquidGlassInteraction(pressed: configuration.isPressed, hovered: hovering)
     }
 }
 
@@ -434,6 +331,7 @@ private struct Transcript: View {
     // Value snapshots let an outgoing transcript finish fading after model.open
     // clears/replaces the active conversation. The live model still owns actions.
     private let items: [ChatItem]
+    private let streaming: String
     private let hasOlder: Bool
     private let taskID: String?
     private let taskStartedAt: Date?
@@ -443,6 +341,7 @@ private struct Transcript: View {
     init(model: AgentModel) {
         self.model = model
         items = model.items
+        streaming = model.streaming
         hasOlder = model.hasOlder
         taskID = model.taskID
         taskStartedAt = model.taskStartedAt
@@ -451,7 +350,7 @@ private struct Transcript: View {
     }
 
     var body: some View {
-        CompatibleTranscriptScroll(itemCount: items.count, activity: groups.last?.activityLabel ?? "") {
+        CompatibleTranscriptScroll(submittedMessageID: items.last(where: { $0.kind == .user })?.id) {
             LazyVStack(alignment: .leading, spacing: 0) {
                 if hasOlder {
                     Button(NSLocalizedString("加载更早的消息", comment: "")) { model.loadOlder() }.buttonStyle(.link).frame(maxWidth: .infinity)
@@ -462,7 +361,7 @@ private struct Transcript: View {
                 }
                 Color.clear.frame(height: 1).id("bottom")
             }
-            .padding(.horizontal, 32).padding(.vertical, 12)
+            .padding(.horizontal, 12).padding(.vertical, 12)
             .padding(.top, AgentLayout.headerHeight)
         }
     }
@@ -481,9 +380,10 @@ private struct Transcript: View {
             if result.last?.id != id { result.append(ChatResponseGroup(id: id, items: [])) }
             result[result.count - 1].startedAt = taskStartedAt
             result[result.count - 1].isRunning = true
+            result[result.count - 1].streaming = streaming
             result[result.count - 1].state = state
         }
-        return result
+        return result.filter { $0.showsThinkingIndicator || !$0.content.isEmpty }
     }
 
     static func label(_ s: AgentTaskState) -> String {
@@ -502,36 +402,35 @@ private struct Transcript: View {
 }
 
 private struct CompatibleTranscriptScroll<Content: View>: View {
-    let itemCount: Int
-    let activity: String
+    let submittedMessageID: String?
     @ViewBuilder var content: Content
 
     var body: some View {
         if #available(macOS 15, *), !SurfaceCompatibility.useMacOS14Compatibility {
-            ModernTranscriptScroll(itemCount: itemCount, activity: activity, content: content)
+            ModernTranscriptScroll(submittedMessageID: submittedMessageID, content: content)
         } else {
-            LegacyTranscriptScroll(itemCount: itemCount, activity: activity, content: content)
+            LegacyTranscriptScroll(submittedMessageID: submittedMessageID, content: content)
         }
     }
 }
 
 @available(macOS 15, *)
 private struct ModernTranscriptScroll<Content: View>: View {
-    let itemCount: Int
-    let activity: String
+    let submittedMessageID: String?
     var content: Content
     @State private var isAtBottom = true
-    @State private var scrollPosition = ScrollPosition()
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        Group {
+        ScrollViewReader { proxy in
             ScrollView {
                 content
             }
-            .scrollPosition($scrollPosition)
-            .defaultScrollAnchor(.bottom, for: .initialOffset)
+            .scrollIndicators(.hidden)
+            .defaultScrollAnchor(.top, for: .initialOffset)
+            .defaultScrollAnchor(.top, for: .sizeChanges)
+            .onAppear { proxy.scrollTo("bottom", anchor: .bottom) }
             .onScrollGeometryChange(for: Bool.self) { geometry in
                 geometry.contentOffset.y + geometry.containerSize.height
                     >= geometry.contentSize.height + geometry.contentInsets.bottom - 1
@@ -542,7 +441,7 @@ private struct ModernTranscriptScroll<Content: View>: View {
                 if !isAtBottom {
                     Button {
                         withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
-                            scrollPosition.scrollTo(edge: .bottom)
+                            proxy.scrollTo("bottom", anchor: .bottom)
                         }
                     } label: {
                         Image(mingCute: "arrow.up", size: 20)
@@ -555,11 +454,9 @@ private struct ModernTranscriptScroll<Content: View>: View {
                     .padding(.bottom, 8)
                 }
             }
-            .onChange(of: itemCount) {
-                if isAtBottom { scrollPosition.scrollTo(edge: .bottom) }
-            }
-            .onChange(of: activity) {
-                if isAtBottom { scrollPosition.scrollTo(edge: .bottom) }
+            .onChange(of: submittedMessageID) { oldID, newID in
+                // Only a new outgoing message moves the viewport; replies keep the reading position.
+                if let newID, newID != oldID { proxy.scrollTo("bottom", anchor: .bottom) }
             }
         }
     }
@@ -607,8 +504,7 @@ private struct LegacyTranscriptPosition: NSViewRepresentable {
 }
 
 private struct LegacyTranscriptScroll<Content: View>: View {
-    let itemCount: Int
-    let activity: String
+    let submittedMessageID: String?
     var content: Content
     @State private var isAtBottom = true
     @Environment(\.colorScheme) private var colorScheme
@@ -622,7 +518,9 @@ private struct LegacyTranscriptScroll<Content: View>: View {
                         LegacyTranscriptPosition { isAtBottom = $0 }
                     }
                 }
-                .defaultScrollAnchor(.bottom)
+                .scrollIndicators(.hidden)
+                .defaultScrollAnchor(.top)
+                .onAppear { proxy.scrollTo("bottom", anchor: .bottom) }
                 .overlay(alignment: .bottom) {
                     if !isAtBottom {
                         Button {
@@ -640,11 +538,8 @@ private struct LegacyTranscriptScroll<Content: View>: View {
                         .padding(.bottom, 8)
                     }
                 }
-                .onChange(of: itemCount) {
-                    if isAtBottom { proxy.scrollTo("bottom", anchor: .bottom) }
-                }
-                .onChange(of: activity) {
-                    if isAtBottom { proxy.scrollTo("bottom", anchor: .bottom) }
+                .onChange(of: submittedMessageID) { oldID, newID in
+                    if let newID, newID != oldID { proxy.scrollTo("bottom", anchor: .bottom) }
                 }
             }
         }
@@ -657,14 +552,27 @@ struct ChatResponseGroup: Identifiable {
     var startedAt: Date?
     var isRunning = false
     var state: AgentTaskState?
+    var streaming = ""
 
     var tools: [ChatItem] { items.filter { if case .tool = $0.kind { true } else { false } } }
-    var content: [ChatItem] { items.filter { if case .tool = $0.kind { false } else { true } } }
+    var steps: [ChatItem] {
+        items.filter { if case .tool = $0.kind { return true }; return $0.kind == .toolNarration }
+    }
+    var content: [ChatItem] {
+        items.filter {
+            switch $0.kind {
+            case .tool, .toolNarration: false
+            case .assistant: !isRunning
+            default: true
+            }
+        }
+    }
     var workSeconds: Int? { items.compactMap(\.workSeconds).last }
+    var showsThinkingIndicator: Bool { isRunning }
     var activityLabel: String {
         if state == .running || state == .starting || state == nil {
             if let tool = tools.last(where: { $0.kind == .tool(nil) }) {
-                return String(format: NSLocalizedString("正在使用 %@…", comment: ""), tool.activityToolName)
+                return tool.text
             }
             return NSLocalizedString("思考中…", comment: "")
         }
@@ -694,80 +602,27 @@ enum ChatCompletionTime {
 private struct ResponseGroupView: View {
     let group: ChatResponseGroup
     let model: AgentModel
-    @State private var expanded = false
+    @Namespace private var bubbleMotion
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            if group.isRunning {
-                HStack(spacing: 8) {
-                    ProgressView().controlSize(.small).accessibilityHidden(true)
-                    Text(group.activityLabel)
-                        .contentTransition(.opacity)
-                        .animation(reduceMotion ? nil : .easeInOut(duration: 0.15), value: group.activityLabel)
-                    Spacer(minLength: 8)
-                    TimelineView(.periodic(from: .now, by: 1)) { context in
-                        let seconds = group.startedAt.map { max(0, Int(context.date.timeIntervalSince($0))) } ?? 0
-                        Text(String(format: NSLocalizedString("Work for %ds", comment: "Tool execution duration"), seconds))
-                    }
-                }
-                .textStyle(AgentLayout.message)
-                .foregroundStyle(ThemeColor.kTextSubtlest)
+            ForEach(group.content) { item in
+                message(item)
+                    .transition(reduceMotion ? .opacity : .opacity.combined(with: .offset(y: 5)))
             }
-            if !group.isRunning && (group.workSeconds != nil || !group.tools.isEmpty) {
-                VStack(alignment: .leading, spacing: 0) {
-                    TimelineView(.periodic(from: .now, by: 1)) { context in
-                        let seconds = group.startedAt.map { max(0, Int(context.date.timeIntervalSince($0))) } ?? group.workSeconds ?? 0
-                        if group.tools.isEmpty {
-                            Text(String(format: NSLocalizedString("Work for %ds", comment: "Tool execution duration"), seconds))
-                                .textStyle(AgentLayout.message)
-                                .foregroundStyle(ThemeColor.kTextSubtlest)
-                        } else {
-                            Button {
-                                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) { expanded.toggle() }
-                            } label: {
-                                HStack(spacing: 4) {
-                                    Text(String(format: NSLocalizedString("Work for %ds", comment: "Tool execution duration"), seconds))
-                                    Image(mingCute: "chevron.right", size: 12)
-                                        .rotationEffect(.degrees(expanded ? 90 : 0))
-                                        .accessibilityHidden(true)
-                                }
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(ToolErrorDisclosureButtonStyle())
-                            .textStyle(AgentLayout.message)
-                            .foregroundStyle(ThemeColor.kTextSubtlest)
-                            .accessibilityLabel(String(format: NSLocalizedString("Work for %ds", comment: "Tool execution duration"), seconds))
-                            .accessibilityValue(expanded ? "expanded" : "collapsed")
-                            .accessibilityHint(NSLocalizedString(expanded ? "收起工具调用" : "展开工具调用", comment: ""))
-                        }
-                    }
-                    VStack(alignment: .leading, spacing: 12) {
-                        ForEach(group.tools) { item in message(item) }
-                    }
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 12)
-                    .frame(height: expanded ? nil : 0, alignment: .top)
-                    .opacity(expanded ? 1 : 0)
-                    .clipped()
-                    .allowsHitTesting(expanded)
-                    .accessibilityHidden(!expanded)
-                }
+            if group.showsThinkingIndicator {
+                ChatTypingBubble(bubbleMotion: bubbleMotion)
+                    .transition(.opacity)
             }
-            ForEach(visibleContent) { item in message(item) }
         }
-        .onChange(of: group.isRunning) { _, running in
-            if !running { expanded = false }
-        }
-    }
-
-    private var visibleContent: [ChatItem] {
-        group.content.filter { !group.isRunning || $0.kind != .assistant }
+        .animation(reduceMotion ? .easeOut(duration: 0.15) : .spring(response: 0.32, dampingFraction: 0.9),
+                   value: group.isRunning)
     }
 
     private func message(_ item: ChatItem) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            ChatBubble(item: item, model: model,
+            ChatBubble(item: item, model: model, bubbleMotion: bubbleMotion,
                 showsReplyActions: !group.isRunning && group.content.last(where: { $0.kind == .assistant })?.id == item.id)
             if item.needsPermissionSettings {
                 Button(NSLocalizedString("管理权限…", comment: "")) { model.openSettings(permissions: true) }
@@ -777,10 +632,41 @@ private struct ResponseGroupView: View {
     }
 }
 
+/// Only this placeholder is visible until the complete answer is committed.
+private struct ChatTypingBubble: View {
+    let bubbleMotion: Namespace.ID
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 60, paused: reduceMotion)) { context in
+            let elapsed = context.date.timeIntervalSinceReferenceDate
+            HStack(spacing: 5) {
+                ForEach(0..<3) { index in
+                    let wave = reduceMotion ? 0.5 : (sin(elapsed * 2 * .pi / 1.15 - Double(index) * 0.85) + 1) / 2
+                    Circle().fill(ThemeColor.kTextSubtlest)
+                        .frame(width: 5, height: 5)
+                        .scaleEffect(0.8 + wave * 0.5)
+                        .offset(y: reduceMotion ? 0 : -wave * 2)
+                        .opacity(0.35 + wave * 0.65)
+                }
+            }
+            .padding(.horizontal, 16).padding(.vertical, 16)
+            .background {
+                RoundedRectangle(cornerRadius: 16).fill(ThemeColor.kBackgroundNeutral)
+                    .matchedGeometryEffect(id: "reply-surface", in: bubbleMotion, properties: reduceMotion ? [] : .frame, anchor: .topLeading)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(NSLocalizedString("思考中…", comment: ""))
+    }
+}
+
 private struct ChatBubble: View {
     let item: ChatItem
     let model: AgentModel
+    let bubbleMotion: Namespace.ID
     var showsReplyActions = true
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hovering = false
     @State private var copyHovering = false
     @State private var copyFeedbackID: UUID?
@@ -824,17 +710,24 @@ private struct ChatBubble: View {
             .contentShape(.rect)
             .onHover { hovering = $0 }
         case .assistant:
-            VStack(alignment: .leading, spacing: 16) {
-                ChatReplyView(text: item.text,
+            VStack(alignment: .leading, spacing: 6) {
+                ChatReplyView(text: item.text, isStreaming: item.id == "streaming",
                     values: Binding(get: { model.formValues[item.id] ?? [:] },
                                     set: { model.formValues[item.id] = $0 }),
                     active: model.formIsActive(item.id), submit: { model.submitForm(item.id) })
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 12).padding(.vertical, 10)
+                    .background {
+                        RoundedRectangle(cornerRadius: 16).fill(ThemeColor.kBackgroundNeutral)
+                            .matchedGeometryEffect(id: showsReplyActions ? "reply-surface" : item.id,
+                                                   in: bubbleMotion, properties: reduceMotion ? [] : .frame, anchor: .topLeading)
+                    }
                 if showsReplyActions {
                     HStack(spacing: 16) {
                         copyButton
-                            // Align the visible glyph with the text, keeping its padded hit area.
-                            .padding(.leading, -8)
+                            // The glyph shares the message text's 12 pt inset.
+                            .padding(.leading, 4)
                         if let completed = item.completedAt {
                             TimelineView(.periodic(from: .now, by: 1)) { context in
                                 Text(ChatCompletionTime.label(completed, now: context.date))
@@ -847,12 +740,16 @@ private struct ChatBubble: View {
                     }
                 }
             }
-        case .tool(let status):
-            ToolCallRow(item: item, status: status)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.trailing, 40)
+        case .tool, .toolNarration:
+            EmptyView()
         case .notice:
             Text(item.text).textStyle(.secondary).foregroundStyle(ThemeColor.kTextSubtle)
+                .padding(12).background(ThemeColor.kBackgroundNeutral, in: .rect(cornerRadius: 16))
         case .error:
             Label { Text(item.text) } icon: { Image(mingCute: "warning", size: 16) }.textStyle(.secondary).foregroundStyle(ThemeColor.kTextNegative)
+                .padding(12).background(ThemeColor.kBackgroundNeutral, in: .rect(cornerRadius: 16))
         }
     }
 
@@ -1119,87 +1016,12 @@ private struct ViewReader: NSViewRepresentable {
 
 private struct ComposerSubmitButtonStyle: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
-    @State private var hovered = false
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
+            .opacity(configuration.isPressed ? 0.7 : 1)
             .foregroundStyle(ThemeColor("iconInverted"))
             // Fade only the fill so the arrow keeps its contrast when disabled.
             .background(ThemeColor.kBackgroundPrimary.opacity(isEnabled ? 1 : 0.3), in: .circle)
-            .liquidGlassInteraction(pressed: configuration.isPressed, hovered: hovered)
-            .onHover { hovered = $0 }
-    }
-}
-
-private struct ToolErrorDisclosureButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .foregroundStyle(ThemeColor.kTextSubtlest)
-    }
-}
-
-private struct ToolCallRow: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    let item: ChatItem
-    let status: ExecutionStatus?
-    @State private var expanded = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 8) {
-                Group {
-                    if status == nil {
-                        ProgressView().controlSize(.small)
-                    } else if status == .failed {
-                        Image(mingCute: "warning", size: 16)
-                            .accessibilityLabel(AgentModel.statusLabel(.failed))
-                    } else if item.pluginID != nil {
-                        Image(mingCute: "tool", size: 16)
-                    } else if let source = item.toolSource, source != .web, source != .memory {
-                        DataSourceIcon(source: source)
-                    } else {
-                        Image(mingCute: item.toolSymbol)
-                    }
-                }
-                .frame(width: 16, height: 16)
-                if item.toolError != nil {
-                    Button {
-                        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
-                            expanded.toggle()
-                        }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Text(item.text)
-                            Image(mingCute: "chevron.right", size: 12)
-                                .rotationEffect(.degrees(expanded ? 90 : 0))
-                                .accessibilityHidden(true)
-                        }
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(ToolErrorDisclosureButtonStyle())
-                    .accessibilityHint(NSLocalizedString(expanded ? "收起错误详情" : "展开错误详情", comment: ""))
-                    .accessibilityValue(expanded ? "expanded" : "collapsed")
-                } else {
-                    Text(item.text).textSelection(.enabled)
-                }
-                if let status, status != .completed, status != .failed {
-                    Text(AgentModel.statusLabel(status))
-                }
-                Spacer(minLength: 0)
-            }
-            if let error = item.toolError {
-                Text(error).textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading).padding(.leading, 24)
-                    .padding(.top, 8)
-                    .frame(height: expanded ? nil : 0, alignment: .top)
-                    .opacity(expanded ? 1 : 0)
-                    .clipped()
-                    .accessibilityHidden(!expanded)
-            }
-        }
-        .textStyle(AgentLayout.message)
-        .foregroundStyle(ThemeColor.kTextSubtlest)
-
     }
 }

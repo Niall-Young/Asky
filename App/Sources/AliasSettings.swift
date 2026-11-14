@@ -124,7 +124,7 @@ private struct AliasEditor: View {
                     Image(mingCute: "xmark", size: 12)
                         .frame(width: 28, height: 28).contentShape(.circle)
                 }
-                .buttonStyle(LiquidGlassPlainButtonStyle()).foregroundStyle(ThemeColor.kTextSubtle)
+                .buttonStyle(.plain).foregroundStyle(ThemeColor.kTextSubtle)
                 .accessibilityLabel(label("关闭"))
             }
             VStack(alignment: .leading, spacing: 8) {

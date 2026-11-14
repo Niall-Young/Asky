@@ -188,6 +188,7 @@ final class AppModel {
         defer { historyOperations -= 1 }
         do {
             let protected = activeConversationIDs.union(await tools.activeAgentSessionIDs)
+            guard protected.isEmpty else { return }
             let result = try await conversationHistory.cleanup(retention: settings.conversationRetention,
                 protecting: protected, draftPaths: conversationDraftPaths?() ?? [], now: now)
             await historyDidDelete(result)
@@ -213,6 +214,37 @@ final class AppModel {
             conversationCleanupError = NSLocalizedString("对话历史清理失败，将自动重试。", comment: "")
             return false
         }
+    }
+
+    func deleteConversationRound(_ message: StoredMessage) async {
+        guard !isCleaningConversationHistory else { return }
+        historyOperations += 1
+        defer { historyOperations -= 1 }
+        let protected = activeConversationIDs.union(await tools.activeAgentSessionIDs)
+        guard protected.isEmpty else { return }
+        do {
+            await historyDidDelete(try await conversationHistory.deleteRound(message, protecting: protected,
+                draftPaths: conversationDraftPaths?() ?? []))
+        } catch { conversationCleanupError = NSLocalizedString("对话历史清理失败，将自动重试。", comment: "") }
+    }
+
+    func clearConversationHistory() async {
+        guard !isCleaningConversationHistory else { return }
+        let alert = AppDialog.make()
+        alert.messageText = NSLocalizedString("清空对话历史？", comment: "")
+        alert.informativeText = NSLocalizedString("删除全部聊天和附件，保留已保存的长期记忆。", comment: "")
+        alert.addButton(withTitle: NSLocalizedString("清空", comment: ""))
+        alert.addButton(withTitle: NSLocalizedString("取消", comment: ""))
+        guard await AppDialog.present(alert) == .alertFirstButtonReturn else { return }
+        historyOperations += 1
+        defer { historyOperations -= 1 }
+        let protected = activeConversationIDs.union(await tools.activeAgentSessionIDs)
+        guard protected.isEmpty else {
+            conversationCleanupError = NSLocalizedString("对话仍有任务正在执行，请稍后重试。", comment: "")
+            return
+        }
+        do { await historyDidDelete(try await conversationHistory.clear(draftPaths: conversationDraftPaths?() ?? [])) }
+        catch { conversationCleanupError = NSLocalizedString("对话历史清理失败，将自动重试。", comment: "") }
     }
 
     private func historyDidDelete(_ result: ConversationHistoryService.CleanupResult) async {
@@ -301,6 +333,8 @@ final class AppModel {
     func start() async {
         Task { [exchange] in await ToolService.prefetchLauncherCurrency(service: exchange) }
         await native.register(into: tools, memory: memory)
+        await tools.register(HistoryTool(store: store))
+        await tools.register(HistoryTool(store: store, reading: true))
         agent = makeAgentHost()
         refreshMCPServer()
         ClipboardMonitor.cleanup(clipboardStore)
