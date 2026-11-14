@@ -723,18 +723,28 @@ private struct ChatBubble: View {
     @State private var copyFeedbackID: UUID?
     @FocusState private var copyFocused: Bool
 
+    private var imageAttachments: [AttachmentRef] { item.attachments.filter { $0.kind == .image } }
+    private var inlineAttachments: [AttachmentRef] {
+        item.attachments.filter { $0.kind != .image || imageAttachments.count < 2 }
+    }
+
     var body: some View {
         switch item.kind {
         case .user:
             VStack(alignment: .trailing, spacing: 8) {
                 if !item.attachments.isEmpty {
-                    ViewThatFits(in: .horizontal) {
-                        attachmentCards
-                        ScrollView(.horizontal) { attachmentCards }
-                            .scrollIndicators(.hidden)
-                            .defaultScrollAnchor(.trailing)
+                    if imageAttachments.count > 1 {
+                        ChatImageAttachmentStack(attachments: imageAttachments)
                     }
-                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    if !inlineAttachments.isEmpty {
+                        ViewThatFits(in: .horizontal) {
+                            attachmentCards
+                            ScrollView(.horizontal) { attachmentCards }
+                                .scrollIndicators(.hidden)
+                                .defaultScrollAnchor(.trailing)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                    }
                 }
                 VStack(alignment: .trailing, spacing: 4) {
                     HStack { Spacer(minLength: 40); bubble.padding(.horizontal, 12).padding(.vertical, 10)
@@ -785,7 +795,7 @@ private struct ChatBubble: View {
 
     private var attachmentCards: some View {
         HStack(spacing: 8) {
-            ForEach(item.attachments) { attachment in
+            ForEach(inlineAttachments) { attachment in
                 ComposerAttachmentCard(attachment: attachment, thumbnail: nil)
             }
         }

@@ -56,6 +56,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             ConfirmationPreviews.run()
             return
         }
+        if CommandLine.arguments.contains("--test-image-attachments") {
+            ChatImageAttachmentPreview.run()
+            return
+        }
         if CommandLine.arguments.contains("--test-confirmations") {
             // Exercise the real shared UI without starting the model or executing tools.
             NSApp.setActivationPolicy(.regular)

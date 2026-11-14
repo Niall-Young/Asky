@@ -8,6 +8,7 @@ struct ComposerAttachmentCard: View {
     let attachment: AttachmentRef
     let thumbnail: Data?
     var remove: (() -> Void)? = nil
+    var imageSize: CGFloat = 52
     @State private var loadedThumbnail: Data?
     @State private var hovering = false
     @FocusState private var deleteFocused: Bool
@@ -25,7 +26,7 @@ struct ComposerAttachmentCard: View {
                         Image(mingCute: "photo", size: 28)
                     }
                 }
-                .frame(width: 52, height: 52).clipped()
+                .frame(width: imageSize, height: imageSize).clipped()
             } else {
                 HStack(spacing: 12) {
                     Image(mingCute: "text.document", size: 24)
