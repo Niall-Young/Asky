@@ -404,7 +404,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
     @objc private func toggleLaunchAtLogin() {
         do {
-            try ToolService.setLaunchAtLogin(!ToolService.launchAtLoginEnabled)
+            let status = try ToolService.setLaunchAtLogin(!ToolService.launchAtLoginEnabled)
+            if status == .requiresApproval { ToolService.openLoginItemSettings() }
         } catch {
             let alert = AppDialog.make()
             alert.messageText = NSLocalizedString("无法更改登录时启动", comment: "")

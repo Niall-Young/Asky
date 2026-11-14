@@ -907,3 +907,8 @@
 "紫色" = "Purple";
 "绿色" = "Green";
 "粉色" = "Pink";
+
+/* Login item authorization */
+"请在系统设置中允许 Asky 登录时启动。" = "Allow Asky to launch at login in System Settings.";
+"打开登录项设置…" = "Open Login Items Settings…";
+"无法确认登录项状态，请在系统设置中检查。" = "Could not confirm the login item status. Check System Settings.";

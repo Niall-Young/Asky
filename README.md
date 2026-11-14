@@ -118,6 +118,8 @@ brew install --cask niall-young/asky/asky
 
 当前源码最低支持 macOS 14，功能与 macOS 15 保持一致，均使用原生背景模糊材质；macOS 26+ 可使用液态玻璃。14 的设置使用原生分组表单，15+ 保留自定义卡片。macOS 14/15 实机验收尚待完成。0.2.10 起的正式安装包与 Homebrew Cask 支持 macOS 14。
 
+登录时启动的开关以 macOS 实际状态为准；若需要批准，在“设置 › 通用”点击“打开登录项设置…”完成授权，返回后会刷新状态。已有安装保留系统选择，关闭后不会自动重新开启。
+
 #### 环境要求
 - 目标运行系统：macOS 14+ (Apple Silicon)
 - Xcode 16+ / Swift 6.2+
@@ -279,6 +281,8 @@ Requires macOS 14+ and Apple Silicon. Homebrew uses the same official package as
 ### 🛠️ Development & Building
 
 Current source targets macOS 14 with the same features and native background blur as macOS 15; macOS 26+ can use Liquid Glass. Settings use a native grouped form on 14 and retain custom cards on 15+. Testing on macOS 14/15 hardware is still pending. Official packages and the Homebrew Cask support macOS 14 starting with 0.2.10.
+
+Launch at login reflects the actual macOS status. If approval is required, choose “Open Login Items Settings…” in Settings › General; the status refreshes when you return. Existing installations preserve the system choice and do not automatically re-enable a disabled login item.
 
 #### Prerequisites
 - Target runtime: macOS 14+ (Apple Silicon)

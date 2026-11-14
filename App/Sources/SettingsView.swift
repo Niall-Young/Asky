@@ -245,7 +245,7 @@ private struct HotKeyRecorderControl: NSViewRepresentable {
 
 private struct GeneralSettings: View {
     @Bindable var app: AppModel
-    @State private var launchAtLogin = ToolService.launchAtLoginEnabled
+    @State private var loginStatus = ToolService.launchAtLoginStatus
     @State private var loginError: String?
 
     var body: some View {
@@ -253,11 +253,27 @@ private struct GeneralSettings: View {
             Section(NSLocalizedString("启动", comment: "")) {
                 Toggle(NSLocalizedString("显示菜单栏图标", comment: ""), isOn: $app.preferences.showMenuBarIcon)
                 Toggle(NSLocalizedString("在 Dock 栏显示", comment: ""), isOn: $app.preferences.showDockIcon)
-                Toggle(NSLocalizedString("登录时启动", comment: ""), isOn: $launchAtLogin)
-                    .onChange(of: launchAtLogin) { _, on in
+                Toggle(NSLocalizedString("登录时启动", comment: ""), isOn: Binding(
+                    get: { loginStatus == .enabled },
+                    set: { on in
                         do { try ToolService.setLaunchAtLogin(on); loginError = nil }
-                        catch { loginError = error.localizedDescription; launchAtLogin = !on }
+                        catch { loginError = error.localizedDescription }
+                        loginStatus = ToolService.launchAtLoginStatus
                     }
+                ))
+                if loginStatus == .requiresApproval {
+                    Text(NSLocalizedString("请在系统设置中允许 Asky 登录时启动。", comment: ""))
+                        .foregroundStyle(.secondary)
+                    SettingsButton(NSLocalizedString("打开登录项设置…", comment: "")) {
+                        ToolService.openLoginItemSettings()
+                    }
+                } else if loginStatus == .notFound || loginStatus == .unknown {
+                    Text(NSLocalizedString("无法确认登录项状态，请在系统设置中检查。", comment: ""))
+                        .foregroundStyle(ThemeColor.kTextNegative)
+                    SettingsButton(NSLocalizedString("打开登录项设置…", comment: "")) {
+                        ToolService.openLoginItemSettings()
+                    }
+                }
                 if let loginError { Text(loginError).foregroundStyle(ThemeColor.kTextNegative) }
             }
             Section(NSLocalizedString("外观", comment: "")) {
@@ -298,6 +314,19 @@ private struct GeneralSettings: View {
                 }
             }
         }
+        .onAppear { refreshLoginStatus() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            refreshLoginStatus()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
+            refreshLoginStatus()
+        }
+    }
+
+    private func refreshLoginStatus() {
+        let current = ToolService.launchAtLoginStatus
+        if current != loginStatus { loginError = nil }
+        loginStatus = current
     }
 }
 
