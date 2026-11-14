@@ -345,7 +345,7 @@ private struct Transcript: View {
     var body: some View {
         GeometryReader { geometry in
             let allGroups = groups
-            let currentTurn = allGroups.lastIndex { $0.items.first?.kind == .user } ?? allGroups.count
+            let currentTurn = allGroups.lastIndex { $0.items.first?.kind == .user } ?? max(0, allGroups.count - 1)
             CompatibleTranscriptScroll(submittedMessageID: items.last(where: { $0.kind == .user })?.id, isWaiting: isRunning, completedReplyID: items.last(where: { $0.kind == .assistant })?.id, viewport: viewport) {
                 VStack(spacing: 0) {
                     LazyVStack(alignment: .leading, spacing: 0) {
@@ -361,16 +361,19 @@ private struct Transcript: View {
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(Array(allGroups.suffix(from: currentTurn).enumerated()), id: \.element.id) { index, group in
                             ResponseGroupView(group: group, model: model)
-                                .padding(.top, index == 0 ? (currentTurn == 0 ? 0 : 20) : 12)
+                                .padding(.top, index == 0 ? 0 : 12)
                         }
                     }
+                    .frame(minHeight: max(0, geometry.size.height - AgentLayout.headerHeight - 25), alignment: .top)
+                    .background { TranscriptTurnPosition() }
+                    .padding(.top, currentTurn == 0 ? 0 : 20)
                     // Keep the destination outside lazy row height estimation.
                     Color.clear.frame(height: 13).id("bottom")
                 }
                 .padding(.horizontal, 12).padding(.top, 12)
                 .padding(.top, AgentLayout.headerHeight)
-                // Short conversations rest above the composer. Each new row pushes older rows up.
-                .frame(minHeight: geometry.size.height, alignment: .bottom)
+                // Leave room below short turns so the question can stay beneath the header.
+                .frame(minHeight: geometry.size.height, alignment: .top)
             }
         }
     }
@@ -427,7 +430,7 @@ private struct CompatibleTranscriptScroll<Content: View>: View {
 }
 
 /// Lazy rows can refine their heights over several layout passes after a jump.
-/// Keep this correction scoped to opening, one submission or an explicit click; replies never start it.
+/// Only the explicit return-to-bottom button uses this destination.
 @MainActor
 private func alignTranscriptBottom(_ proxy: ScrollViewProxy, viewport: TranscriptViewport,
                                    reduceMotion: Bool) -> Task<Void, Never> {
@@ -455,26 +458,25 @@ private func alignTranscriptBottom(_ proxy: ScrollViewProxy, viewport: Transcrip
 private final class TranscriptViewport {
     weak var scroll: NSScrollView?
     var readerMoved = true
-    var followsInitialBottom = false
+    var followsInitialTurn = false
 
-    func revealReplyStart(id: String) -> Bool {
-        guard !readerMoved, let scroll, let document = scroll.documentView else { return false }
+    func alignTurnStart() -> Bool {
+        guard let scroll, let document = scroll.documentView else { return false }
         document.layoutSubtreeIfNeeded()
-        func findReply(_ view: NSView) -> NSView? {
-            if view.identifier?.rawValue == "transcript-reply-" + id { return view }
-            return view.subviews.compactMap(findReply).first
+        func findTurn(_ view: NSView) -> NSView? {
+            if view.identifier?.rawValue == "transcript-current-turn" { return view }
+            return view.subviews.compactMap(findTurn).first
         }
-        guard let reply = findReply(document) else { return false }
-        let rect = scroll.contentView.convert(reply.bounds, from: reply)
-        let previewHeight = CGFloat(AgentLayout.message.lineHeight * 4)
-        if rect.height <= previewHeight {
-            alignBottom()
-        } else {
-            var bounds = scroll.contentView.bounds
-            bounds.origin.y = document.isFlipped
-                ? rect.minY + previewHeight - bounds.height
-                : rect.maxY - previewHeight
-            scroll.contentView.scroll(to: scroll.contentView.constrainBoundsRect(bounds).origin)
+        guard let turn = findTurn(document) else { return false }
+        let rect = scroll.contentView.convert(turn.bounds, from: turn)
+        var bounds = scroll.contentView.bounds
+        let topInset = AgentLayout.headerHeight + 12
+        bounds.origin.y = document.isFlipped
+            ? rect.minY - topInset
+            : rect.maxY + topInset - bounds.height
+        let origin = scroll.contentView.constrainBoundsRect(bounds).origin
+        if abs(scroll.contentView.bounds.minY - origin.y) > 0.5 {
+            scroll.contentView.scroll(to: origin)
             scroll.reflectScrolledClipView(scroll.contentView)
         }
         return true
@@ -503,6 +505,15 @@ private final class TranscriptViewport {
     }
 }
 
+private struct TranscriptTurnPosition: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        view.identifier = NSUserInterfaceItemIdentifier("transcript-current-turn")
+        return view
+    }
+    func updateNSView(_ view: NSView, context: Context) {}
+}
+
 private struct TranscriptReplyPosition: NSViewRepresentable {
     let id: String
     func makeNSView(context: Context) -> NSView {
@@ -516,16 +527,14 @@ private struct TranscriptReplyPosition: NSViewRepresentable {
 }
 
 @MainActor
-private func revealCompletedReply(viewport: TranscriptViewport, id: String) -> Task<Void, Never> {
+private func alignTranscriptTurn(viewport: TranscriptViewport) -> Task<Void, Never> {
     Task { @MainActor in
-        // The placeholder transition can defer creation of the final reply's native marker.
-        // Follow only this initial layout, never the reply's bottom.
+        // Let native Markdown and lazy history finish measuring, keeping the question at the top.
         for _ in 0..<30 {
             guard !Task.isCancelled, !viewport.readerMoved else { return }
-            _ = viewport.revealReplyStart(id: id)
+            _ = viewport.alignTurnStart()
             do { try await Task.sleep(for: .milliseconds(30)) } catch { return }
         }
-        viewport.readerMoved = true
     }
 }
 
@@ -548,28 +557,28 @@ private struct ModernTranscriptScroll<Content: View>: View {
             ScrollView {
                 content.background {
                     TranscriptPosition(viewport: viewport, onChange: { isAtBottom = $0 },
-                                       onUserScroll: { bottomTask?.cancel(); submissionTask?.cancel(); replyTask?.cancel(); viewport.followsInitialBottom = false; viewport.readerMoved = true })
+                                       onUserScroll: { bottomTask?.cancel(); submissionTask?.cancel(); replyTask?.cancel(); viewport.followsInitialTurn = false; viewport.readerMoved = true })
                 }
             }
             .scrollIndicators(.hidden)
-            .onDisappear { bottomTask?.cancel(); submissionTask?.cancel(); replyTask?.cancel(); viewport.followsInitialBottom = false }
+            .onDisappear { bottomTask?.cancel(); submissionTask?.cancel(); replyTask?.cancel(); viewport.followsInitialTurn = false }
             .onChange(of: isWaiting) { _, waiting in
                 if !waiting { submissionTask?.cancel() }
             }
             .onChange(of: completedReplyID) { oldID, newID in
-                viewport.followsInitialBottom = false
+                viewport.followsInitialTurn = false
                 if let newID, newID != oldID, !isWaiting, !viewport.readerMoved {
                     bottomTask?.cancel()
                     submissionTask?.cancel()
                     replyTask?.cancel()
-                    replyTask = revealCompletedReply(viewport: viewport, id: newID)
+                    replyTask = alignTranscriptTurn(viewport: viewport)
                 }
             }
-            .defaultScrollAnchor(.bottom, for: .initialOffset)
+            .defaultScrollAnchor(.top, for: .initialOffset)
             .defaultScrollAnchor(.top, for: .sizeChanges)
             .onScrollPhaseChange { _, phase in
                 if phase == .interacting || phase == .tracking {
-                    viewport.followsInitialBottom = false
+                    viewport.followsInitialTurn = false
                     bottomTask?.cancel()
                     submissionTask?.cancel()
                     replyTask?.cancel()
@@ -577,10 +586,10 @@ private struct ModernTranscriptScroll<Content: View>: View {
                 }
             }
             .onAppear {
-                viewport.readerMoved = !isWaiting
-                viewport.followsInitialBottom = !isWaiting
+                viewport.readerMoved = false
+                viewport.followsInitialTurn = true
                 bottomTask?.cancel()
-                bottomTask = alignTranscriptBottom(proxy, viewport: viewport, reduceMotion: true)
+                bottomTask = alignTranscriptTurn(viewport: viewport)
             }
             .overlay(alignment: .bottom) {
                 if !isAtBottom {
@@ -602,13 +611,13 @@ private struct ModernTranscriptScroll<Content: View>: View {
             }
             .onChange(of: submittedMessageID) { oldID, newID in
                 // Only a new outgoing message moves the viewport; replies keep the reading position.
-                viewport.followsInitialBottom = false
+                viewport.followsInitialTurn = false
                 if let newID, newID != oldID, isWaiting {
                     bottomTask?.cancel()
                     submissionTask?.cancel()
                     replyTask?.cancel()
                     viewport.readerMoved = false
-                    submissionTask = alignTranscriptBottom(proxy, viewport: viewport, reduceMotion: true)
+                    submissionTask = alignTranscriptTurn(viewport: viewport)
                 }
             }
         }
@@ -661,8 +670,8 @@ private struct TranscriptPosition: NSViewRepresentable {
             }
             // Native Markdown/form views can finish measuring after the first scroll task.
             // Follow those layout changes only while opening untouched history.
-            if let viewport, viewport.followsInitialBottom, !viewport.isAtBottom {
-                viewport.alignBottom()
+            if let viewport, viewport.followsInitialTurn, !viewport.readerMoved {
+                _ = viewport.alignTurnStart()
             }
             onChange?(viewport?.isAtBottom ?? false)
         }
@@ -690,29 +699,29 @@ private struct LegacyTranscriptScroll<Content: View>: View {
                 ScrollView {
                     content.background {
                         TranscriptPosition(viewport: viewport, onChange: { isAtBottom = $0 },
-                                           onUserScroll: { bottomTask?.cancel(); submissionTask?.cancel(); replyTask?.cancel(); viewport.followsInitialBottom = false; viewport.readerMoved = true })
+                                           onUserScroll: { bottomTask?.cancel(); submissionTask?.cancel(); replyTask?.cancel(); viewport.followsInitialTurn = false; viewport.readerMoved = true })
                     }
                 }
                 .scrollIndicators(.hidden)
-                .onDisappear { bottomTask?.cancel(); submissionTask?.cancel(); replyTask?.cancel(); viewport.followsInitialBottom = false }
+                .onDisappear { bottomTask?.cancel(); submissionTask?.cancel(); replyTask?.cancel(); viewport.followsInitialTurn = false }
                 .onChange(of: isWaiting) { _, waiting in
                     if !waiting { submissionTask?.cancel() }
                 }
                 .onChange(of: completedReplyID) { oldID, newID in
-                    viewport.followsInitialBottom = false
+                    viewport.followsInitialTurn = false
                     if let newID, newID != oldID, !isWaiting, !viewport.readerMoved {
                         bottomTask?.cancel()
                         submissionTask?.cancel()
                         replyTask?.cancel()
-                        replyTask = revealCompletedReply(viewport: viewport, id: newID)
+                        replyTask = alignTranscriptTurn(viewport: viewport)
                     }
                 }
                 .defaultScrollAnchor(.top)
                 .onAppear {
-                    viewport.readerMoved = !isWaiting
-                    viewport.followsInitialBottom = !isWaiting
+                    viewport.readerMoved = false
+                    viewport.followsInitialTurn = true
                     bottomTask?.cancel()
-                    bottomTask = alignTranscriptBottom(proxy, viewport: viewport, reduceMotion: true)
+                    bottomTask = alignTranscriptTurn(viewport: viewport)
                 }
                 .overlay(alignment: .bottom) {
                     if !isAtBottom {
@@ -733,13 +742,13 @@ private struct LegacyTranscriptScroll<Content: View>: View {
                     }
                 }
                 .onChange(of: submittedMessageID) { oldID, newID in
-                    viewport.followsInitialBottom = false
+                    viewport.followsInitialTurn = false
                     if let newID, newID != oldID, isWaiting {
                         bottomTask?.cancel()
                         submissionTask?.cancel()
                         replyTask?.cancel()
                         viewport.readerMoved = false
-                        submissionTask = alignTranscriptBottom(proxy, viewport: viewport, reduceMotion: true)
+                        submissionTask = alignTranscriptTurn(viewport: viewport)
                     }
                 }
             }
