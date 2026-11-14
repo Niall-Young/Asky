@@ -45,13 +45,15 @@ enum AgentAvatarColor: String, CaseIterable {
 }
 
 enum AgentAvatarShape: String, CaseIterable {
-    case monster, round, square, triangle, ghost
+    case monster, round
+    case gear = "square" // Retain the saved selection from the replaced square shape.
+    case triangle, ghost
 
     var title: String {
         switch self {
         case .monster: "小怪物"
         case .round: "正圆"
-        case .square: "方形"
+        case .gear: "圆齿"
         case .triangle: "软糖"
         case .ghost: "幽灵"
         }
@@ -61,7 +63,7 @@ enum AgentAvatarShape: String, CaseIterable {
         switch self {
         case .monster: "AgentAvatarBody"
         case .round: "AgentAvatarRound"
-        case .square: "AgentAvatarSquare"
+        case .gear: "AgentAvatarGear"
         case .triangle: "AgentAvatarTriangle"
         case .ghost: "AgentAvatarGhost"
         }
@@ -72,8 +74,8 @@ enum AgentAvatarShape: String, CaseIterable {
         switch self {
         case .monster: 1
         case .round: 1.06
-        case .square: 1.12
-        case .triangle: 0.94
+        case .gear: 0.96
+        case .triangle: 0.98
         case .ghost: 1.06
         }
     }
@@ -148,7 +150,7 @@ private struct AvatarFace: View {
                 eye(35); eye(65)
             case .wink:
                 eye(35)
-                stroke([CGPoint(x: 60, y: 47), CGPoint(x: 67, y: 51), CGPoint(x: 60, y: 54)])
+                stroke([CGPoint(x: 67, y: 47), CGPoint(x: 60, y: 51), CGPoint(x: 67, y: 54)])
             case .sleepy:
                 for x: CGFloat in [35, 65] {
                     var lid = Path()
