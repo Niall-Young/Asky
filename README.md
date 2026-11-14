@@ -62,6 +62,7 @@ Asky 是使用 SwiftUI 与 AppKit 构建的 macOS 原生效率入口。本地全
 
 - 🧩 **系统生态与扩展**
   - **macOS 系统集成**：按授权安全访问系统日历、提醒事项、备忘录与通讯录。
+  - **短信草稿**：明确要求准备短信且收件人、正文完整时，直接交接到 Messages，不重复弹出执行确认；最终由用户检查并手动发送。外部 MCP 调用仍需原生确认。
   - **MCP 协议支持**：内置 MCP（Model Context Protocol）桥接，可无缝连接外部工具生态。
   - **可信插件体系**：支持用户主动安装 GitHub 插件；设置中按 AI 插件和功能插件分 Tab 查看，并可跨分类搜索名称与命令；插件可提供无需 AI 的启动器命令与动态搜索结果，支持复制和打开链接，详见[插件开发](docs/plugins.md)。官方提供 [飞书插件](https://github.com/Niall-Young/asky-plugin-lark) 与 [Orca 插件](https://github.com/Niall-Young/asky-plugin-orca)。
 
@@ -235,6 +236,7 @@ Asky is a native macOS efficiency launcher built with SwiftUI and AppKit. Local 
 
 - 🧩 **System Integration & Extensibility**
   - **macOS Native Access**: Authorized access to system Calendars, Reminders, Notes, and Contacts.
+  - **Message Drafts**: Explicit requests with a valid recipient and body open a draft in Messages without a second execution confirmation. The user reviews and sends it manually; external MCP calls still require native confirmation.
   - **MCP Protocol**: Built-in Model Context Protocol bridge for broad compatibility with external tooling ecosystems.
   - **Trusted Plugin System**: Install plugins from GitHub on demand. Settings separates AI and function plugins into tabs, with search across categories, names, and commands. Plugins can provide launcher commands and dynamic search results without AI, with copy and open-link actions; see the [plugin guide](docs/plugins.md). Official integrations include [Feishu](https://github.com/Niall-Young/asky-plugin-lark) and [Orca](https://github.com/Niall-Young/asky-plugin-orca).
 

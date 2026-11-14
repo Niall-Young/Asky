@@ -80,7 +80,7 @@
 "向已有备忘录末尾追加文本（需用户确认）" = "Append text to an existing note (requires confirmation)";
 "响应无效" = "Unexpected reply";
 "图片" = "Image";
-"在 Messages 中准备草稿（需确认；由用户手动发送）" = "Prepare a draft in Messages (requires confirmation; the user sends it manually)";
+"在 Messages 中准备草稿（明确请求直接打开；由用户手动发送）" = "Prepare a draft in Messages (opens directly on explicit request; the user sends it manually)";
 "在已授权文件夹中找不到该备忘录" = "The note was not found in the authorized folders";
 "在已授权文件夹中新建备忘录" = "Create a note in an authorized folder";
 "在已授权的 Notes 文件夹中按标题或正文搜索" = "Search authorized Notes folders by title or body";

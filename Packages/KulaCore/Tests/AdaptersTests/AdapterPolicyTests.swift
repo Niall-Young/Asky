@@ -40,7 +40,9 @@ import Contracts
         #expect(Set(tools.map(\.name)).count == tools.count)
         for t in tools {
             if t.effect == .write { #expect(t.writeKind != nil && t.confirmation != .never, "\(t.name)") }
-            if t.writeKind == .modify || t.writeKind == .delete || t.writeKind == .handoff {
+            if t.name == "messages_prepare_draft" {
+                #expect(t.confirmation == .explicitDirectOtherwiseConfirm)
+            } else if t.writeKind == .modify || t.writeKind == .delete || t.writeKind == .handoff {
                 #expect(t.confirmation == .always, "\(t.name)")
             }
             if [.shortcuts, .memory, .clipboard, .terminal].contains(t.source) { #expect(!t.externallyExposable, "\(t.name)") }

@@ -14,7 +14,7 @@ public enum ToolEffect: String, Sendable, Codable {
 public enum ConfirmationRule: String, Sendable, Codable {
     /// Explicit user-requested creation may run directly; modifications / deletes / batch always confirm.
     case createDirectOtherwiseConfirm
-    /// Trusted plugins: explicit user requests may execute without an extra prompt.
+    /// Explicit user requests may execute without an extra prompt; external MCP still confirms.
     case explicitDirectOtherwiseConfirm
     /// Always requires native confirmation.
     case always

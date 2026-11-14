@@ -90,11 +90,11 @@ public struct MessagesDraftTool: ToolAdapter {
     public init(_ c: ContactsBridge) { contacts = c }
 
     public var definition: ToolDefinition {
-        ToolDefinition(name: "messages_prepare_draft", summary: CoreLocalization.text("在 Messages 中准备草稿（需确认；由用户手动发送）"),
+        ToolDefinition(name: "messages_prepare_draft", summary: CoreLocalization.text("在 Messages 中准备草稿（明确请求直接打开；由用户手动发送）"),
                        inputSchema: Args.schema(["contactID": Args.stringProp,
                                                  "handle": ["type": "string", "description": .string(CoreLocalization.text("电话号码或邮箱；联系人有多个时必填"))],
                                                  "body": Args.stringProp], required: ["body"]),
-                       source: .messages, effect: .write, writeKind: .handoff, confirmation: .always, externallyExposable: true)
+                       source: .messages, effect: .write, writeKind: .handoff, confirmation: .explicitDirectOtherwiseConfirm, externallyExposable: true)
     }
 
     /// Resolves exactly one recipient handle; multiple numbers require an explicit choice.
