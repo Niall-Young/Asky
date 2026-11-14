@@ -27,7 +27,6 @@ struct ChatFormView: View {
     @Binding var values: [String: [String]]
     let active: Bool
     let submit: () -> Void
-    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -55,8 +54,6 @@ struct ChatFormView: View {
         .font(.system(size: 14))
         .foregroundStyle(ThemeColor.kText)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .environment(\.settingsInputFill, scheme == .light ? Color.white.opacity(0.55)
-                     : ThemeColor.kBackgroundNeutral.color(for: scheme))
     }
 
     @ViewBuilder private func control(_ field: ChatForm.Field) -> some View {

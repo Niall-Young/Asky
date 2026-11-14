@@ -185,7 +185,7 @@ private struct SettingsInputChrome: ViewModifier {
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius)
         content.background(fill ?? (scheme == .dark ? ThemeColor.kBackgroundNeutral.color(for: scheme)
-                            : ThemeColor.kInput.color(for: scheme)), in: shape)
+                            : SettingsPalette.surface(scheme, opaque: true).opacity(0.12)), in: shape)
             .overlay {
                 shape.strokeBorder(focused ? Color.accentColor : ThemeColor.kBorder.color(for: scheme),
                                    lineWidth: focused ? 2 : 1)
