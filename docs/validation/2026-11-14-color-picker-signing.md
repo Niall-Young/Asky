@@ -2,6 +2,8 @@
 
 日期：2026-11-14。
 
+状态：用户已撤回插件拆分，恢复主应用内置取色。本记录仅保留历史排查结果，不再继续取色插件的公证或分发。当前恢复验证见 [原生取色恢复记录](2026-11-14-native-color-picker-restored.md)。
+
 ## 改动范围
 
 独立仓库 `../asky-plugin-color-picker` 的 `build.sh` 改用现有 Developer ID Application 证书 `Niall Young (V8GVW783CK)`，启用 hardened runtime 和安全时间戳，拒绝临时签名。重新构建了分发文件 `color-picker`，添加 `notarize.sh` 和中英文开发说明，公证凭据仍仅使用钥匙串配置 `Asky`。
