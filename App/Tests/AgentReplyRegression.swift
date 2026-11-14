@@ -909,7 +909,7 @@ enum AgentReplyRegression {
             return view.subviews.compactMap(findScroll).first
         }
         func findReply(_ view: NSView, id: String) -> NSView? {
-            if view.identifier?.rawValue == (id == "current-turn" ? "transcript-current-turn" : "transcript-reply-" + id) { return view }
+            if view.identifier?.rawValue == ("transcript-reply-" + id) { return view }
             return view.subviews.compactMap { findReply($0, id: id) }.first
         }
         for attempt in 0..<3 {
@@ -919,12 +919,14 @@ enum AgentReplyRegression {
             let scroll = findScroll(window.contentView!)!
             let gap = scroll.documentView!.bounds.maxY - scroll.documentVisibleRect.maxY
             print("Restored transcript attempt=\(attempt), gap=\(gap), document=\(scroll.documentView!.frame), clip=\(scroll.contentView.bounds)")
-            let turn = findReply(window.contentView!, id: "current-turn")!
-            let turnRect = scroll.contentView.convert(turn.bounds, from: turn)
-            precondition(abs(turnRect.minY - scroll.contentView.bounds.minY - 76) <= 1,
-                         "Opening history must show the latest question below the header")
             let reply = findReply(window.contentView!, id: model.items.last(where: { $0.kind == .assistant })!.id)!
             let rect = scroll.contentView.convert(reply.bounds, from: reply)
+            if CommandLine.arguments.contains("--restored-long-reply") {
+                precondition(abs(rect.minY - scroll.contentView.bounds.minY - 90) <= 1,
+                             "A restored long answer must begin below the header with its bubble padding")
+            } else {
+                precondition(abs(gap) <= 1, "Restored short replies must stay at the natural bottom without a blank screen")
+            }
             precondition(scroll.contentView.bounds.intersects(rect), "Restored reply must be visible without user interaction")
         }
         let scroll = findScroll(window.contentView!)!
@@ -966,12 +968,21 @@ enum AgentReplyRegression {
         }
         try capture("before")
         precondition(scroll.documentView!.bounds.height >= scroll.contentSize.height - 1,
-                     "Short turns must fill the viewport so the question can stay at the top")
+                     "The initial short conversation must occupy a top-aligned viewport")
         try store.append(conversationID: cid, role: "user", text: "晚上好")
         model.open(cid)
         model.beginResponse(taskID: "bottom-push")
         try await Task.sleep(for: .milliseconds(800))
         try capture("after")
+        func textViews(_ view: NSView) -> [NSTextView] {
+            (view as? NSTextView).map { [$0] } ?? view.subviews.flatMap(textViews)
+        }
+        let greeting = textViews(window.contentView!).first { $0.string == "你好" }!
+        let greetingRect = scroll.contentView.convert(greeting.bounds, from: greeting)
+        precondition(greetingRect.minY >= scroll.contentView.bounds.minY + 64,
+                     "A second short question must leave the first exchange visible, not start a new screen")
+        precondition(scroll.documentView!.bounds.height <= scroll.contentSize.height + 1,
+                     "Several short messages must share one screen without a full-height current turn")
         var gap = scroll.documentView!.bounds.maxY - scroll.documentVisibleRect.maxY
         precondition(abs(gap) <= 1, "New message and waiting bubble must be visible at the bottom: gap=\(gap)")
         model.handle(.taskState(taskID: "bottom-push", .cancelled), conversationID: cid)
@@ -992,7 +1003,7 @@ enum AgentReplyRegression {
         precondition(scroll.documentView!.bounds.height > scroll.contentSize.height * 2, "History must really overflow")
         model.handle(.taskState(taskID: "bottom-push-overflow", .cancelled), conversationID: cid)
         model.finishTask(conversationID: cid)
-        try store.append(conversationID: cid, role: "user", text: "请给我一篇长回答")
+        try store.append(conversationID: cid, role: "user", text: String(repeating: "这是很长的用户问题，回答出现后可以把它往上推。\n", count: 25))
         model.open(cid)
         model.beginResponse(taskID: "fast-reply")
         try await Task.sleep(for: .milliseconds(40))
@@ -1008,21 +1019,10 @@ enum AgentReplyRegression {
         let reply = replyMarker(window.contentView!)!
         let rect = scroll.contentView.convert(reply.bounds, from: reply)
         let visible = scroll.contentView.bounds.maxY - rect.minY
-        func turnMarker(_ view: NSView) -> NSView? {
-            if view.identifier?.rawValue == "transcript-current-turn" { return view }
-            return view.subviews.compactMap(turnMarker).first
-        }
-        func assertQuestionAtTop() {
-            let turn = turnMarker(window.contentView!)!
-            let turnRect = scroll.contentView.convert(turn.bounds, from: turn)
-            precondition(abs(turnRect.minY - scroll.contentView.bounds.minY - 76) <= 1,
-                         "The current question must stay below the header: offset=\(turnRect.minY - scroll.contentView.bounds.minY)")
-        }
-        assertQuestionAtTop()
         precondition(visible > 250 && rect.height > visible,
-                     "Long replies must fill the remaining viewport from their beginning: visible=\(visible)")
-        precondition(rect.minY > scroll.contentView.bounds.minY + 76,
-                     "The question and reply beginning must both be visible")
+                     "Long replies must fill the viewport from their beginning: visible=\(visible)")
+        precondition(abs(rect.minY - scroll.contentView.bounds.minY - 90) <= 1,
+                     "Long answers stop at the beginning of the bubble, allowing the user question to move above it")
         print("Long reply visible height: \(visible)")
         try capture("completed")
         try store.append(conversationID: cid, role: "user", text: "收到")
@@ -1035,12 +1035,13 @@ enum AgentReplyRegression {
         try await Task.sleep(for: .milliseconds(1400))
         let shortReply = replyMarker(window.contentView!)!
         let shortRect = scroll.contentView.convert(shortReply.bounds, from: shortReply)
-        assertQuestionAtTop()
+        gap = scroll.documentView!.bounds.maxY - scroll.documentVisibleRect.maxY
+        precondition(abs(gap) <= 1, "Fitting replies must end at the natural bottom with no per-turn blank space")
         precondition(shortRect.height > 88, "The fitting reply must exceed the former four-line limit")
         precondition(shortRect.minY >= scroll.contentView.bounds.minY && shortRect.maxY <= scroll.contentView.bounds.maxY,
                      "Any reply fitting below the question must be fully visible")
         try capture("short")
-        print("Top-aligned turns passed: short, overflowing and fitting replies, fixed window, waiting bubble")
+        print("Natural chat flow passed: short, overflowing and fitting replies, fixed window, waiting bubble")
     }
 
     static func readingScrollRegression(app: AppModel) async throws {
