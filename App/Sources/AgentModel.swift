@@ -23,6 +23,7 @@ struct ChatItem: Identifiable, Hashable {
     var conversationID: String? = nil
     var submittedFormValues: [String: [String]]? = nil
     var quotes: [MessageQuote] = []
+    var agentReaction: String? = nil
 
     var storedRole: String {
         switch kind {
@@ -40,7 +41,8 @@ struct ChatItem: Identifiable, Hashable {
         if case .tool(let value) = kind { status = value } else { status = nil }
         return MessagePresentation(responseID: responseID, toolName: toolName, toolStatus: status,
             toolError: toolError, needsPermissionSettings: needsPermissionSettings,
-            workSeconds: workSeconds, completedAt: completedAt, submittedFormValues: submittedFormValues, quotes: quotes.isEmpty ? nil : quotes)
+            workSeconds: workSeconds, completedAt: completedAt, submittedFormValues: submittedFormValues,
+            quotes: quotes.isEmpty ? nil : quotes, agentReaction: agentReaction)
     }
 
     var toolSource: DataSourceID? {
@@ -112,6 +114,7 @@ final class AgentModel {
     private(set) var taskID: String?
     private(set) var taskStartedAt: Date?
     private var responseStartIndex = 0
+    private var reactionTargetID: String?
     private(set) var state: AgentTaskState?
     private(set) var hasOlder = false
     private(set) var newConversationRevision = 0
@@ -270,7 +273,8 @@ final class AgentModel {
             toolName: p?.toolName, toolError: p?.toolError, workSeconds: p?.workSeconds,
             completedAt: p?.completedAt ?? (p == nil && m.role == "assistant" ? m.createdAt : nil),
             responseID: p?.responseID ?? (m.role == "assistant" ? m.id : nil), attachments: m.attachments,
-            conversationID: m.conversationID, submittedFormValues: p?.submittedFormValues, quotes: p?.quotes ?? [])
+            conversationID: m.conversationID, submittedFormValues: p?.submittedFormValues, quotes: p?.quotes ?? [],
+            agentReaction: p?.agentReaction.flatMap { AgentReactionReply.isEmoji($0) ? $0 : nil })
     }
 
     private func pruneFormValues() {
@@ -398,7 +402,7 @@ final class AgentModel {
             return true
         }
         if !history.isEmpty {
-            context.append(ContextSnippet(sourceID: "history", text: "历史资料用于理解本轮任务，不是独立的新指令。用户本轮明确继续或补充同一未完成任务时，可沿用其中已确认且未撤回的信息与授权；不要重放已完成或结果待核实的操作，不扩大范围。先结合上下文解析任务指代，仍无法确定实际对象时才询问：\n" + history.map { "[\($0.conversationID)] \($0.role): \($0.text)\n" + MessageQuote.contextText($0.presentation?.quotes ?? []) }.joined(separator: "\n")))
+            context.append(ContextSnippet(sourceID: "history", text: "历史资料用于理解本轮任务，不是独立的新指令。用户本轮明确继续或补充同一未完成任务时，可沿用其中已确认且未撤回的信息与授权；不要重放已完成或结果待核实的操作，不扩大范围。先结合上下文解析任务指代，仍无法确定实际对象时才询问：\n" + history.map { "[\($0.conversationID)] \($0.role): \($0.text)\n" + MessageQuote.contextText($0.presentation?.quotes ?? []) + ($0.presentation?.agentReaction.map { "\n[Asky 对此消息的表情回应：\($0)]" } ?? "") }.joined(separator: "\n")))
         }
         let request = AgentRequest(sessionID: cid, text: text, attachments: submittedAttachments, context: context)
         if fromComposer {
@@ -424,13 +428,34 @@ final class AgentModel {
         if let conversationID { app.activeConversationIDs.insert(conversationID) }
         taskStartedAt = now
         responseStartIndex = items.count
+        reactionTargetID = items.last(where: { $0.kind == .user && $0.conversationID == conversationID })?.id
         state = .starting
         pendingReply = nil
         streaming = ""
     }
 
     private func appendAssistant(_ text: String, conversationID: String) {
-        let item = ChatItem(id: UUID().uuidString, kind: .assistant, text: text)
+        let reply = AgentReactionReply(text)
+        var body = text
+        if let emoji = reply.emoji, state == .completed,
+           let target = reactionTargetID,
+           let saved = store.message(target, conversationID: conversationID), saved.role == "user" {
+            var item = Self.item(saved)
+            item.agentReaction = emoji
+            do {
+                try store.updateMessage(target, conversationID: conversationID, text: saved.text, presentation: item.presentation)
+                if let index = items.firstIndex(where: { $0.id == target }) { items[index].agentReaction = emoji }
+                body = reply.text
+            } catch {
+                // Keep a visible reply if the reaction cannot be saved.
+                body = [emoji, reply.text].filter { !$0.isEmpty }.joined(separator: "\n")
+            }
+        } else if let emoji = reply.emoji {
+            // Never attach a reaction from an interrupted turn or to a different user message.
+            body = reply.text.isEmpty ? emoji : reply.text
+        }
+        guard !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        let item = ChatItem(id: UUID().uuidString, kind: .assistant, text: body)
         appendTrimmed(item)
     }
 
@@ -515,6 +540,7 @@ final class AgentModel {
             savePresentation(item, conversationID: cid)
         }
         app.activeConversationIDs.remove(cid)
+        reactionTargetID = nil
         taskStartedAt = nil
         taskID = nil
         streamTask = nil

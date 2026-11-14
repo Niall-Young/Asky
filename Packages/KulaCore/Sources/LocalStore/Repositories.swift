@@ -171,11 +171,14 @@ public struct MessagePresentation: Sendable, Hashable, Codable {
     /// Non-nil (including an empty dictionary) permanently marks a submitted form.
     public var submittedFormValues: [String: [String]]?
     public var quotes: [MessageQuote]?
+    /// The assistant's single emoji reaction, attached to the user message.
+    public var agentReaction: String?
 
     public init(responseID: String? = nil, toolName: String? = nil, toolStatus: ExecutionStatus? = nil,
                 toolError: String? = nil, needsPermissionSettings: Bool = false,
                 workSeconds: Int? = nil, completedAt: Date? = nil,
-                submittedFormValues: [String: [String]]? = nil, quotes: [MessageQuote]? = nil) {
+                submittedFormValues: [String: [String]]? = nil, quotes: [MessageQuote]? = nil,
+                agentReaction: String? = nil) {
         self.responseID = responseID
         self.toolName = toolName
         self.toolStatus = toolStatus
@@ -185,6 +188,7 @@ public struct MessagePresentation: Sendable, Hashable, Codable {
         self.completedAt = completedAt
         self.submittedFormValues = submittedFormValues
         self.quotes = quotes
+        self.agentReaction = agentReaction
     }
 }
 

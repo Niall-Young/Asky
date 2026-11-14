@@ -1201,6 +1201,8 @@ enum AgentReplyRegression {
         let root = FileManager.default.temporaryDirectory.appending(path: "Asky-reply-\(UUID())")
         defer { try? FileManager.default.removeItem(at: root) }
         let app = try AppModel(root: root)
+        try await reactionRegression(app: app, capture: CommandLine.arguments.contains("--reactions-preview"))
+        if CommandLine.arguments.contains("--reactions-preview") { return }
         if CommandLine.arguments.contains("--avatar-preview") {
             let legacy = try JSONDecoder().decode(SettingsPreferences.self, from: Data(#"{"agentAvatarColor":"yellow","showDockIcon":true}"#.utf8))
             precondition(legacy.agentAvatarShape == "monster" && legacy.agentAvatarExpression == "smile")

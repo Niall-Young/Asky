@@ -905,10 +905,20 @@ private struct ChatBubble: View {
                                     RoundedRectangle(cornerRadius: 16).fill(model.avatarColor.userBubbleTint(for: scheme))
                                 }
                         } }
-                    copyButton
-                        .onHover { copyHovering = $0 }
-                        .opacity(hovering || copyHovering || copyFocused || copyFeedbackID != nil ? 1 : 0)
-                        .frame(maxWidth: .infinity, alignment: .trailing)
+                    HStack(spacing: 6) {
+                        if let emoji = item.agentReaction {
+                            Text(emoji)
+                                .font(.system(size: 15))
+                                .padding(.horizontal, 7).padding(.vertical, 3)
+                                .background(Capsule().fill(ThemeColor.kBackgroundNeutral))
+                                .overlay(Capsule().strokeBorder(ThemeColor.kTextSubtlest.opacity(0.16), lineWidth: 0.5))
+                                .accessibilityLabel(String(format: NSLocalizedString("Asky 回应了 %@", comment: ""), emoji))
+                        }
+                        copyButton
+                            .onHover { copyHovering = $0 }
+                            .opacity(hovering || copyHovering || copyFocused || copyFeedbackID != nil ? 1 : 0)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .trailing)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .trailing)

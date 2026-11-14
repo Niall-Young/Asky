@@ -931,3 +931,5 @@
 "小怪物" = "Monster";
 "正圆" = "Circle";
 "方形" = "Square";
+
+"Asky 回应了 %@" = "Asky reacted with %@";
