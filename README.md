@@ -46,7 +46,7 @@ Asky 是使用 SwiftUI 与 AppKit 构建的 macOS 原生效率入口。本地全
   - **灵活历史管理**：支持自定义保留期限（8 小时 ~ 30 天）与自动清理，支持快捷键 `⌘⌫` 单条删除或 `⌘K` 菜单清空历史。
 
 - 🤖 **按需 AI 助手与本地记忆**
-  - **紧凑对话窗口**：固定 560 pt 宽、26 pt 普通圆角，默认高 560 pt，可纵向调整至最低 480 pt；紧凑玻璃输入框采用 16 pt 圆角，附件与发送按钮均为 28 pt。
+  - **紧凑对话窗口**：固定 560 pt 宽、26 pt 普通圆角，默认高 560 pt，可纵向调整至最低 480 pt；紧凑玻璃输入框采用 16 pt 圆角，附件与发送按钮均为 28 pt。顶部为 48 pt 无分割线工具栏，13 pt 左对齐标题；保留新对话按钮，历史、置顶和关闭入口收进更多菜单。
   - **Swift 原生 Agent**：模型请求、工具循环、会话恢复和上下文压缩均由 Swift 执行。运行时显示思考或当前工具，结束后一次展示完整回复；无需 Node / Pi 辅助进程，支持 OpenAI-compatible Chat Completions。
   - **对话历史**：新保存的会话保留工具调用状态、错误、回复分组与耗时，支持分页恢复；旧会话未保存的工具展示记录不会自动补回。在“设置 › 智能配置 › 对话历史”选择保留 7 天、30 天（默认）、90 天或永久；按最后活动时间清理，启动时、每天及修改期限后检查。到期或手动删除会清理会话、执行记录、索引及无引用的自有附件，已保存记忆独立保留，失败文件自动重试。
   - **原生交互表单**：AI 回复完成后一次显示原生单选按钮组、下拉单选、多选、文本输入、日期及按需显示时、分、秒的时间/时长控件，填写后直接提交至同一会话。控件复用设置页组件，日期选择复用创建日程弹窗的月历。
@@ -200,7 +200,7 @@ Asky is a native macOS efficiency launcher built with SwiftUI and AppKit. Local 
   - **Flexible Retention**: Configure history retention (8 hours to 30 days) with automatic cleanup. Delete single entries with `⌘⌫` or clear all via the More menu (`⌘K`).
 
 - 🤖 **On-Demand AI Assistant & Local Memory**
-  - **Compact Chat Window**: Fixed at 560 pt wide with 26 pt circular corners, a default height of 560 pt and a minimum adjustable height of 480 pt; the compact glass composer uses 16 pt corners and matching 28 pt attachment and send buttons.
+  - **Compact Chat Window**: Fixed at 560 pt wide with 26 pt circular corners, a default height of 560 pt and a minimum adjustable height of 480 pt; the compact glass composer uses 16 pt corners and matching 28 pt attachment and send buttons. The 48 pt header uses a left-aligned 13 pt title without a divider; New Chat stays visible, with history, pinning and close in the More menu.
   - **Native Swift Agent**: Swift handles model requests, tool loops, session recovery, and context compaction without a Node / Pi helper. Chat shows thinking or the active tool, then presents the complete reply at once; supports OpenAI-compatible Chat Completions.
   - **Conversation History**: Newly saved conversations retain tool statuses, errors, response groups, and elapsed time across paginated reloads. Tool display records missing from older conversations are not backfilled. Settings › AI Settings › Conversation History offers 7, 30 (default), or 90 days, or forever, based on the last activity. Cleanup runs at startup, daily, and after retention changes. Expiry and manual deletion remove sessions, execution records, indexes, and unreferenced managed attachments while preserving saved memory; failed file removals are retried.
   - **Native Interactive Forms**: Completed AI replies display structured form controls (text fields, native radio groups, dropdowns, checkboxes, date pickers and configurable hour/minute/second time or duration controls) directly in chat, which submit straight back into the conversation. Controls reuse the Settings components; date selection uses the calendar from the event creation dialog.

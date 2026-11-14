@@ -21,7 +21,7 @@
 
 后续指定的[聚焦搜索 Field，node 22:348](https://www.figma.com/design/tmVnTyCb2sz5egNQ7We9Sw/KulaHere?node-id=22-348)为启动器收起状态的设计依据：720 × 60、左 24 / 右 20 留白、12 间距、17 pt `magnifyingglass`（21 × 22 图标槽）、16/400/Default 输入和 “Search” 提示。此节点替代之前的输入区尺寸与玻璃处理。搜索总宽度后续按用户要求调整为 640 pt（包含空状态右侧按钮），剪贴板列表宽度同为 640 pt，共用 `WindowMetrics.launcherWidth`；AI 窗口按后续要求独立为 560 pt，使用 `WindowMetrics.agentWidth`。
 
-[UI 页 22:293](https://www.figma.com/design/tmVnTyCb2sz5egNQ7We9Sw/KulaHere?node-id=22-293)中的新聊天 43:1071、AI 对话 42:760、历史记录 38:653 是对话界面的设计依据：720 × 640、32 圆角、70% 语义背景与原生 Regular Liquid Glass、1 pt border。顶部 12 pt 内距、32 pt 圆形按钮与 18/500/Default 居中标题；正文左右 32 pt，用户气泡 16 圆角与 12/10 内距，正文和工具行使用 14/400/Default。工具行保留 8 pt 图文间距，示例搜索图标按实际工具替换。底部外距 12 pt；输入区后续收紧为 16 pt 普通圆角、最小 28 pt 文字区域、8 pt 行间距、顶部 10 / 底部 8 pt 留白，空态总高 82 pt；文本左右 12 pt、操作行左右 8 pt。输入区使用原生 Clear 玻璃，仅玻璃背景层以 35% 强度合成以减轻高光与折射，不降低文字或按钮的不透明度，不再叠加 kInput 底色；附件与发送按钮均为 28 pt 圆形，附件按钮使用无底板的加号图标。顶部增加新对话与可切换置顶按钮；空状态显示 24/500 问候，历史行高 48 pt 并显示更新日期。历史页替换正文和输入区，不保留常驻侧栏；新对话与设置也可从附件菜单进入。Figma 壁纸属于桌面展示背景，不作为 App 资产。窗口阴影由 AppKit 提供，光学效果由系统实现，不声称逐项复刻 Figma 滤镜。见[新对话样式验证](validation/2026-10-10-ai-chat-refresh.md)。
+[UI 页 22:293](https://www.figma.com/design/tmVnTyCb2sz5egNQ7We9Sw/KulaHere?node-id=22-293)中的新聊天 43:1071、AI 对话 42:760、历史记录 38:653 是对话界面的设计依据：720 × 640、32 圆角、70% 语义背景与原生 Regular Liquid Glass、1 pt border。顶部现采用 48 pt 高、左右 16 pt 内距的无分割线工具栏，标题为左对齐 13/500/Default、额外左内距 8 pt；按钮为 28 pt 点击区域与 16 pt 图标，普通状态无底板，仅在悬停和按下时显示反馈；正文左右 32 pt，用户气泡 16 圆角与 12/10 内距，正文和工具行使用 14/400/Default。工具行保留 8 pt 图文间距，示例搜索图标按实际工具替换。底部外距 12 pt；输入区后续收紧为 16 pt 普通圆角、最小 28 pt 文字区域、8 pt 行间距、顶部 10 / 底部 8 pt 留白，空态总高 82 pt；文本左右 12 pt、操作行左右 8 pt。输入区使用原生 Clear 玻璃，仅玻璃背景层以 35% 强度合成以减轻高光与折射，不降低文字或按钮的不透明度，不再叠加 kInput 底色；附件与发送按钮均为 28 pt 圆形，附件按钮使用无底板的加号图标。顶部仅保留新对话与更多按钮，历史对话、置顶、设置和关闭窗口收进更多菜单；置顶时标题旁显示 12 pt 状态图标，历史页显示返回按钮与无独立玻璃底板的搜索框；空状态显示 24/500 问候，历史行高 48 pt 并显示更新日期。历史页替换正文和输入区，不保留常驻侧栏；新对话与设置也可从附件菜单进入。Figma 壁纸属于桌面展示背景，不作为 App 资产。窗口阴影由 AppKit 提供，光学效果由系统实现，不声称逐项复刻 Figma 滤镜。见[新对话样式验证](validation/2026-10-10-ai-chat-refresh.md)。
 
 后续 Figma 变更先核对来源，再更新附录与原生映射；不要在文件中自动创建组件或改写用户变量。本稿附录为设计数据快照，不是自动生成的生产源码。
 
@@ -102,7 +102,7 @@ Theme、ButtonStyle、LabelStyle 或 ViewModifier 只负责样式映射，不重
 
 macOS 14/15 的兼容表面使用 `NSVisualEffectView` 的 `underWindowBackground` 材质与 `behindWindow` 模式，叠加现有 `background` 变量（浅色白 60%、深色黑 60%）及 1pt `border` 描边。设置侧栏与内容区同步适配；按钮降级为原生 bordered / borderedProminent。用户已接受系统控制的背景模糊半径，不要求精确 120px。辅助功能模式保持不透明背景与高对比描边。
 
-macOS 14 的设置使用原生分组 `Form`，保留全部设置项；15+ 保留现有自定义分组卡片。14 的聊天滚动使用 `ScrollViewReader` 与 AppKit 滚动区域通知，保留初始底部、活动更新/完整回复跟随和回到底部按钮；标题栏空隙通过 AppKit `performDrag` 拖动窗口。
+macOS 14 的设置使用原生分组 `Form`，保留全部设置项；15+ 保留现有自定义分组卡片。14 的聊天滚动使用 `ScrollViewReader` 与 AppKit 滚动区域通知，保留初始底部、活动更新与正文流式跟随和回到底部按钮；标题栏空隙通过 AppKit `performDrag` 拖动窗口。
 
 macOS 26+ 使用原生液态玻璃；源码构建最低支持 macOS 14。SwiftUI 的 glassEffect、GlassEffectContainer 与原生玻璃按钮样式，以及 AppKit NSGlassEffectView 是实施候选；具体组合与 SDK 可用性在 M0 编译和视觉验证。[Apple SwiftUI Liquid Glass](https://developer.apple.com/documentation/swiftui/applying-liquid-glass-to-custom-views)、[Apple NSGlassEffectView](https://developer.apple.com/documentation/appkit/nsglasseffectview)
 

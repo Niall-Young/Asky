@@ -89,7 +89,7 @@ private enum AgentLayout {
     // Figma UI page 22:293, new chat 43:1072, conversation 42:761 and history 38:654.
     static let radius: CGFloat = LauncherLayout.shellCornerRadius
     static let message = TextStyle(size: 14, weight: 400, mode: .default)
-    static let title = TextStyle(size: 18, weight: 500, mode: .default)
+    static let title = TextStyle(size: 13, weight: 500, mode: .default)
 }
 
 struct AgentView: View {
@@ -115,7 +115,6 @@ struct AgentView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            Rectangle().fill(ThemeColor.kBorder.color(for: colorScheme)).frame(height: 1)
             ZStack {
                 if showingHistory {
                     history.transition(historyTransition).zIndex(1)
@@ -165,74 +164,81 @@ struct AgentView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 40) {
-            HStack(spacing: 12) {
-                Button { showingHistory.toggle(); model.reloadConversations() } label: {
-                    headerIcon(showingHistory ? "chevron.left" : "list.bullet")
+        HStack(spacing: 8) {
+            if showingHistory {
+                Button { showingHistory = false } label: { headerIcon("chevron.left") }
+                    .accessibilityLabel(NSLocalizedString("返回对话", comment: ""))
+                    .help(NSLocalizedString("返回对话", comment: ""))
+                HStack(spacing: 8) {
+                    Image(mingCute: "magnifyingglass", size: 14)
+                        .foregroundStyle(ThemeColor.kIconSubtle.color(for: colorScheme))
+                    ConversationSearchField(text: $historyQuery,
+                        textColor: NSColor(ThemeColor.kText.color(for: colorScheme)),
+                        placeholderColor: NSColor(ThemeColor.kTextSubtlest.color(for: colorScheme)))
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .accessibilityLabel(showingHistory ? NSLocalizedString("返回对话", comment: "") : NSLocalizedString("历史对话", comment: ""))
-                .keyboardShortcut(model.shortcutPreferences.shortcut(.history).keyEquivalent,
-                                  modifiers: model.shortcutPreferences.shortcut(.history).eventModifiers)
-                Button { model.open(nil); showingHistory = false } label: {
-                    headerIcon("pencil")
+                .frame(maxWidth: .infinity)
+            } else {
+                HStack(spacing: 6) {
+                    Text(model.conversations.first { $0.id == model.conversationID }?.title ?? NSLocalizedString("新对话", comment: ""))
+                        .textStyle(AgentLayout.title)
+                        .foregroundStyle(ThemeColor.kTextSubtle.color(for: colorScheme))
+                        .lineLimit(1).truncationMode(.tail)
+                    if pinned {
+                        Image(mingCute: "pin.fill", size: 12)
+                            .foregroundStyle(ThemeColor.kIconSubtle.color(for: colorScheme))
+                            .accessibilityLabel(NSLocalizedString("已置顶", comment: ""))
+                    }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.leading, 8)
+            }
+            Button { model.open(nil); showingHistory = false } label: { headerIcon("pencil") }
                 .disabled(model.isRunning)
                 .accessibilityLabel(NSLocalizedString("新对话", comment: ""))
+                .help(NSLocalizedString("新对话", comment: ""))
                 .keyboardShortcut(model.shortcutPreferences.shortcut(.newChat).keyEquivalent,
                                   modifiers: model.shortcutPreferences.shortcut(.newChat).eventModifiers)
-            }
-            .buttonStyle(AgentHeaderButtonStyle(colorScheme: colorScheme))
-            ZStack {
-                if showingHistory {
-                    HStack(spacing: 12) {
-                        Image(mingCute: "magnifyingglass", size: 17).frame(width: 17, height: 20)
-                            .foregroundStyle(ThemeColor.kIconSubtle.color(for: colorScheme))
-                        ConversationSearchField(text: $historyQuery,
-                            textColor: NSColor(ThemeColor.kText.color(for: colorScheme)),
-                            placeholderColor: NSColor(ThemeColor.kTextSubtlest.color(for: colorScheme)))
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .padding(.horizontal, 16).frame(maxWidth: .infinity).frame(height: 36)
-                    .nativeGlassBackground(in: Capsule())
-                    .transition(.opacity)
-                } else {
-                    Text(model.conversations.first { $0.id == model.conversationID }?.title ?? NSLocalizedString("新对话", comment: ""))
-                        .textStyle(AgentLayout.title).lineLimit(1).frame(maxWidth: .infinity)
-                        .contextMenu {
-                            Button(NSLocalizedString("新对话", comment: "")) { model.open(nil) }.disabled(model.isRunning)
-                            Button(NSLocalizedString("设置…", comment: "")) { model.openSettings() }
-                        }
-                        .id(model.conversationID)
-                        .transition(.opacity)
+            Menu {
+                Button {
+                    showingHistory.toggle()
+                    model.reloadConversations()
+                } label: {
+                    Label { Text(NSLocalizedString(showingHistory ? "返回对话" : "历史对话", comment: "")) }
+                        icon: { Image(mingCute: showingHistory ? "chevron.left" : "list.bullet") }
                 }
-            }
-            .frame(maxWidth: .infinity)
-            .animation(navigationAnimation, value: showingHistory)
-            .animation(navigationAnimation, value: model.conversationID)
-            HStack(spacing: 12) {
-                Button { pinned.toggle(); setPinned(pinned) } label: {
-                    headerIcon(pinned ? "pin.fill" : "pin")
+                .keyboardShortcut(model.shortcutPreferences.shortcut(.history).keyEquivalent,
+                                  modifiers: model.shortcutPreferences.shortcut(.history).eventModifiers)
+                Toggle(isOn: Binding(get: { pinned }, set: { pinned = $0; setPinned($0) })) {
+                    Label { Text(NSLocalizedString("置顶窗口", comment: "")) } icon: { Image(mingCute: "pin") }
                 }
-                .accessibilityLabel(pinned ? NSLocalizedString("取消置顶", comment: "") : NSLocalizedString("置顶窗口", comment: ""))
-                .accessibilityValue(pinned ? NSLocalizedString("已置顶", comment: "") : NSLocalizedString("未置顶", comment: ""))
-                Button(action: close) { headerIcon("xmark") }
-                    .accessibilityLabel(NSLocalizedString("关闭对话窗口", comment: ""))
-                    .keyboardShortcut(model.shortcutPreferences.shortcut(.closeChat).keyEquivalent,
+                Divider()
+                Button { model.openSettings() } label: {
+                    Label { Text(NSLocalizedString("设置…", comment: "")) } icon: { Image(mingCute: "gearshape") }
+                }
+                Button(action: close) {
+                    Label { Text(NSLocalizedString("关闭对话窗口", comment: "")) } icon: { Image(mingCute: "xmark") }
+                }
+                .keyboardShortcut(model.shortcutPreferences.shortcut(.closeChat).keyEquivalent,
                                   modifiers: model.shortcutPreferences.shortcut(.closeChat).eventModifiers)
-            }
-            .buttonStyle(AgentHeaderButtonStyle(colorScheme: colorScheme))
+            } label: { headerIcon("ellipsis.vertical") }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help(NSLocalizedString("更多操作", comment: ""))
+            .accessibilityLabel(NSLocalizedString("更多操作", comment: ""))
         }
-        .padding(.horizontal, 12)
-        .frame(height: 56)
+        .buttonStyle(AgentToolbarButtonStyle(colorScheme: colorScheme))
+        .padding(.horizontal, 16)
+        .frame(height: 48)
         .contentShape(Rectangle())
         .compatibleWindowDrag()
     }
 
     private func headerIcon(_ symbol: String) -> some View {
-        Image(mingCute: symbol)
-            .frame(width: 20, height: 20)
-            .frame(width: 32, height: 32)
-            .contentShape(.interaction, Circle())
+        Image(mingCute: symbol, size: 16)
+            .frame(width: 28, height: 28)
+            .contentShape(.interaction, RoundedRectangle(cornerRadius: 7))
     }
 
     private var history: some View {
@@ -286,6 +292,25 @@ private struct AgentGreeting: View {
                     visibleCount = count
                 }
             }
+    }
+}
+
+private struct AgentToolbarButtonStyle: ButtonStyle {
+    let colorScheme: ColorScheme
+    @Environment(\.isEnabled) private var isEnabled
+    @State private var hovering = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(ThemeColor.kTextSubtle.color(for: colorScheme))
+            .background {
+                if isEnabled && (hovering || configuration.isPressed) {
+                    RoundedRectangle(cornerRadius: 7)
+                        .fill(ThemeColor.kInteractionHover.color(for: colorScheme))
+                }
+            }
+            .opacity(isEnabled ? (configuration.isPressed ? 0.7 : 1) : 0.35)
+            .onHover { hovering = $0 }
     }
 }
 
