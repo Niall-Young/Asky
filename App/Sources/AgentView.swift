@@ -177,7 +177,7 @@ struct AgentView: View {
                 onPressChanged: { historyPressed = $0 })
                 .fixedSize()
                 .nativeGlassBackground(in: Circle(), interactive: true, clear: true, glassOpacity: 0.35)
-                .modifier(AgentToolbarElasticity(pressed: historyPressed, hovered: historyHovered))
+                .liquidGlassInteraction(pressed: historyPressed, hovered: historyHovered)
                 .onHover { historyHovered = $0 }
             if showingHistory {
                 HStack(spacing: 8) {
@@ -199,7 +199,7 @@ struct AgentView: View {
                 onPressChanged: { actionsPressed = $0 })
                 .fixedSize()
                 .nativeGlassBackground(in: Capsule(), interactive: true, clear: true, glassOpacity: 0.35)
-                .modifier(AgentToolbarElasticity(pressed: actionsPressed, hovered: actionsHovered))
+                .liquidGlassInteraction(pressed: actionsPressed, hovered: actionsHovered)
                 .onHover { actionsHovered = $0 }
         }
         .padding(.horizontal, 16)
@@ -304,7 +304,7 @@ private struct AgentToolbarControls: NSViewRepresentable {
         stack.alignment = .centerY
         stack.detachesHiddenViews = false
         for index in 0..<(history ? 1 : 3) {
-            let button = AgentToolbarPressButton(title: "", target: context.coordinator, action: #selector(Coordinator.activate(_:)))
+            let button = LiquidGlassPressButton(title: "", target: context.coordinator, action: #selector(Coordinator.activate(_:)))
             button.setButtonType(.momentaryPushIn)
             button.bezelStyle = .accessoryBarAction
             button.tag = index
@@ -331,7 +331,7 @@ private struct AgentToolbarControls: NSViewRepresentable {
         for (index, view) in stack.arrangedSubviews.enumerated() {
             guard let button = view as? NSButton else { continue }
             let title = NSLocalizedString(titles[index], comment: "")
-            (button as? AgentToolbarPressButton)?.onPressChanged = onPressChanged
+            (button as? LiquidGlassPressButton)?.onPressChanged = onPressChanged
             button.image = MingCute.image(symbols[index], size: 18)
             button.image?.accessibilityDescription = title
             button.toolTip = title
@@ -350,33 +350,6 @@ private struct AgentToolbarControls: NSViewRepresentable {
             else if sender.tag == 1 { parent.onPin() }
             else if sender.tag == 2 { parent.onClose() }
         }
-    }
-}
-
-/// Observe native mouse tracking without replacing NSButton's action, drag-out
-/// cancellation, keyboard activation or accessibility behavior.
-private final class AgentToolbarPressButton: NSButton {
-    var onPressChanged: ((Bool) -> Void)?
-
-    override func mouseDown(with event: NSEvent) {
-        guard isEnabled else { super.mouseDown(with: event); return }
-        onPressChanged?(true)
-        defer { onPressChanged?(false) }
-        super.mouseDown(with: event)
-    }
-}
-
-private struct AgentToolbarElasticity: ViewModifier {
-    let pressed: Bool
-    let hovered: Bool
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    func body(content: Content) -> some View {
-        content
-            .scaleEffect(x: reduceMotion ? 1 : pressed ? 1.045 : hovered ? 1.012 : 1,
-                         y: reduceMotion ? 1 : pressed ? 0.93 : hovered ? 1.02 : 1)
-            .animation(reduceMotion ? nil : .spring(response: 0.28, dampingFraction: 0.45), value: pressed)
-            .animation(reduceMotion ? nil : .spring(response: 0.22, dampingFraction: 0.75), value: hovered)
     }
 }
 
@@ -414,7 +387,7 @@ private struct AgentHeaderButtonStyle: ButtonStyle {
     @State private var hovering = false
     func makeBody(configuration: Configuration) -> some View {
         configuration.label.font(.system(size: 14)).foregroundStyle(ThemeColor.kTextSubtle.color(for: colorScheme))
-            .nativeGlassBackground(in: Circle())
+            .nativeGlassBackground(in: Circle(), interactive: true)
             .overlay {
                 if isEnabled && (hovering || configuration.isPressed) {
                     Circle().fill(ThemeColor.kInteractionHover.color(for: colorScheme))
@@ -423,6 +396,7 @@ private struct AgentHeaderButtonStyle: ButtonStyle {
             .contentShape(.interaction, Circle())
             .opacity(isEnabled && configuration.isPressed ? 0.7 : 1)
             .onHover { hovering = $0 }
+            .liquidGlassInteraction(pressed: configuration.isPressed, hovered: hovering)
     }
 }
 
@@ -458,6 +432,7 @@ struct AgentIconButtonStyle: ButtonStyle {
                 }
             }
             .onHover { hovering = $0 }
+            .liquidGlassInteraction(pressed: configuration.isPressed, hovered: hovering)
     }
 }
 
@@ -1151,12 +1126,15 @@ private struct ViewReader: NSViewRepresentable {
 
 private struct ComposerSubmitButtonStyle: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
+    @State private var hovered = false
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .foregroundStyle(ThemeColor("iconInverted"))
             // Fade only the fill so the arrow keeps its contrast when disabled.
             .background(ThemeColor.kBackgroundPrimary.opacity(isEnabled ? 1 : 0.3), in: .circle)
+            .liquidGlassInteraction(pressed: configuration.isPressed, hovered: hovered)
+            .onHover { hovered = $0 }
     }
 }
 

@@ -21,7 +21,7 @@ struct SettingsSearchField: View {
                 } label: {
                     Image(mingCute: "xmark.circle.fill").foregroundStyle(.secondary)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(LiquidGlassPlainButtonStyle())
                 .accessibilityLabel(NSLocalizedString("清除搜索", comment: ""))
             }
         }

@@ -247,7 +247,7 @@ struct SettingsIconButton: View {
                 .renderingMode(.template)
                 .foregroundStyle(.secondary)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(LiquidGlassPlainButtonStyle())
         .fixedSize()
         .frame(width: 28, height: 28)
         .contentShape(RoundedRectangle(cornerRadius: 6))
@@ -269,6 +269,8 @@ private extension View {
 
 /// A native AppKit push button, including the system bezel, focus and disabled states.
 struct SettingsButton: View {
+    @State private var pressed = false
+    @State private var hovered = false
     let title: String
     let action: () -> Void
     let role: ButtonRole?
@@ -287,7 +289,8 @@ struct SettingsButton: View {
     }
     var body: some View {
         SettingsPushButton(title: title, role: role, systemImage: systemImage, assetImage: assetImage,
-                           hidesTitle: isLoading || isComplete, isBordered: isBordered, action: action)
+                           hidesTitle: isLoading || isComplete, isBordered: isBordered, action: action,
+                           onPressChanged: { pressed = $0 })
             .fixedSize()
             .overlay {
                 if isComplete { Image(mingCute: "checkmark").accessibilityHidden(true) }
@@ -296,6 +299,8 @@ struct SettingsButton: View {
                     else { ProgressView().controlSize(.small) }
                 }
             }
+            .liquidGlassInteraction(pressed: pressed, hovered: hovered)
+            .onHover { hovered = $0 }
     }
 }
 
@@ -307,17 +312,29 @@ private struct SettingsPushButton: NSViewRepresentable {
     let hidesTitle: Bool
     let isBordered: Bool
     let action: () -> Void
+    var onPressChanged: (Bool) -> Void
     @Environment(\.isEnabled) private var enabled
     @Environment(\.controlSize) private var controlSize
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
     func makeCoordinator() -> Coordinator { Coordinator(action: action) }
     func makeNSView(context: Context) -> NSButton {
-        let button = NSButton(title: title, target: context.coordinator, action: #selector(Coordinator.press))
+        let button = LiquidGlassPressButton(title: title, target: context.coordinator, action: #selector(Coordinator.press))
         button.bezelStyle = .rounded
         button.controlSize = .regular
         button.font = .systemFont(ofSize: 14)
         return button
     }
     func updateNSView(_ button: NSButton, context: Context) {
+        (button as? LiquidGlassPressButton)?.onPressChanged = onPressChanged
+        if #available(macOS 26, *), !SurfaceCompatibility.useLegacyMaterial,
+           isBordered, !reduceTransparency, contrast != .increased {
+            button.bezelStyle = .glass
+            button.borderShape = .capsule
+        } else {
+            button.bezelStyle = .rounded
+            if #available(macOS 26, *) { button.borderShape = .automatic }
+        }
         button.title = title
         button.attributedTitle = NSAttributedString(string: title, attributes: [
             .font: NSFont.systemFont(ofSize: 14),

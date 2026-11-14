@@ -69,7 +69,7 @@ struct CalendarMonthPicker: View {
             Image(mingCute: symbol, size: 12)
                 .frame(width: 28, height: 28).contentShape(Rectangle())
         }
-        .buttonStyle(.plain).accessibilityLabel(Text(NSLocalizedString(title, comment: "")))
+        .buttonStyle(LiquidGlassPlainButtonStyle()).accessibilityLabel(Text(NSLocalizedString(title, comment: "")))
     }
 
     static func selecting(_ day: Date, preservingTimeFrom date: Date, calendar: Calendar) -> Date? {

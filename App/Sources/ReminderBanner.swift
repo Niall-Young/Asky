@@ -517,7 +517,7 @@ private struct ReminderBannerCard: View {
                         .frame(width: 20, height: 20)
                         .contentShape(Circle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(LiquidGlassPlainButtonStyle())
                 .foregroundStyle(ThemeColor.kTextSubtle)
                 .background(ThemeColor.kBackgroundNeutral, in: Circle())
                 .padding(10)
@@ -533,6 +533,7 @@ private struct ReminderBannerCard: View {
 /// System bordered buttons dim in non-key windows; the banner never becomes key, so it draws its own.
 private struct BannerButtonStyle: ButtonStyle {
     var prominent: Bool
+    @State private var hovered = false
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
@@ -544,5 +545,7 @@ private struct BannerButtonStyle: ButtonStyle {
                         in: Capsule())
             .opacity(configuration.isPressed ? 0.7 : 1)
             .contentShape(Capsule())
+            .liquidGlassInteraction(pressed: configuration.isPressed, hovered: hovered)
+            .onHover { hovered = $0 }
     }
 }

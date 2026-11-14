@@ -146,19 +146,47 @@ private struct HotKeySettings: View {
     }
 }
 
-private struct HotKeyRecorder: NSViewRepresentable {
+private struct HotKeyRecorder: View {
     let label: String
     let allowsPlainKey: Bool
     let apply: (UInt32, UInt32, String) -> Bool
+    @State private var pressed = false
+    @State private var hovered = false
+
+    var body: some View {
+        HotKeyRecorderControl(label: label, allowsPlainKey: allowsPlainKey, apply: apply,
+                              onPressChanged: { pressed = $0 })
+            .fixedSize()
+            .liquidGlassInteraction(pressed: pressed, hovered: hovered)
+            .onHover { hovered = $0 }
+    }
+}
+
+private struct HotKeyRecorderControl: NSViewRepresentable {
+    let label: String
+    let allowsPlainKey: Bool
+    let apply: (UInt32, UInt32, String) -> Bool
+    let onPressChanged: (Bool) -> Void
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
     func makeNSView(context: Context) -> Recorder { Recorder(label: label, allowsPlainKey: allowsPlainKey, apply: apply) }
     func updateNSView(_ view: Recorder, context: Context) {
+        view.onPressChanged = onPressChanged
+        if #available(macOS 26, *), !SurfaceCompatibility.useLegacyMaterial,
+           !reduceTransparency, contrast != .increased {
+            view.bezelStyle = .glass
+            view.borderShape = .capsule
+        } else {
+            view.bezelStyle = .rounded
+            if #available(macOS 26, *) { view.borderShape = .automatic }
+        }
         view.label = label
         view.apply = apply
         view.allowsPlainKey = allowsPlainKey
         if !view.recording { view.title = label }
         view.setAccessibilityLabel(String(format: NSLocalizedString("快捷键 %@，点击录制", comment: ""), label))
     }
-    final class Recorder: NSButton {
+    final class Recorder: LiquidGlassPressButton {
         var label: String
         var apply: (UInt32, UInt32, String) -> Bool
         var allowsPlainKey: Bool

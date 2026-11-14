@@ -140,7 +140,7 @@ struct MessageCalendarEditorView: View {
                     Image(mingCute: "xmark.circle.fill", size: 18)
                         .foregroundStyle(.secondary)
                 }
-                .buttonStyle(.plain).accessibilityLabel("取消").disabled(model.saving)
+                .buttonStyle(LiquidGlassPlainButtonStyle()).accessibilityLabel("取消").disabled(model.saving)
                 Spacer()
                 Text("新建日程").font(.system(size: 13, weight: .medium)).foregroundStyle(.secondary)
                 Spacer()
@@ -204,7 +204,7 @@ struct MessageCalendarEditorView: View {
                 Button(NSLocalizedString(model.saving ? "创建中…" : "创建", comment: ""), action: create)
                     .keyboardShortcut(.defaultAction)
                     .disabled(!model.isValid || model.saving || model.uncertain)
-                    .buttonStyle(.borderedProminent)
+                    .compatibleGlassButtonStyle(prominent: true)
             }.controlSize(.large)
         }
         .font(.system(size: 14))

@@ -101,9 +101,9 @@ struct AboutSettings: View {
         switch updater.status {
         case .available(let release):
             SettingsButton(NSLocalizedString("下载更新", comment: "")) { Task { await updater.download(release) } }
-                .buttonStyle(.borderedProminent)
+                .compatibleGlassButtonStyle(prominent: true)
         case .ready:
-            SettingsButton(NSLocalizedString("立即重启", comment: "")) { confirmingInstall = true }.buttonStyle(.borderedProminent)
+            SettingsButton(NSLocalizedString("立即重启", comment: "")) { confirmingInstall = true }.compatibleGlassButtonStyle(prominent: true)
         case .checking, .downloading, .installing:
             SettingsButton(NSLocalizedString("检查更新", comment: "")) {}.disabled(true)
         default:
