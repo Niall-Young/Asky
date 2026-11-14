@@ -92,6 +92,7 @@ struct ComposerTextEditor: NSViewRepresentable {
     var pasteAttachment: () -> Bool
     var submit: () -> Void
     var shortcuts = SettingsPreferences()
+    @Environment(\.chatSelectionColor) private var selectionColor
     @Environment(\.colorScheme) private var colorScheme
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -137,6 +138,10 @@ struct ComposerTextEditor: NSViewRepresentable {
         editor.submit = submit
         editor.textColor = NSColor(ThemeColor.kText.color(for: colorScheme))
         editor.placeholderColor = NSColor(ThemeColor.kTextSubtlest.color(for: colorScheme))
+        editor.selectedTextAttributes = [.backgroundColor: NSColor(selectionColor).withAlphaComponent(0.45)]
+        if isFocused, editor.window?.firstResponder !== editor {
+            editor.window?.makeFirstResponder(editor)
+        }
         editor.insertionPointColor = editor.textColor ?? .labelColor
         if editor.string != text && !editor.hasMarkedText() {
             editor.string = text

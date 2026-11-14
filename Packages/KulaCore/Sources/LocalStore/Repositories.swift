@@ -142,7 +142,24 @@ public struct ConversationSummary: Sendable, Hashable, Identifiable {
     public var updatedAt: Date
 }
 
-/// Only the metadata needed to restore the native transcript; no tool arguments or raw results.
+/// An explicitly selected excerpt and its source, retained with the user message.
+public struct MessageQuote: Sendable, Hashable, Codable, Identifiable {
+    public var id: String
+    public var sourceMessageID: String
+    public var text: String
+
+    public init(id: String = UUID().uuidString, sourceMessageID: String, text: String) {
+        self.id = id
+        self.sourceMessageID = sourceMessageID
+        self.text = text
+    }
+
+    public static func contextText(_ quotes: [MessageQuote]) -> String {
+        quotes.map { "[引用消息 \($0.sourceMessageID)]\n" + $0.text }.joined(separator: "\n\n")
+    }
+}
+
+/// Transcript presentation and user-selected context; no raw tool arguments or results.
 public struct MessagePresentation: Sendable, Hashable, Codable {
     public var responseID: String?
     public var toolName: String?
@@ -153,11 +170,12 @@ public struct MessagePresentation: Sendable, Hashable, Codable {
     public var completedAt: Date?
     /// Non-nil (including an empty dictionary) permanently marks a submitted form.
     public var submittedFormValues: [String: [String]]?
+    public var quotes: [MessageQuote]?
 
     public init(responseID: String? = nil, toolName: String? = nil, toolStatus: ExecutionStatus? = nil,
                 toolError: String? = nil, needsPermissionSettings: Bool = false,
                 workSeconds: Int? = nil, completedAt: Date? = nil,
-                submittedFormValues: [String: [String]]? = nil) {
+                submittedFormValues: [String: [String]]? = nil, quotes: [MessageQuote]? = nil) {
         self.responseID = responseID
         self.toolName = toolName
         self.toolStatus = toolStatus
@@ -166,6 +184,7 @@ public struct MessagePresentation: Sendable, Hashable, Codable {
         self.workSeconds = workSeconds
         self.completedAt = completedAt
         self.submittedFormValues = submittedFormValues
+        self.quotes = quotes
     }
 }
 

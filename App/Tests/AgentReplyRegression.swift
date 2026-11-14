@@ -977,6 +977,88 @@ enum AgentReplyRegression {
         print("Reading scroll regression passed: preserved reading position before and after manual bottom jumps")
     }
 
+    static func selectionPreview(app: AppModel) async throws {
+        let store = ConversationStore(app.store)
+        let cid = try store.create(title: "文字选区")
+        let source = try store.append(conversationID: cid, role: "assistant", text: #"平方根：`\sqrt{x}` → $\sqrt{x}$，立方根：$\sqrt[3]{x}$。"#)
+        let model = AgentModel(app: app)
+        model.open(cid)
+        let controller = AgentWindowController(model: model, presentation: WindowPresentation())
+        controller.show()
+        let window = NSApplication.shared.windows.first { $0.title == "Asky AI" }!
+        defer { window.orderOut(nil) }
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
+        func capture(_ name: String, window: NSWindow) throws {
+            let process = Process()
+            process.executableURL = URL(filePath: "/usr/sbin/screencapture")
+            process.arguments = ["-x", "-o", "-l", String(window.windowNumber), "build/selection-\(name).png"]
+            try process.run(); process.waitUntilExit()
+            precondition(process.terminationStatus == 0)
+        }
+        func click(_ window: NSWindow, point: NSPoint) {
+            for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                let event = NSEvent.mouseEvent(with: type, location: point, modifierFlags: [],
+                    timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                    context: nil, eventNumber: 1, clickCount: 1, pressure: type == .leftMouseDown ? 1 : 0)!
+                NSApplication.shared.sendEvent(event)
+            }
+        }
+        for (appearance, name) in [(NSAppearance.Name.aqua, "light"), (.darkAqua, "dark")] {
+            window.appearance = NSAppearance(named: appearance)
+            for color in AgentAvatarColor.allCases {
+                model.avatarColor = color
+                try await Task.sleep(for: .milliseconds(200))
+                let text = descendants(window.contentView!).compactMap { $0 as? ChatSelectableTextView }.first { $0.string.contains("平方根") }!
+                window.makeFirstResponder(text)
+                text.setSelectedRange(NSRange(location: 0, length: (text.string as NSString).length))
+                precondition(text.selectedContent.contains(#"\sqrt[3]{x}"#), "Formula attachments must copy their source")
+                precondition(!text.selectedContent.contains("\u{fffc}"), "Never quote attachment placeholders")
+                let actual = text.selectedTextAttributes[.backgroundColor] as! NSColor
+                precondition(actual == NSColor(color.tint).withAlphaComponent(0.45), "Selection must follow the current Agent color")
+                text.showSelectionMenu()
+                try await Task.sleep(for: .milliseconds(150))
+                let menu = window.childWindows!.first { $0 is SurfacePanel && $0.isVisible }!
+                precondition(menu.frame.height < 60 && menu.frame.width < 320, "Selection menu is one compact horizontal row")
+                precondition(window.screen!.visibleFrame.contains(menu.frame))
+                if color == .purple { try capture(name, window: window); try capture(name + "-menu", window: menu) }
+                click(menu, point: NSPoint(x: menu.frame.width * 0.72, y: menu.frame.height / 2))
+                try await Task.sleep(for: .milliseconds(150))
+                precondition(model.quotes.count == 1, "Add to Chat must add once and deduplicate repeated selections")
+                precondition(!menu.isVisible)
+                precondition((window.firstResponder as? NSTextView)?.isEditable == true, "Add to Chat must focus the composer")
+            }
+        }
+        model.avatarColor = .purple
+        model.draft = "这里的立方根是什么意思？"
+        try await Task.sleep(for: .milliseconds(300))
+        try capture("draft", window: window)
+        // Configuration failure must preserve the prepared question and quote.
+        model.send()
+        precondition(model.quotes.count == 1 && !model.draft.isEmpty)
+        app.preferences.automaticUpdates = false
+        await app.start()
+        app.modelConfiguration = ModelConfiguration(baseURL: URL(string: "http://127.0.0.1:1/v1")!,
+            modelName: "quote-regression", credentialRef: "Asky-quote-unset-" + UUID().uuidString)
+        let quote = model.quotes[0]
+        precondition(quote.sourceMessageID == source.id)
+        model.send()
+        let submittedCID = model.conversationID!
+        precondition(model.quotes.isEmpty && model.draft.isEmpty)
+        let saved = store.messages(conversationID: submittedCID, limit: 40).first { $0.role == "user" }!
+        precondition(saved.presentation?.quotes == [quote])
+        precondition(saved.text == "这里的立方根是什么意思？")
+        for _ in 0..<100 where model.isRunning { try await Task.sleep(for: .milliseconds(20)) }
+        model.open(submittedCID)
+        precondition(model.items.first { $0.id == saved.id }?.quotes == [quote])
+        try await Task.sleep(for: .milliseconds(300))
+        try capture("sent", window: window)
+        model.addQuote("待移除的片段", sourceMessageID: source.id)
+        model.quotes.removeAll()
+        precondition(model.quotes.isEmpty)
+        print("Selection regression passed: 5 colors in light/dark, formula source, real menu action, deduplication, composer focus, failed-send preservation, send and history restore")
+    }
+
     static func main() async throws {
         let application = NSApplication.shared
         application.setActivationPolicy(.accessory)
@@ -991,6 +1073,10 @@ enum AgentReplyRegression {
         let root = FileManager.default.temporaryDirectory.appending(path: "Asky-reply-\(UUID())")
         defer { try? FileManager.default.removeItem(at: root) }
         let app = try AppModel(root: root)
+        if CommandLine.arguments.contains("--selection-preview") {
+            try await selectionPreview(app: app)
+            return
+        }
         if CommandLine.arguments.contains("--restored-transcript") {
             try await restoredTranscriptRegression(app: app)
             return

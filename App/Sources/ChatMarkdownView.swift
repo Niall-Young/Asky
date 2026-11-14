@@ -26,10 +26,10 @@ struct ChatMarkdownView: View {
             .markdownBlockStyle(\.heading6, body: Self.heading)
             .markdownBlockStyle(\.paragraph) { configuration in
                 Group {
-                    if ChatInlineText.requiresNativeLayout(configuration.content.renderMarkdown()) {
-                        ChatInlineText(markdown: configuration.content.renderMarkdown())
-                    } else {
+                    if ChatInlineText.isImageOnly(configuration.content.renderMarkdown()) {
                         configuration.label
+                    } else {
+                        ChatInlineText(markdown: configuration.content.renderMarkdown())
                     }
                 }
                     .fixedSize(horizontal: false, vertical: true)
@@ -100,7 +100,8 @@ struct ChatMarkdownView: View {
 
     // Headings follow ordinary message typography, including reopened history.
     private static func heading(_ configuration: BlockConfiguration) -> some View {
-        configuration.label
+        ChatInlineText(markdown: configuration.content.renderMarkdown().replacingOccurrences(
+            of: "^#{1,6} +", with: "", options: .regularExpression))
             .markdownTextStyle {
                 FontSize(bodyStyle.size)
                 FontWeight(.regular)
@@ -127,7 +128,7 @@ private struct ChatTableCell: View {
     @Environment(\.chatTableRowCount) private var rowCount
 
     var body: some View {
-        configuration.label
+        ChatInlineText(markdown: configuration.content.renderMarkdown(), weight: configuration.row == 0 ? .medium : .regular)
             .markdownTextStyle {
                 if configuration.row == 0 { FontWeight(.medium) }
                 BackgroundColor(nil)
@@ -159,6 +160,21 @@ private extension NSAttributedString.Key {
 }
 
 private final class ChatInlineLayoutManager: NSLayoutManager {
+    override func fillBackgroundRectArray(_ rectArray: UnsafePointer<NSRect>, count rectCount: Int,
+        forCharacterRange charRange: NSRange, color: NSColor) {
+        guard let view = textContainers.first?.textView as? ChatSelectableTextView,
+              view.selectedRange().length > 0,
+              NSIntersectionRange(view.selectedRange(), charRange).length > 0,
+              let tint = view.selectedTextAttributes[.backgroundColor] as? NSColor else {
+            super.fillBackgroundRectArray(rectArray, count: rectCount, forCharacterRange: charRange, color: color)
+            return
+        }
+        NSGraphicsContext.saveGraphicsState()
+        tint.setFill()
+        super.fillBackgroundRectArray(rectArray, count: rectCount, forCharacterRange: charRange, color: tint)
+        NSGraphicsContext.restoreGraphicsState()
+    }
+
     override func drawBackground(forGlyphRange glyphsToShow: NSRange, at origin: NSPoint) {
         guard let storage = textStorage, !textContainers.isEmpty else { return }
         let characters = characterRange(forGlyphRange: glyphsToShow, actualGlyphRange: nil)
@@ -186,8 +202,12 @@ private final class ChatInlineLayoutManager: NSLayoutManager {
 }
 
 /// Native selectable text supplies inline padding, rounded backgrounds and attachment baselines.
-private struct ChatInlineText: View {
+struct ChatInlineText: View {
     let markdown: String
+    var literal = false
+    var monospaced = false
+    var shrinkToFit = false
+    var weight: NSFont.Weight = .regular
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.chatInlineForeground) private var foreground
     @State private var images: [URL: Data] = [:]
@@ -198,23 +218,21 @@ private struct ChatInlineText: View {
             options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(markdown)
     }
 
-    static func requiresNativeLayout(_ markdown: String) -> Bool {
+    static func isImageOnly(_ markdown: String) -> Bool {
         let content = parsed(markdown)
-        let hasText = content.runs.contains { run in
-            run.imageURL == nil && !String(content[run.range].characters)
+        return content.runs.contains { $0.imageURL != nil } && !content.runs.contains {
+            $0.imageURL == nil && !String(content[$0.range].characters)
                 .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        }
-        return hasText && content.runs.contains { run in
-            run.imageURL != nil || run.link.map(ChatImageService.supports) == true || run.inlinePresentationIntent?.contains(.code) == true
         }
     }
 
     var body: some View {
-        ChatInlineNativeText(content: Self.parsed(markdown), images: images, sourceName: ChatSourceTextView.sources(in: Self.parsed(markdown)).first.flatMap { sourceNames[$0] },
+        ChatInlineNativeText(content: literal ? AttributedString(markdown) : Self.parsed(markdown), monospaced: monospaced, shrinkToFit: shrinkToFit, weight: weight, images: images, sourceName: ChatSourceTextView.sources(in: Self.parsed(markdown)).first.flatMap { sourceNames[$0] },
             foreground: NSColor(foreground.color(for: colorScheme)),
             background: NSColor(ThemeColor("backgroundNeutral").color(for: colorScheme)),
             linkColor: NSColor(ThemeColor("textPrimary").color(for: colorScheme)))
             .task(id: markdown) {
+                guard !literal else { return }
                 var loaded: [URL: Data] = [:]
                 for url in Set(Self.parsed(markdown).runs.compactMap(\.imageURL)) {
                     guard !Task.isCancelled else { return }
@@ -234,6 +252,11 @@ private struct ChatInlineText: View {
 
 private struct ChatInlineNativeText: NSViewRepresentable {
     let content: AttributedString
+    var monospaced = false
+    var shrinkToFit = false
+    var weight: NSFont.Weight = .regular
+    @Environment(\.chatSelectionColor) private var selectionColor
+    @Environment(\.chatQuoteAction) private var quoteAction
     let images: [URL: Data]
     let sourceName: String?
     let foreground: NSColor
@@ -267,7 +290,7 @@ private struct ChatInlineNativeText: NSViewRepresentable {
         paragraph.lineSpacing = TextStyle(size: 14, weight: 400, mode: .default).lineHeight - 14 * 1.2
         for run in content.runs {
             let intent = run.inlinePresentationIntent ?? []
-            var font = NSFont.systemFont(ofSize: 14)
+            var font = monospaced ? NSFont.monospacedSystemFont(ofSize: 14, weight: .regular) : NSFont.systemFont(ofSize: 14, weight: weight)
             if intent.contains(.stronglyEmphasized) { font = NSFont.systemFont(ofSize: 14, weight: .bold) }
             if intent.contains(.emphasized) { font = NSFontManager.shared.convert(font, toHaveTrait: .italicFontMask) }
             var attributes: [NSAttributedString.Key: Any] = [
@@ -289,7 +312,9 @@ private struct ChatInlineNativeText: NSViewRepresentable {
                         attachment.image = rendered.image
                         attachment.bounds = NSRect(x: 0, y: -rendered.descent,
                             width: rendered.image.size.width, height: rendered.image.size.height)
-                        result.append(NSAttributedString(attachment: attachment))
+                        let fragment = NSMutableAttributedString(attachment: attachment)
+                        fragment.addAttribute(.chatSelectionText, value: formula.source, range: NSRange(location: 0, length: fragment.length))
+                        result.append(fragment)
                     } else {
                         result.append(NSAttributedString(string: formula.source, attributes: attributes))
                     }
@@ -300,6 +325,7 @@ private struct ChatInlineNativeText: NSViewRepresentable {
                 attachment.image = image
                 attachment.bounds = NSRect(x: 0, y: -2, width: min(120, 14 * image.size.width / max(1, image.size.height)), height: 14)
                 let fragment = NSMutableAttributedString(attachment: attachment)
+                attributes[.chatSelectionText] = String(content[run.range].characters)
                 fragment.addAttributes(attributes, range: NSRange(location: 0, length: fragment.length))
                 result.append(fragment)
             } else {
@@ -324,6 +350,10 @@ private struct ChatInlineNativeText: NSViewRepresentable {
             fragment.addAttributes([.link: first, .chatSources: sources], range: NSRange(location: 0, length: fragment.length))
             result.append(fragment)
         }
+        if let selectable = view as? ChatSelectableTextView {
+            selectable.quoteAction = quoteAction
+            selectable.selectedTextAttributes = [.backgroundColor: NSColor(selectionColor).withAlphaComponent(0.45)]
+        }
         view.linkTextAttributes = [.foregroundColor: linkColor, .underlineStyle: NSUnderlineStyle.single.rawValue]
         if view.textStorage?.isEqual(to: result) != true { view.textStorage?.setAttributedString(result) }
     }
@@ -333,7 +363,18 @@ private struct ChatInlineNativeText: NSViewRepresentable {
         // Falling back to NSTextView for the zero-width probe makes its current width a hard minimum.
         if proposal.width == 0 { return .zero }
         if let width = proposal.width, !width.isFinite { return CGSize(width: 100_000, height: 0) }
-        guard let width = proposal.width, width > 0, let container = view.textContainer,
+        let proposedWidth: CGFloat?
+        if monospaced {
+            proposedWidth = max(200, (view.string.components(separatedBy: "\n").map {
+                ($0 as NSString).size(withAttributes: [.font: NSFont.monospacedSystemFont(ofSize: 14, weight: .regular)]).width
+            }.max() ?? 200) + 2)
+        } else if shrinkToFit, let width = proposal.width {
+            let natural = view.string.components(separatedBy: "\n").map {
+                ($0 as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 14, weight: weight)]).width
+            }.max() ?? width
+            proposedWidth = min(width, ceil(natural) + 2)
+        } else { proposedWidth = proposal.width }
+        guard let width = proposedWidth, width > 0, let container = view.textContainer,
               let manager = view.layoutManager else { return nil }
         view.setFrameSize(NSSize(width: width, height: view.frame.height))
         container.containerSize = NSSize(width: width, height: CGFloat.greatestFiniteMagnitude)
@@ -370,8 +411,9 @@ private struct ChatCodeBlock: View {
             .padding(.leading, 12).padding(.trailing, 6).padding(.vertical, 4)
             Rectangle().fill(ThemeColor.kBorder).frame(height: 1)
             ScrollView(.horizontal) {
-                configuration.label
-                    .fixedSize(horizontal: true, vertical: false)
+                ChatInlineText(markdown: configuration.content, literal: true, monospaced: true)
+                    .frame(minWidth: 200)
+                    .fixedSize(horizontal: false, vertical: true)
                     .markdownTextStyle {
                         FontFamilyVariant(.monospaced)
                         FontSize(14)

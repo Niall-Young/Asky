@@ -8,7 +8,7 @@ extension NSAttributedString.Key {
 }
 
 /// Source attachments are the only hover targets, regardless of the original Markdown label.
-final class ChatSourceTextView: NSTextView, NSTextViewDelegate {
+final class ChatSourceTextView: ChatSelectableTextView, NSTextViewDelegate {
     private var hoverTask: Task<Void, Never>?
     private var sourceURL: URL?
     private var sourceTrackingArea: NSTrackingArea?

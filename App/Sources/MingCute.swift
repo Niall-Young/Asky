@@ -38,6 +38,7 @@ enum MingCute {
         "stop.fill": "MingCute-filled-stop",
         "photo": "MingCute-pic",
         "text.document": "MingCute-document_2",
+        "textformat": "MingCute-text",
         "doc": "MingCute-file",
         "doc.on.clipboard": "MingCute-clipboard",
         "note.text": "MingCute-notebook",

@@ -873,11 +873,11 @@ private struct ChatBubble: View {
         switch item.kind {
         case .user:
             VStack(alignment: .trailing, spacing: 8) {
-                if !item.attachments.isEmpty {
+                if !item.attachments.isEmpty || !item.quotes.isEmpty {
                     if imageAttachments.count > 1 {
                         ChatImageAttachmentStack(attachments: imageAttachments)
                     }
-                    if !inlineAttachments.isEmpty {
+                    if !inlineAttachments.isEmpty || !item.quotes.isEmpty {
                         ViewThatFits(in: .horizontal) {
                             attachmentCards
                             ScrollView(.horizontal) { attachmentCards }
@@ -912,6 +912,8 @@ private struct ChatBubble: View {
                     values: Binding(get: { model.formAnswers(item.id) },
                                     set: { model.setFormAnswers($0, for: item.id) }),
                     active: model.formIsActive(item.id), submit: { model.submitForm(item.id) })
+                    .environment(\.chatSelectionColor, model.avatarColor.tint)
+                    .environment(\.chatQuoteAction, { model.addQuote($0, sourceMessageID: item.id) })
                     .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
                     .background {
@@ -957,6 +959,7 @@ private struct ChatBubble: View {
 
     private var attachmentCards: some View {
         HStack(spacing: 8) {
+            ForEach(item.quotes) { _ in ComposerAttachmentCard(quoteWithRemoval: nil) }
             ForEach(inlineAttachments) { attachment in
                 ComposerAttachmentCard(attachment: attachment, thumbnail: nil)
             }
@@ -995,7 +998,11 @@ private struct ChatBubble: View {
     }
 
     private var bubble: some View {
-        Text(LocalizedStringKey(item.text)).textStyle(AgentLayout.message).textSelection(.enabled)
+        VStack(alignment: .leading, spacing: 10) {
+            ChatInlineText(markdown: item.text, literal: true, shrinkToFit: true)
+                .environment(\.chatSelectionColor, model.avatarColor.tint)
+                .environment(\.chatQuoteAction, { model.addQuote($0, sourceMessageID: item.id) })
+        }
     }
 }
 
@@ -1007,9 +1014,14 @@ private struct Composer: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if !model.attachments.isEmpty {
+            if !model.attachments.isEmpty || !model.quotes.isEmpty {
                 ScrollView(.horizontal) {
                     HStack(spacing: 8) {
+                        ForEach(model.quotes) { quote in
+                            ComposerAttachmentCard(quoteWithRemoval: {
+                                model.quotes.removeAll { $0.id == quote.id }
+                            })
+                        }
                         ForEach(model.attachments) { attachment in
                             ComposerAttachmentCard(attachment: attachment,
                                 thumbnail: model.attachmentThumbnails[attachment.id]) {
@@ -1026,6 +1038,7 @@ private struct Composer: View {
             ComposerTextEditor(text: $model.draft, height: $editorHeight,
                 isFocused: $editorFocused,
                 pasteAttachment: { model.pasteAttachments() }, submit: { model.send() }, shortcuts: model.shortcutPreferences)
+                .environment(\.chatSelectionColor, model.avatarColor.tint)
                 .frame(height: editorHeight)
             .padding(.horizontal, 12)
             HStack {
@@ -1047,8 +1060,9 @@ private struct Composer: View {
         }
         // Attachment cards reserve 6 pt above their visible edge for the delete button.
         // Keep the visible top inset aligned with the compact text editor.
-        .padding(.top, model.attachments.isEmpty ? 10 : 4).padding(.bottom, 8)
+        .padding(.top, model.attachments.isEmpty && model.quotes.isEmpty ? 10 : 4).padding(.bottom, 8)
         .nativeGlassBackground(in: RoundedRectangle(cornerRadius: 16, style: .circular), clear: true, glassOpacity: 0.85)
+        .onChange(of: model.quoteFocusRevision) { _, _ in editorFocused = true }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.data, .image, .text], allowsMultipleSelection: true) { r in
             switch r {
             case .success(let urls): urls.forEach { model.attach(fileURL: $0) }
