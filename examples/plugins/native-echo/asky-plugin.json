@@ -1,0 +1,20 @@
+{
+  "id": "native_echo",
+  "name": "Native Echo",
+  "version": "1.0.0",
+  "apiVersion": 2,
+  "entry": "native-echo",
+  "tools": [{
+    "name": "echo",
+    "description": "返回输入文本",
+    "effect": "read",
+    "confirmation": "never",
+    "inputSchema": {
+      "type": "object",
+      "properties": {"text": {"type": "string", "minLength": 1}},
+      "required": ["text"],
+      "additionalProperties": false
+    }
+  }],
+  "commands": [{"name": "echo", "title": "Native Echo", "keyword": "echo", "tool": "echo", "mode": "search", "queryArgument": "text"}]
+}

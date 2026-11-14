@@ -10,7 +10,6 @@
 以下命令均从仓库根目录运行。先构建 MCP Bridge，再运行核心包测试：
 
 ```sh
-(cd AgentRuntime && npm test)
 (cd MCPBridge && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift build)
 (cd Packages/KulaCore && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test)
 ```
@@ -47,6 +46,7 @@ python3 App/Tests/run-clipboard-regression.py --files
 python3 App/Tests/run-clipboard-regression.py --chat-images
 python3 App/Tests/run-clipboard-regression.py --drag-preview
 python3 App/Tests/run-settings-regression.py
+python3 App/Tests/run-settings-regression.py --conversation-retention
 python3 App/Tests/run-settings-regression.py --permissions-only
 python3 App/Tests/run-settings-regression.py --preview-legacy-material
 python3 App/Tests/run-settings-regression.py --plugins-only -AppleLanguages "(en)"
@@ -56,6 +56,7 @@ python3 App/Tests/check-localization.py
 python3 App/Tests/run-application-language-regression.py -AppleLanguages "(en)"
 python3 App/Tests/run-application-language-regression.py -AppleLanguages "(zh-Hans)"
 python3 App/Tests/run-agent-reply-regression.py
+python3 App/Tests/run-agent-reply-regression.py --reply-activity-preview
 python3 App/Tests/run-agent-reply-regression.py --forms-preview --time-preview
 python3 App/Tests/run-agent-reply-regression.py --forms-preview --components-preview
 python3 App/Tests/run-agent-reply-regression.py --forms-preview --radio-preview
@@ -117,13 +118,11 @@ App 界面资源位于 `App/Resources`；核心错误、工具说明及确定性
 
 版本变更与发布结果见 [0.1.0 发布记录](validation/2026-10-14-release-0.1.0.md)。以下路径为该版本的打包示例；发布新版本时替换版本号、构建号及目录。
 
-先运行本指南中的测试，使用 `xcodebuild` 的 `Release` 配置构建到 `build/Release010DerivedData`。在干净的 `build/release-runtime-0.1.0` 目录中仅放入 AgentRuntime 的 `dist`、`package.json`、`package-lock.json`，再运行 `npm ci --omit=dev --prefix build/release-runtime-0.1.0`。从 Node.js 官方获取并按官方 SHA-256 清单核验 arm64 运行时，解压至下面的目录。提交源码后，在干净工作区运行：
+先运行本指南中的测试，使用 `xcodebuild` 的 `Release` 配置构建到 `build/Release010DerivedData`。Agent 随原生应用编译，不再准备 Node 或 npm 依赖目录。提交源码后，在干净工作区运行：
 
 ```sh
 python3 scripts/package-release.py --version 0.1.0 --build 24 \
-  --derived-data build/Release010DerivedData \
-  --runtime build/release-runtime-0.1.0 \
-  --node-root build/release-node-0.0.16/node-v22.23.3-darwin-arm64
+  --derived-data build/Release010DerivedData
 ```
 
 Debug、Release 构建与打包默认使用 `Developer ID Application: Niall Young (V8GVW783CK)`，Team ID 为 `V8GVW783CK`。需在钥匙串中安装证书及私钥；跨机器应安全迁移同一身份，私钥备份不得进入仓库或安装包。`scripts/signing.py` 的本机重签名默认也使用同一正式身份。从旧自签名版本切换到正式签名后，系统权限可能需要重新授权；签名检查不能替代真实权限验收。
@@ -137,7 +136,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun notarytool store-
 
 凭据保存在钥匙串，不写入源码。随后使用 `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer python3 scripts/package-release.py ...` 执行上面的打包参数。可通过 `--signing-identity` 指定其他 Developer ID Application 证书名称或 SHA-1，通过 `--notary-profile` 指定其他钥匙串配置。缺少有效证书、私钥或公证凭据时直接失败；发布不再接受自签名或 ad-hoc 身份。
 
-脚本先为应用、MCP Bridge、Node 与原生依赖（含无扩展名可执行文件）签名并附安全时间戳，检查随包 runtime 的启动协议，再提交应用 ZIP 公证、确认 Accepted、为应用装订并验证票据，然后生成更新 ZIP。DMG 完成 Finder 布局后单独签名、公证、装订并验证；两种产物的 SHA-256 都在最终内容完成后计算。公证回执与详细日志保存在 `build/release-<version>-{app,dmg}-notarization*.json`。输出位于 `build/releases/<version>/`；不执行 GitHub 发布或本机安装，每次打包需要新的 staging 目录。DMG 使用 `scripts/dmg/background.tiff` 的 Retina 背景与 `scripts/dmg/layout.applescript` 的固定图标布局，终端需获准自动化 Finder。
+脚本先检查应用包不含旧 Node / Pi 资源，为原生应用和 MCP Bridge 签名并附安全时间戳，再提交应用 ZIP 公证、确认 Accepted、为应用装订并验证票据，然后生成更新 ZIP。DMG 完成 Finder 布局后单独签名、公证、装订并验证；两种产物的 SHA-256 都在最终内容完成后计算。公证回执与详细日志保存在 `build/release-<version>-{app,dmg}-notarization*.json`。输出位于 `build/releases/<version>/`；不执行 GitHub 发布或本机安装，每次打包需要新的 staging 目录。DMG 使用 `scripts/dmg/background.tiff` 的 Retina 背景与 `scripts/dmg/layout.applescript` 的固定图标布局，终端需获准自动化 Finder。
 
 ### Homebrew 安装源
 
@@ -170,7 +169,6 @@ Debug 版本可用 `open -n build/DerivedData/Build/Products/Debug/Asky.app --ar
 Run these commands from the repository root. Build the MCP Bridge before running core package tests:
 
 ```sh
-(cd AgentRuntime && npm test)
 (cd MCPBridge && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift build)
 (cd Packages/KulaCore && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test)
 ```
@@ -207,6 +205,7 @@ python3 App/Tests/run-clipboard-regression.py --files
 python3 App/Tests/run-clipboard-regression.py --chat-images
 python3 App/Tests/run-clipboard-regression.py --drag-preview
 python3 App/Tests/run-settings-regression.py
+python3 App/Tests/run-settings-regression.py --conversation-retention
 python3 App/Tests/run-settings-regression.py --permissions-only
 python3 App/Tests/run-settings-regression.py --preview-legacy-material
 python3 App/Tests/run-settings-regression.py --plugins-only -AppleLanguages "(en)"
@@ -216,6 +215,7 @@ python3 App/Tests/check-localization.py
 python3 App/Tests/run-application-language-regression.py -AppleLanguages "(en)"
 python3 App/Tests/run-application-language-regression.py -AppleLanguages "(zh-Hans)"
 python3 App/Tests/run-agent-reply-regression.py
+python3 App/Tests/run-agent-reply-regression.py --reply-activity-preview
 python3 App/Tests/run-agent-reply-regression.py --forms-preview --time-preview
 python3 App/Tests/run-agent-reply-regression.py --forms-preview --components-preview
 python3 App/Tests/run-agent-reply-regression.py --forms-preview --radio-preview
@@ -275,13 +275,11 @@ Internal confirmation field markers, input aliases, persisted fields and user co
 
 See the [0.1.0 release record](validation/2026-10-14-release-0.1.0.md) for changes and results. The paths below are examples for that version; replace the version, build number, and directories for a new release.
 
-Run the tests in this guide and build with the `Release` configuration of `xcodebuild` into `build/Release010DerivedData`. In a clean `build/release-runtime-0.1.0` directory, include only AgentRuntime's `dist`, `package.json`, and `package-lock.json`, then run `npm ci --omit=dev --prefix build/release-runtime-0.1.0`. Obtain the arm64 runtime from Node.js, verify it against the official SHA-256 manifest, and extract it into the directory below. Commit the source changes, then run from a clean working tree:
+Run the tests in this guide and build with the `Release` configuration of `xcodebuild` into `build/Release010DerivedData`. The Agent is compiled into the native app; no Node distribution or npm dependency directory is required. Commit the source changes, then run from a clean working tree:
 
 ```sh
 python3 scripts/package-release.py --version 0.1.0 --build 24 \
-  --derived-data build/Release010DerivedData \
-  --runtime build/release-runtime-0.1.0 \
-  --node-root build/release-node-0.0.16/node-v22.23.3-darwin-arm64
+  --derived-data build/Release010DerivedData
 ```
 
 Debug and Release builds and packages default to `Developer ID Application: Niall Young (V8GVW783CK)`, with Team ID `V8GVW783CK`. Install both the certificate and private key in Keychain. Securely migrate the same identity between build machines; keep private-key backups out of the repository and installers. Local re-signing through `scripts/signing.py` also defaults to the same identity. Switching from self-signed builds to Developer ID may require granting system permissions again. Signature checks do not replace real permission acceptance tests.
@@ -295,7 +293,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun notarytool store-
 
 Credentials stay in Keychain, outside source control. Then run the packaging arguments above with `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer python3 scripts/package-release.py ...`. Override the Developer ID Application certificate name or SHA-1 with `--signing-identity`, and the Keychain profile with `--notary-profile`. Missing certificates, private keys, or notarization credentials fail immediately. Release packaging no longer accepts self-signed or ad-hoc identities.
 
-The script signs the app, MCP Bridge, Node, and native dependencies (including executables without extensions) with secure timestamps and checks the bundled runtime startup protocol. It submits an app ZIP for notarization, requires Accepted, staples and validates the app ticket, and only then creates the updater ZIP. After the Finder layout, it separately signs, notarizes, staples, and validates the DMG. Both SHA-256 checksums are computed from the final artifacts. Receipts and detailed logs are saved as `build/release-<version>-{app,dmg}-notarization*.json`. Outputs go to `build/releases/<version>/`. The script does not publish to GitHub or install locally, and each run needs a new staging directory. DMGs use the Retina background in `scripts/dmg/background.tiff` and fixed icon layout in `scripts/dmg/layout.applescript`; allow terminal automation of Finder.
+The script rejects retired Node / Pi resources and signs the native app and MCP Bridge with secure timestamps. It submits an app ZIP for notarization, requires Accepted, staples and validates the app ticket, and only then creates the updater ZIP. After the Finder layout, it separately signs, notarizes, staples, and validates the DMG. Both SHA-256 checksums are computed from the final artifacts. Receipts and detailed logs are saved as `build/release-<version>-{app,dmg}-notarization*.json`. Outputs go to `build/releases/<version>/`. The script does not publish to GitHub or install locally, and each run needs a new staging directory. DMGs use the Retina background in `scripts/dmg/background.tiff` and fixed icon layout in `scripts/dmg/layout.applescript`; allow terminal automation of Finder.
 
 ### Homebrew Tap
 

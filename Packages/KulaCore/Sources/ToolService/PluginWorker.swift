@@ -2,13 +2,13 @@ import Foundation
 import Contracts
 
 enum PluginWorker {
-    static func run(node: String, runner: String, directory: URL, payload: JSONValue,
+    static func run(executable: String, arguments: [String], directory: URL, payload: JSONValue,
                     saveState: @escaping @Sendable (JSONValue) -> Void) async throws -> JSONValue {
         let control = PluginProcessControl()
         return try await withTaskCancellationHandler {
             try await Task.detached {
                 let p = Process(), input = Pipe(), output = Pipe()
-                p.executableURL = URL(filePath: node); p.arguments = [runner]
+                p.executableURL = URL(filePath: executable); p.arguments = arguments
                 p.currentDirectoryURL = directory; p.environment = PluginProcess.environment()
                 p.standardInput = input; p.standardOutput = output
                 let log = directory.appending(path: "execution.log")

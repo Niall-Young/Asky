@@ -16,6 +16,7 @@ struct SettingsView: View {
             switch SettingsPage.resolve(app.settingsTab) {
             case .model: SettingsForm {
                 ModelSettingsView(app: app)
+                ConversationHistorySettings(app: app)
                 MemorySettings(app: app)
                 MCPSettings(app: app)
             }
@@ -656,6 +657,26 @@ private struct ModelSettingsView: View {
         } catch { message = error.localizedDescription }
     }
 
+}
+
+private struct ConversationHistorySettings: View {
+    @Bindable var app: AppModel
+
+    var body: some View {
+        Section(NSLocalizedString("对话历史", comment: "")) {
+            LabeledContent(NSLocalizedString("保留时间", comment: "")) {
+                SettingsChoice(selection: $app.settings.conversationRetention, options: [
+                    (.sevenDays, NSLocalizedString("7 天", comment: "")),
+                    (.thirtyDays, NSLocalizedString("30 天", comment: "")),
+                    (.ninetyDays, NSLocalizedString("90 天", comment: "")),
+                    (.forever, NSLocalizedString("永久", comment: ""))
+                ]).fixedSize()
+            }
+            if let error = app.conversationCleanupError {
+                Text(error).foregroundStyle(.red)
+            }
+        }
+    }
 }
 
 // MARK: Memory

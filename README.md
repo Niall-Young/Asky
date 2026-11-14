@@ -47,8 +47,9 @@ Asky 是使用 SwiftUI 与 AppKit 构建的 macOS 原生效率入口。本地全
 
 - 🤖 **按需 AI 助手与本地记忆**
   - **紧凑对话窗口**：固定 560 pt 宽、26 pt 普通圆角，默认高 560 pt，可纵向调整至最低 480 pt；紧凑玻璃输入框采用 16 pt 圆角，附件与发送按钮均为 28 pt。
-  - **轻量按需启动**：无需常驻后台 AI 进程；兼容任意 OpenAI 协议模型服务商与自定义端点。
-  - **原生交互表单**：支持 AI 在对话流中渲染原生单选按钮组、下拉单选、多选、文本输入、日期及按需显示时、分、秒的时间/时长控件，填写后直接提交至同一会话。控件复用设置页组件，日期选择复用创建日程弹窗的月历。
+  - **Swift 原生 Agent**：模型请求、工具循环、会话恢复和上下文压缩均由 Swift 执行。运行时显示思考或当前工具，结束后一次展示完整回复；无需 Node / Pi 辅助进程，支持 OpenAI-compatible Chat Completions。
+  - **对话历史**：新保存的会话保留工具调用状态、错误、回复分组与耗时，支持分页恢复；旧会话未保存的工具展示记录不会自动补回。在“设置 › 智能配置 › 对话历史”选择保留 7 天、30 天（默认）、90 天或永久；按最后活动时间清理，启动时、每天及修改期限后检查。到期或手动删除会清理会话、执行记录、索引及无引用的自有附件，已保存记忆独立保留，失败文件自动重试。
+  - **原生交互表单**：AI 回复完成后一次显示原生单选按钮组、下拉单选、多选、文本输入、日期及按需显示时、分、秒的时间/时长控件，填写后直接提交至同一会话。控件复用设置页组件，日期选择复用创建日程弹窗的月历。
   - **本地记忆与上下文**：基于本地 Markdown 存储用户偏好与记忆，支持长上下文智能压缩与网络实时检索。
   - **网页来源预览**：网页来源以真实 favicon 图标显示在对应段落末尾；悬停图标在其旁展示封面、标题和域名，空间不足时向上展开，点击打开原文。图标读取失败时使用通用网页图标。
   - **本地数学公式排版**：原生支持行内与独立 LaTeX 公式（`$…$`、`$$…$$`）排版。
@@ -100,7 +101,7 @@ brew install --cask niall-young/asky/asky
 
 #### 下载安装
 - 前往 [GitHub Releases](https://github.com/Niall-Young/Asky/releases) 或 [官方网站](https://asky.niallyoung2002.workers.dev/) 下载最新 DMG 安装包（支持 macOS 14+，Apple Silicon）。
-- 打开 DMG，将 `Asky.app` 拖入“应用程序”目录即可。安装包已预置 Node.js 与 AgentRuntime，无需手动配置外部环境。
+- 打开 DMG，将 `Asky.app` 拖入“应用程序”目录即可。Agent 已使用 Swift 原生运行时，安装包不再携带 Node.js 或 Pi。Orca、飞书插件执行器与 Text Tools 聚焦搜索示例使用 API v2 Swift 原生入口，无需 Node；CLI 自身环境由用户准备。旧版 JavaScript 插件另需本机 Node.js 22+。
 - 应用默认开启静默自动更新，可在“设置 › 关于 Asky › 软件更新”中管理。
 
 #### 权限与 AI 配置
@@ -116,7 +117,6 @@ brew install --cask niall-young/asky/asky
 #### 环境要求
 - 目标运行系统：macOS 14+ (Apple Silicon)
 - Xcode 16+ / Swift 6.2+
-- Node.js 22+
 - [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`)
 
 应用图标源文件为 `App/Branding/AskyNative.icon`，使用 Xcode 附带的 Icon Composer 编辑。修改后同步导出的 `AppIcon.appiconset`、`AskyLogo.imageset` 和 `App/Branding` 中的 PNG / ICNS 兼容资源。
@@ -125,13 +125,10 @@ brew install --cask niall-young/asky/asky
 在仓库根目录执行：
 
 ```sh
-# 1. 安装 Agent 运行时依赖并构建
-(cd AgentRuntime && npm ci && npm run build)
-
-# 2. 生成 Xcode 工程
+# 1. 生成 Xcode 工程
 xcodegen generate
 
-# 3. 编译并启动 Debug 版本
+# 2. 编译并启动 Debug 版本
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project Asky.xcodeproj -scheme Asky -configuration Debug -derivedDataPath build/DerivedData build
 open build/DerivedData/Build/Products/Debug/Asky.app
 ```
@@ -139,9 +136,10 @@ open build/DerivedData/Build/Products/Debug/Asky.app
 #### 运行测试
 ```sh
 # 核心测试套件
-(cd AgentRuntime && npm test)
 (cd MCPBridge && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift build)
 (cd Packages/KulaCore && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test)
+# 完整回复与活动状态回归（先完成 Debug 构建）
+python3 App/Tests/run-agent-reply-regression.py --reply-activity-preview
 ```
 
 启动器首帧诊断使用隔离数据，录制独立 Debug 进程的首次打开与再次打开；需要屏幕录制权限。输出保存在 `build/`，不操作日常安装和数据：
@@ -163,7 +161,7 @@ python3 App/Tests/run-launcher-presentation-diagnostic.py --output build/launche
 | :--- | :--- |
 | `App/` | 基于 SwiftUI 与 AppKit 的原生客户端界面与交互实现 |
 | `Packages/KulaCore/` | 核心业务模型与统一系统访问入口 `ToolService` |
-| `AgentRuntime/` | 基于 TypeScript 构建的轻量 AI 运行时宿主 |
+| `PluginSupport/` | 旧版 JavaScript 插件兼容脚本；Agent 本身位于 KulaCore 的 AgentHost |
 | `MCPBridge/` | Model Context Protocol 原生桥接服务 |
 
 - [文档索引](docs/README.md) · [产品需求 (PRD)](docs/PRD.md) · [系统架构](docs/framework.md) · [设计规范](docs/design-system.md) · [插件开发](docs/plugins.md) · [隐私政策](PRIVACY.md)
@@ -203,8 +201,9 @@ Asky is a native macOS efficiency launcher built with SwiftUI and AppKit. Local 
 
 - 🤖 **On-Demand AI Assistant & Local Memory**
   - **Compact Chat Window**: Fixed at 560 pt wide with 26 pt circular corners, a default height of 560 pt and a minimum adjustable height of 480 pt; the compact glass composer uses 16 pt corners and matching 28 pt attachment and send buttons.
-  - **On-Demand Lifecycle**: Keeps background resource usage minimal; connects to any OpenAI-compatible provider and custom endpoints.
-  - **Native Interactive Forms**: AI can stream structured form controls (text fields, native radio groups, dropdowns, checkboxes, date pickers and configurable hour/minute/second time or duration controls) directly in chat, which submit straight back into the conversation. Controls reuse the Settings components; date selection uses the calendar from the event creation dialog.
+  - **Native Swift Agent**: Swift handles model requests, tool loops, session recovery, and context compaction without a Node / Pi helper. Chat shows thinking or the active tool, then presents the complete reply at once; supports OpenAI-compatible Chat Completions.
+  - **Conversation History**: Newly saved conversations retain tool statuses, errors, response groups, and elapsed time across paginated reloads. Tool display records missing from older conversations are not backfilled. Settings › AI Settings › Conversation History offers 7, 30 (default), or 90 days, or forever, based on the last activity. Cleanup runs at startup, daily, and after retention changes. Expiry and manual deletion remove sessions, execution records, indexes, and unreferenced managed attachments while preserving saved memory; failed file removals are retried.
+  - **Native Interactive Forms**: Completed AI replies display structured form controls (text fields, native radio groups, dropdowns, checkboxes, date pickers and configurable hour/minute/second time or duration controls) directly in chat, which submit straight back into the conversation. Controls reuse the Settings components; date selection uses the calendar from the event creation dialog.
   - **Local Memory & Context**: Stores user preferences and context in local Markdown files with automatic context compaction and web search.
   - **Web Source Previews**: Web sources appear as real site favicons at the end of each paragraph. Hover over an icon for a nearby card with its cover, title, and domain; the card opens upward when needed. Click to open the source. A generic web icon is used if the favicon cannot load.
   - **Native LaTeX Rendering**: Renders inline and block LaTeX formulas (`$…$`, `$$…$$`) locally.
@@ -256,7 +255,7 @@ Requires macOS 14+ and Apple Silicon. Homebrew uses the same official package as
 
 #### Download & Install
 - Download the latest DMG release from [GitHub Releases](https://github.com/Niall-Young/Asky/releases) or the [Official Website](https://asky.niallyoung2002.workers.dev/) (macOS 14+, Apple Silicon).
-- Open the DMG and drag `Asky.app` into Applications. Node.js and AgentRuntime are bundled—no extra setup required.
+- Open the DMG and drag `Asky.app` into Applications. The Agent runs natively in Swift; the app no longer bundles Node.js or Pi. The Orca and Lark plugin runners and the Text Tools launcher example use native Swift API v2 executables without Node; users supply the CLI environment. Legacy JavaScript plugins require local Node.js 22+.
 - In-app automatic updates are enabled by default; configure in Settings › About Asky › Software Update.
 
 #### Permissions & AI Configuration
@@ -272,7 +271,6 @@ Current source targets macOS 14 with the same features and native background blu
 #### Prerequisites
 - Target runtime: macOS 14+ (Apple Silicon)
 - Xcode 16+ / Swift 6.2+
-- Node.js 22+
 - [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`)
 
 The app icon source is `App/Branding/AskyNative.icon`, edited with Icon Composer bundled with Xcode. After changes, synchronize the exported `AppIcon.appiconset`, `AskyLogo.imageset`, and PNG / ICNS compatibility assets in `App/Branding`.
@@ -281,13 +279,10 @@ The app icon source is `App/Branding/AskyNative.icon`, edited with Icon Composer
 Run from the repository root:
 
 ```sh
-# 1. Install AgentRuntime dependencies and build
-(cd AgentRuntime && npm ci && npm run build)
-
-# 2. Generate Xcode project
+# 1. Generate Xcode project
 xcodegen generate
 
-# 3. Build and launch Debug app
+# 2. Build and launch Debug app
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project Asky.xcodeproj -scheme Asky -configuration Debug -derivedDataPath build/DerivedData build
 open build/DerivedData/Build/Products/Debug/Asky.app
 ```
@@ -295,9 +290,10 @@ open build/DerivedData/Build/Products/Debug/Asky.app
 #### Running Tests
 ```sh
 # Core test suites
-(cd AgentRuntime && npm test)
 (cd MCPBridge && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift build)
 (cd Packages/KulaCore && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test)
+# Complete reply and activity regression (build Debug first)
+python3 App/Tests/run-agent-reply-regression.py --reply-activity-preview
 ```
 
 The launcher presentation diagnostic uses isolated data and records first and repeat presentation in separate Debug processes. Screen Recording access is required. Outputs stay in `build/`; the installed app and everyday data are untouched:
@@ -319,7 +315,7 @@ Recording requests 60 fps; inspect the output files and logs for delivered caden
 | :--- | :--- |
 | `App/` | Native macOS user interface and interactions (SwiftUI & AppKit) |
 | `Packages/KulaCore/` | Core business logic and unified system access through `ToolService` |
-| `AgentRuntime/` | TypeScript-based lightweight AI host runtime |
+| `PluginSupport/` | Legacy JavaScript plugin shim; the native Agent lives in KulaCore AgentHost |
 | `MCPBridge/` | Native Model Context Protocol bridge |
 
 - [Docs Index](docs/README.md) · [Product Requirements (PRD)](docs/PRD.md) · [Architecture](docs/framework.md) · [Design System](docs/design-system.md) · [Plugins](docs/plugins.md) · [Privacy](PRIVACY.md)

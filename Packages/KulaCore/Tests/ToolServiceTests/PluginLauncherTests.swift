@@ -53,10 +53,8 @@ import LocalStore
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         let store = try LocalStore(root: root)
-        let runner = repository.appending(path: "AgentRuntime/dist/src/plugin-runner.js").path
         let service = ToolService(store: store, policy: { PolicySnapshot(enabledSources: [.plugins]) },
-            presenter: { _ in Issue.record("Read commands should not confirm"); return .rejected },
-            pluginRuntime: .init(nodePath: try PluginProcess.executable("node"), runnerPath: runner))
+            presenter: { _ in Issue.record("Read commands should not confirm"); return .rejected })
         let source = repository.appending(path: "examples/plugins/text-tools")
         await service.plugins.setInstallationCommand { _, args, _, _ in
             if args.first == "clone" { try FileManager.default.copyItem(at: source, to: URL(filePath: args.last!)) }
@@ -87,6 +85,8 @@ import LocalStore
         defer { try? FileManager.default.removeItem(at: root) }
         let store = try LocalStore(root: root)
         var m = try manifest()
+        // Keep a separate API v1 fixture to verify legacy write compatibility.
+        m.apiVersion = 1; m.entry = "index.mjs"
         m.commands = [m.commands![1]]
         m.tools = [m.tools[1]]
         m.tools[0].effect = .write
@@ -96,7 +96,7 @@ import LocalStore
         try "export default {tools:{uuid:{execute(){return {text:'done'}},readback(){return {text:'done'}}}}}".write(to: directory.appending(path: "index.mjs"), atomically: true, encoding: .utf8)
         let record = InstalledPlugin(manifest: m, repository: "https://github.com/example/text-tools", commit: "test", enabled: true, configuration: [:])
         store.setCodableSetting("plugins.installed", [record])
-        let runtime = PluginRuntimeConfiguration(nodePath: try PluginProcess.executable("node"), runnerPath: repository.appending(path: "AgentRuntime/dist/src/plugin-runner.js").path)
+        let runtime = PluginRuntimeConfiguration(nodePath: try PluginProcess.executable("node"), runnerPath: repository.appending(path: "PluginSupport/plugin-runner.mjs").path)
         let rejected = ToolService(store: store, policy: { PolicySnapshot(enabledSources: [.plugins], approvalMode: .fullAccess) }, presenter: { _ in .rejected }, pluginRuntime: runtime)
         #expect(await rejected.runPluginCommand(id: "text_tools/uuid", query: "").status == .rejected)
         let approved = ToolService(store: store, policy: { PolicySnapshot(enabledSources: [.plugins]) }, presenter: { _ in .approved }, pluginRuntime: runtime)

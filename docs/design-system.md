@@ -102,7 +102,7 @@ Theme、ButtonStyle、LabelStyle 或 ViewModifier 只负责样式映射，不重
 
 macOS 14/15 的兼容表面使用 `NSVisualEffectView` 的 `underWindowBackground` 材质与 `behindWindow` 模式，叠加现有 `background` 变量（浅色白 60%、深色黑 60%）及 1pt `border` 描边。设置侧栏与内容区同步适配；按钮降级为原生 bordered / borderedProminent。用户已接受系统控制的背景模糊半径，不要求精确 120px。辅助功能模式保持不透明背景与高对比描边。
 
-macOS 14 的设置使用原生分组 `Form`，保留全部设置项；15+ 保留现有自定义分组卡片。14 的聊天滚动使用 `ScrollViewReader` 与 AppKit 滚动区域通知，保留初始底部、流式跟随和回到底部按钮；标题栏空隙通过 AppKit `performDrag` 拖动窗口。
+macOS 14 的设置使用原生分组 `Form`，保留全部设置项；15+ 保留现有自定义分组卡片。14 的聊天滚动使用 `ScrollViewReader` 与 AppKit 滚动区域通知，保留初始底部、活动更新/完整回复跟随和回到底部按钮；标题栏空隙通过 AppKit `performDrag` 拖动窗口。
 
 macOS 26+ 使用原生液态玻璃；源码构建最低支持 macOS 14。SwiftUI 的 glassEffect、GlassEffectContainer 与原生玻璃按钮样式，以及 AppKit NSGlassEffectView 是实施候选；具体组合与 SDK 可用性在 M0 编译和视觉验证。[Apple SwiftUI Liquid Glass](https://developer.apple.com/documentation/swiftui/applying-liquid-glass-to-custom-views)、[Apple NSGlassEffectView](https://developer.apple.com/documentation/appkit/nsglasseffectview)
 

@@ -16,7 +16,7 @@ Asky 首先提供不依赖 AI 的 macOS 效率入口，再通过按需运行的 
 | [V1 产品需求](PRD.md) | 产品范围、用户行为、默认设置、交付与验收 | 判断做什么、是否符合 V1 |
 | [产品框架与架构](framework.md) | 技术栈、模块、进程与主要接口 | 模块划分、进程边界、总体数据流 |
 | [原生界面与设计系统](design-system.md) | Figma 变量、Styles、原生控件、Liquid Glass | 页面、窗口、组件与主题 |
-| [Agent Runtime](agent-runtime.md) | Pi 选型、扩展、模型接入、任务与进程生命周期 | AI 集成、会话、原生通信 |
+| [Agent Runtime](agent-runtime.md) | Swift 原生循环、模型接入、任务、会话迁移与资源生命周期 | AI 集成、会话、原生通信 |
 | [GitHub 插件](plugins.md) | 可信插件安装、独立官方仓库、插件 API 与 CLI 执行 | 插件管理、作者接口、Orca 交接 |
 | [原生工具与 MCP](native-tools-and-mcp.md) | 系统适配器、工具契约、权限、执行与回读 | macOS 操作、MCP、敏感写入 |
 | [数据、记忆与提醒](data-and-memory.md) | 数据归属、记忆文件与提炼整理、删除边界及提醒计划 | 数据存储、记忆、情境增强 |
@@ -39,12 +39,12 @@ Asky 首先提供不依赖 AI 的 macOS 效率入口，再通过按需运行的 
 | --- | --- | --- |
 | 定位 | 完整自用 V1，效率入口优先，AI 为增强 | 已确认；[PRD](PRD.md) |
 | 界面 | SwiftUI 与 AppKit 原生组件，使用用户 Figma 变量与 Styles，加入原生 Liquid Glass | 已确认；[设计系统](design-system.md) |
-| Runtime | 优先验证 Pi SDK，以本地辅助进程接入；保留更换 Runtime 的边界 | 选型方向；M0 验证后锁定；[Agent](agent-runtime.md) |
-| 运行方式 | 原生应用常驻，明确提交 AI 请求才启动 Pi | 已确认方向；空闲退出时长为默认值；[Agent](agent-runtime.md) |
+| Runtime | Swift 原生 Runtime，在主进程内按需运行，无 Node / Pi 依赖 | 已实现；验证范围见 [Agent](agent-runtime.md) |
+| 运行方式 | 原生应用常驻，明确提交 AI 请求才创建 Swift Runtime | 已确认方向；空闲退出时长为默认值；[Agent](agent-runtime.md) |
 | 扩展 | 仅加载内置能力与用户主动安装的可信 GitHub 插件，不建立 V1 插件商店 | 已确认方向；[Agent](agent-runtime.md) |
 | 数据 | 本地持久化、最小上下文外发、来源权限继承 | 已确认；[数据](data-and-memory.md) |
 | 性能 | 管理每类资源的归属、上限和释放，不以语言判断占用 | 已确认；预算待测量；[资源](resource-lifecycle.md) |
 
-纯 Swift 自研 Agent 不再作为当前默认路线；Agent Core 也不等于完整 Pi 扩展机制。两者仅作为 Pi 验证失败时的替代评估对象，不在 V1 同时建设多套 Runtime。
+当前 Agent 已迁移为 Swift 原生实现。旧 Pi 会话按需导入；插件 API v2 无 Node 依赖，旧 JavaScript 插件兼容入口使用本机 Node。
 
 原始构想见 [SwiftUI Agent构想](https://chatgpt.com/c/6ac7944a-fc58-83e8-ab44-cac56c1dd796)。本目录使用当前讨论的修正：仅 Chrome 标签页、剪贴板历史、Messages 人工发送、默认不后台唤醒模型，以及资源生命周期优先。

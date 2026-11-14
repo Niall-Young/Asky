@@ -1,7 +1,7 @@
 import Foundation
 import Contracts
 
-/// JSONL wire protocol between AgentHost (Swift) and the TypeScript Pi host.
+/// JSONL wire protocol between AgentHost and its runtime adapter. The native adapter transports these frames in memory.
 /// stdout carries protocol frames only; diagnostics go to stderr.
 public enum WireProtocol {
     public static let version = 2

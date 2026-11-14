@@ -18,6 +18,11 @@ struct AppSettings: Codable, Equatable, Sendable {
     var notesFolders: [NotesFolder] = []
     var chromeBookmarkFolderAccess: Data?
     var clipboardEnabled = true
+    var conversationRetentionDays: Int?
+    var conversationRetention: ConversationRetention {
+        get { conversationRetentionDays.flatMap(ConversationRetention.init(rawValue:)) ?? .thirtyDays }
+        set { conversationRetentionDays = newValue.rawValue }
+    }
     var clipboardRetentionHours: Int?
     var clipboardRetention: ClipboardRetention {
         get { clipboardRetentionHours.flatMap(ClipboardRetention.init(rawValue:)) ?? .threeDays }
@@ -163,9 +168,60 @@ final class AppModel {
             if settings.clipboardRetention != oldValue.clipboardRetention {
                 ClipboardMonitor.cleanup(clipboardStore)
             }
+            if settings.conversationRetention != oldValue.conversationRetention {
+                Task { await maintainConversationHistory() }
+            }
             onSettingsChange?()
         }
     }
+    @ObservationIgnored private var historyCleanupTask: Task<Void, Never>?
+    private var historyOperations = 0
+    @ObservationIgnored var activeConversationIDs: Set<String> = []
+    @ObservationIgnored var conversationDraftPaths: (() -> Set<String>)?
+    @ObservationIgnored var onConversationHistoryDeleted: ((Set<String>) -> Void)?
+    private(set) var conversationCleanupError: String?
+    var isCleaningConversationHistory: Bool { historyOperations > 0 }
+    let conversationHistory: ConversationHistoryService
+
+    func maintainConversationHistory(now: Date = Date()) async {
+        historyOperations += 1
+        defer { historyOperations -= 1 }
+        do {
+            let protected = activeConversationIDs.union(await tools.activeAgentSessionIDs)
+            let result = try await conversationHistory.cleanup(retention: settings.conversationRetention,
+                protecting: protected, draftPaths: conversationDraftPaths?() ?? [], now: now)
+            await historyDidDelete(result)
+        } catch {
+            conversationCleanupError = NSLocalizedString("对话历史清理失败，将自动重试。", comment: "")
+        }
+    }
+
+    @discardableResult func deleteConversationHistory(_ id: String) async -> Bool {
+        historyOperations += 1
+        defer { historyOperations -= 1 }
+        do {
+            let protected = activeConversationIDs.union(await tools.activeAgentSessionIDs)
+            guard !protected.contains(id) else {
+                conversationCleanupError = NSLocalizedString("对话仍有任务正在执行，请稍后重试。", comment: "")
+                return false
+            }
+            let result = try await conversationHistory.delete(id, protecting: protected,
+                draftPaths: conversationDraftPaths?() ?? [])
+            await historyDidDelete(result)
+            return result.pendingFiles == 0
+        } catch {
+            conversationCleanupError = NSLocalizedString("对话历史清理失败，将自动重试。", comment: "")
+            return false
+        }
+    }
+
+    private func historyDidDelete(_ result: ConversationHistoryService.CleanupResult) async {
+        conversationCleanupError = result.pendingFiles > 0
+            ? NSLocalizedString("部分对话文件未能清理，将自动重试。", comment: "") : nil
+        await agent?.forgetSessions(result.deletedIDs)
+        onConversationHistoryDeleted?(result.deletedIDs)
+    }
+
     var clipboardStore: ClipboardStore { ClipboardStore(store, retention: settings.clipboardRetention) }
     @ObservationIgnored var onSettingsChange: (() -> Void)?
     @ObservationIgnored var onModelAuthenticationFinished: (() -> Void)?
@@ -210,6 +266,7 @@ final class AppModel {
     init(root: URL = LocalStore.defaultRoot) throws {
         let store = try LocalStore(root: root)
         self.store = store
+        conversationHistory = ConversationHistoryService(store: store)
         let reader = SettingsReader(store: store)
         settings = reader.load()
         let savedPreferences = store.codableSetting(SettingsPreferences.key, as: SettingsPreferences.self) ?? SettingsPreferences()
@@ -228,8 +285,7 @@ final class AppModel {
                                   mcpInstances: Dictionary(uniqueKeysWithValues: instances.all().map { ($0.id, $0) }),
                                   approvalMode: s.approvalMode ?? .autoReview)
         }, presenter: { request in await confirmations.present(request) },
-           pluginRuntime: PluginRuntimeConfiguration(nodePath: NodeRuntimeLauncher.findNode(bundleResources: Bundle.main.resourceURL),
-               runnerPath: Self.runtimeEntry().map { URL(filePath: $0).deletingLastPathComponent().appending(path: "plugin-runner.js").path }),
+           pluginRuntime: .legacyCompatibility(bundleResources: Bundle.main.resourceURL),
            authorize: { source, origin in try await SystemPermissions.require(source, origin: origin) })
         native = NativeTools(notesFolders: { reader.load().notesFolders },
                              messagesEnabled: {
@@ -249,10 +305,21 @@ final class AppModel {
         refreshMCPServer()
         ClipboardMonitor.cleanup(clipboardStore)
         _ = try? ActivityStore(store).purgeExpired()
+        await maintainConversationHistory()
+        historyCleanupTask?.cancel()
+        historyCleanupTask = Task { [weak self] in
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .seconds(86400)) } catch { return }
+                guard let self else { return }
+                await self.maintainConversationHistory()
+            }
+        }
         updater.setAutomatic(preferences.automaticUpdates)
     }
 
     func shutdown() async {
+        historyCleanupTask?.cancel()
+        historyCleanupTask = nil
         updater.setAutomatic(false)
         updater.installOnQuit()
         mcpServer?.stop()
@@ -261,30 +328,10 @@ final class AppModel {
 
     // MARK: Agent runtime
 
-    /// Bundled runtime first, then the dev checkout recorded in Info.plist.
-    static func runtimeEntry() -> String? {
-        var candidates: [String] = []
-        if let r = Bundle.main.resourceURL { candidates.append(r.appending(path: "AgentRuntime/dist/src/main.js").path) }
-        if let root = Bundle.main.object(forInfoDictionaryKey: "KHSourceRoot") as? String, !root.isEmpty {
-            candidates.append(URL(filePath: root).appending(path: "AgentRuntime/dist/src/main.js").path)
-        }
-        return candidates.first { FileManager.default.fileExists(atPath: $0) }
-    }
-
     private func makeAgentHost() -> AgentHost? {
-        guard let node = NodeRuntimeLauncher.findNode(bundleResources: Bundle.main.resourceURL) else {
-            agentUnavailableReason = NSLocalizedString("未找到 Node（需要 Node 22+）。", comment: "")
-            return nil
-        }
-        guard let entry = Self.runtimeEntry() else {
-            agentUnavailableReason = NSLocalizedString("未找到 AgentRuntime（请先在 AgentRuntime/ 运行 npm install && npm run build）。", comment: "")
-            return nil
-        }
-        let runtimeDir = store.root.appending(path: "runtime")
-        let launcher = NodeRuntimeLauncher(nodePath: node, entryScript: entry, dataDirectory: runtimeDir.path,
-                                           stderrLog: store.root.appending(path: "runtime-stderr.log").path)
+        let storage = AgentSessionStorage(root: store.root.appending(path: "runtime"))
         let store = store, tools = tools
-        return AgentHost(launcher: launcher.launcher, configProvider: { [weak self] in
+        return AgentHost(launcher: { NativeRuntime(storage: storage) }, configProvider: { [weak self] in
             guard let cfg = store.codableSetting(ModelSettings.configKey, as: ModelConfiguration.self) else { return nil }
             guard let self else { return nil }
             let key = try await self.readModelCredential(account: cfg.credentialRef)

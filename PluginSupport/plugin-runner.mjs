@@ -3,23 +3,23 @@ import { createInterface } from "node:readline";
 import { pathToFileURL } from "node:url";
 import { inspect } from "node:util";
 class ArgumentError extends Error {}
-const emit = (value: unknown) => process.stdout.write(JSON.stringify(value) + "\n");
-for (const method of ["log", "info", "warn", "error", "debug"] as const) {
-  console[method] = (...args: unknown[]) => process.stderr.write(args.map(a => typeof a === "string" ? a : inspect(a)).join(" ") + "\n");
+const emit = (value) => process.stdout.write(JSON.stringify(value) + "\n");
+for (const method of ["log", "info", "warn", "error", "debug"]) {
+  console[method] = (...args) => process.stderr.write(args.map(a => typeof a === "string" ? a : inspect(a)).join(" ") + "\n");
 }
 const cancellation = new AbortController();
 process.on("SIGTERM", () => { cancellation.abort(); setTimeout(() => process.exit(143), 100).unref(); });
 const input = createInterface({ input: process.stdin });
 let started = false;
 let seq = 0;
-const pending = new Map<number, { resolve(value: unknown): void; reject(error: Error): void }>();
-function rpc(method: string, body: Record<string, unknown>): Promise<any> {
+const pending = new Map();
+function rpc(method, body) {
   const id = ++seq;
   return new Promise((resolve, reject) => { pending.set(id, { resolve, reject }); emit({ type: "rpc", id, method, ...body }); });
 }
 input.on("line", (line) => {
   if (Buffer.byteLength(line) > 1 << 20) { emit({ type: "result", error: "Plugin frame too large" }); process.exit(1); }
-  let frame: any;
+  let frame;
   try { frame = JSON.parse(line); } catch { emit({ type: "result", error: "Invalid host frame" }); process.exit(1); }
   if (started) {
     const waiter = pending.get(frame.id); pending.delete(frame.id);
@@ -35,8 +35,8 @@ input.on("line", (line) => {
     const context = {
       configuration: frame.configuration, requestID: frame.requestID, signal: cancellation.signal,
       state: frame.state,
-      async saveState(value: unknown) { await rpc("state", { value }); this.state = value; },
-      exec(executable: string, args: string[], options: { cwd?: string; timeoutSeconds?: number } = {}) {
+      async saveState(value) { await rpc("state", { value }); this.state = value; },
+      exec(executable, args, options = {}) {
         if (cancellation.signal.aborted) return Promise.reject(new Error("Plugin call cancelled"));
         return rpc("exec", { executable, arguments: args, ...options });
       },
@@ -47,13 +47,13 @@ input.on("line", (line) => {
   })().catch(error => emit({ type: "result", error: String(error?.stack ?? error), errorCode: error instanceof ArgumentError ? "invalidArguments" : "adapterFailure" })).finally(() => { input.close(); process.stdout.write("", () => process.exit(0)); });
 });
 
-function validate(value: any, schema: any, path = "arguments"): void {
+function validate(value, schema, path = "arguments") {
   if (!schema) return;
-  const types: Record<string, boolean> = { object: value !== null && typeof value === "object" && !Array.isArray(value),
+  const types = { object: value !== null && typeof value === "object" && !Array.isArray(value),
     array: Array.isArray(value), string: typeof value === "string", boolean: typeof value === "boolean",
     number: typeof value === "number", integer: Number.isInteger(value), null: value === null };
   if (schema.type && !types[schema.type]) throw new ArgumentError(`${path}: expected ${schema.type}`);
-  if (schema.enum && !schema.enum.some((v: unknown) => JSON.stringify(v) === JSON.stringify(value))) throw new ArgumentError(`${path}: invalid option`);
+  if (schema.enum && !schema.enum.some((v) => JSON.stringify(v) === JSON.stringify(value))) throw new ArgumentError(`${path}: invalid option`);
   if (typeof value === "string" && value.length < (schema.minLength ?? 0)) throw new ArgumentError(`${path}: value is too short`);
   if (schema.type === "object") {
     for (const key of schema.required ?? []) if (!(key in value)) throw new ArgumentError(`${path}.${key}: required`);
@@ -62,5 +62,5 @@ function validate(value: any, schema: any, path = "arguments"): void {
       validate(val, schema.properties?.[key], `${path}.${key}`);
     }
   }
-  if (schema.type === "array" && schema.items) value.forEach((v: unknown, i: number) => validate(v, schema.items, `${path}[${i}]`));
+  if (schema.type === "array" && schema.items) value.forEach((v, i) => validate(v, schema.items, `${path}[${i}]`));
 }

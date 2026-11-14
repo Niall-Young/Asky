@@ -110,7 +110,7 @@ struct AgentView: View {
     private var conversationTransition: AnyTransition {
         reduceMotion ? .opacity : .opacity.combined(with: .offset(y: 8))
     }
-    private var isEmptyConversation: Bool { model.items.isEmpty && model.streaming.isEmpty && !model.isRunning }
+    private var isEmptyConversation: Bool { model.items.isEmpty && !model.isRunning }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -347,7 +347,6 @@ private struct Transcript: View {
     // Value snapshots let an outgoing transcript finish fading after model.open
     // clears/replaces the active conversation. The live model still owns actions.
     private let items: [ChatItem]
-    private let streaming: String
     private let hasOlder: Bool
     private let taskID: String?
     private let taskStartedAt: Date?
@@ -357,7 +356,6 @@ private struct Transcript: View {
     init(model: AgentModel) {
         self.model = model
         items = model.items
-        streaming = model.streaming
         hasOlder = model.hasOlder
         taskID = model.taskID
         taskStartedAt = model.taskStartedAt
@@ -366,7 +364,7 @@ private struct Transcript: View {
     }
 
     var body: some View {
-        CompatibleTranscriptScroll(itemCount: items.count, streaming: streaming) {
+        CompatibleTranscriptScroll(itemCount: items.count, activity: groups.last?.activityLabel ?? "") {
             LazyVStack(alignment: .leading, spacing: 0) {
                 if hasOlder {
                     Button(NSLocalizedString("加载更早的消息", comment: "")) { model.loadOlder() }.buttonStyle(.link).frame(maxWidth: .infinity)
@@ -395,7 +393,6 @@ private struct Transcript: View {
             if result.last?.id != id { result.append(ChatResponseGroup(id: id, items: [])) }
             result[result.count - 1].startedAt = taskStartedAt
             result[result.count - 1].isRunning = true
-            result[result.count - 1].streaming = streaming
             result[result.count - 1].state = state
         }
         return result
@@ -404,7 +401,7 @@ private struct Transcript: View {
     static func label(_ s: AgentTaskState) -> String {
         switch s {
         case .starting: NSLocalizedString("正在启动…", comment: "")
-        case .running: NSLocalizedString("处理中…", comment: "")
+        case .running: NSLocalizedString("思考中…", comment: "")
         case .compacting: NSLocalizedString("正在压缩上下文…", comment: "")
         case .awaitingInput: NSLocalizedString("等待你的回答", comment: "")
         case .awaitingConfirmation: NSLocalizedString("等待确认", comment: "")
@@ -418,14 +415,14 @@ private struct Transcript: View {
 
 private struct CompatibleTranscriptScroll<Content: View>: View {
     let itemCount: Int
-    let streaming: String
+    let activity: String
     @ViewBuilder var content: Content
 
     var body: some View {
         if #available(macOS 15, *), !SurfaceCompatibility.useMacOS14Compatibility {
-            ModernTranscriptScroll(itemCount: itemCount, streaming: streaming, content: content)
+            ModernTranscriptScroll(itemCount: itemCount, activity: activity, content: content)
         } else {
-            LegacyTranscriptScroll(itemCount: itemCount, streaming: streaming, content: content)
+            LegacyTranscriptScroll(itemCount: itemCount, activity: activity, content: content)
         }
     }
 }
@@ -433,7 +430,7 @@ private struct CompatibleTranscriptScroll<Content: View>: View {
 @available(macOS 15, *)
 private struct ModernTranscriptScroll<Content: View>: View {
     let itemCount: Int
-    let streaming: String
+    let activity: String
     var content: Content
     @State private var isAtBottom = true
     @State private var scrollPosition = ScrollPosition()
@@ -473,7 +470,7 @@ private struct ModernTranscriptScroll<Content: View>: View {
             .onChange(of: itemCount) {
                 if isAtBottom { scrollPosition.scrollTo(edge: .bottom) }
             }
-            .onChange(of: streaming) {
+            .onChange(of: activity) {
                 if isAtBottom { scrollPosition.scrollTo(edge: .bottom) }
             }
         }
@@ -523,7 +520,7 @@ private struct LegacyTranscriptPosition: NSViewRepresentable {
 
 private struct LegacyTranscriptScroll<Content: View>: View {
     let itemCount: Int
-    let streaming: String
+    let activity: String
     var content: Content
     @State private var isAtBottom = true
     @Environment(\.colorScheme) private var colorScheme
@@ -558,7 +555,7 @@ private struct LegacyTranscriptScroll<Content: View>: View {
                 .onChange(of: itemCount) {
                     if isAtBottom { proxy.scrollTo("bottom", anchor: .bottom) }
                 }
-                .onChange(of: streaming) {
+                .onChange(of: activity) {
                     if isAtBottom { proxy.scrollTo("bottom", anchor: .bottom) }
                 }
             }
@@ -571,12 +568,21 @@ struct ChatResponseGroup: Identifiable {
     var items: [ChatItem]
     var startedAt: Date?
     var isRunning = false
-    var streaming = ""
     var state: AgentTaskState?
 
     var tools: [ChatItem] { items.filter { if case .tool = $0.kind { true } else { false } } }
     var content: [ChatItem] { items.filter { if case .tool = $0.kind { false } else { true } } }
     var workSeconds: Int? { items.compactMap(\.workSeconds).last }
+    var activityLabel: String {
+        if state == .running || state == .starting || state == nil {
+            if let tool = tools.last(where: { $0.kind == .tool(nil) }) {
+                return String(format: NSLocalizedString("正在使用 %@…", comment: ""), tool.activityToolName)
+            }
+            return NSLocalizedString("思考中…", comment: "")
+        }
+        if let state { return Transcript.label(state) }
+        return NSLocalizedString("思考中…", comment: "")
+    }
 }
 
 /// The exact timestamp remains available while the visible label ages with the clock.
@@ -605,7 +611,22 @@ private struct ResponseGroupView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            if group.isRunning || group.workSeconds != nil || !group.tools.isEmpty {
+            if group.isRunning {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small).accessibilityHidden(true)
+                    Text(group.activityLabel)
+                        .contentTransition(.opacity)
+                        .animation(reduceMotion ? nil : .easeInOut(duration: 0.15), value: group.activityLabel)
+                    Spacer(minLength: 8)
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        let seconds = group.startedAt.map { max(0, Int(context.date.timeIntervalSince($0))) } ?? 0
+                        Text(String(format: NSLocalizedString("Work for %ds", comment: "Tool execution duration"), seconds))
+                    }
+                }
+                .textStyle(AgentLayout.message)
+                .foregroundStyle(ThemeColor.kTextSubtlest)
+            }
+            if !group.isRunning && (group.workSeconds != nil || !group.tools.isEmpty) {
                 VStack(alignment: .leading, spacing: 0) {
                     TimelineView(.periodic(from: .now, by: 1)) { context in
                         let seconds = group.startedAt.map { max(0, Int(context.date.timeIntervalSince($0))) } ?? group.workSeconds ?? 0
@@ -645,21 +666,7 @@ private struct ResponseGroupView: View {
                     .accessibilityHidden(!expanded)
                 }
             }
-            // A streaming reply and its final stored message occupy the same view slot.
-            // Keep native fields (including focus/IME composition) alive at completion.
-            ForEach(Array(visibleContent.enumerated()), id: \.offset) { _, item in message(item) }
-            if group.isRunning, let state = group.state {
-                HStack(spacing: 8) {
-                    if state == .compacting {
-                        ProgressView().controlSize(.small)
-                            .tint(ThemeColor.kTextSubtlest)
-                            .accessibilityHidden(true)
-                    }
-                    Text(Transcript.label(state))
-                }
-                .textStyle(AgentLayout.message)
-                .foregroundStyle(ThemeColor.kTextSubtlest)
-            }
+            ForEach(visibleContent) { item in message(item) }
         }
         .onChange(of: group.isRunning) { _, running in
             if !running { expanded = false }
@@ -667,12 +674,13 @@ private struct ResponseGroupView: View {
     }
 
     private var visibleContent: [ChatItem] {
-        group.content + (group.streaming.isEmpty ? [] : [ChatItem(id: "streaming", kind: .assistant, text: group.streaming)])
+        group.content.filter { !group.isRunning || $0.kind != .assistant }
     }
 
     private func message(_ item: ChatItem) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            ChatBubble(item: item, model: model)
+            ChatBubble(item: item, model: model,
+                showsReplyActions: !group.isRunning && group.content.last(where: { $0.kind == .assistant })?.id == item.id)
             if item.needsPermissionSettings {
                 Button(NSLocalizedString("管理权限…", comment: "")) { model.openSettings(permissions: true) }
                     .buttonStyle(.link)
@@ -684,6 +692,7 @@ private struct ResponseGroupView: View {
 private struct ChatBubble: View {
     let item: ChatItem
     let model: AgentModel
+    var showsReplyActions = true
     @State private var hovering = false
     @State private var copyHovering = false
     @State private var copyFeedbackID: UUID?
@@ -718,12 +727,12 @@ private struct ChatBubble: View {
             .onHover { hovering = $0 }
         case .assistant:
             VStack(alignment: .leading, spacing: 16) {
-                ChatReplyView(text: item.text, streaming: model.isRunning && (item.id == "streaming" || item.responseID == model.taskID),
+                ChatReplyView(text: item.text,
                     values: Binding(get: { model.formValues[item.id] ?? [:] },
                                     set: { model.formValues[item.id] = $0 }),
                     active: model.formIsActive(item.id), submit: { model.submitForm(item.id) })
                     .frame(maxWidth: .infinity, alignment: .leading)
-                if item.id != "streaming" {
+                if showsReplyActions {
                     HStack(spacing: 16) {
                         copyButton
                             // Align the visible glyph with the text, keeping its padded hit area.

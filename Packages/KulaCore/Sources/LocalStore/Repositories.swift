@@ -142,6 +142,29 @@ public struct ConversationSummary: Sendable, Hashable, Identifiable {
     public var updatedAt: Date
 }
 
+/// Only the metadata needed to restore the native transcript; no tool arguments or raw results.
+public struct MessagePresentation: Sendable, Hashable, Codable {
+    public var responseID: String?
+    public var toolName: String?
+    public var toolStatus: ExecutionStatus?
+    public var toolError: String?
+    public var needsPermissionSettings: Bool
+    public var workSeconds: Int?
+    public var completedAt: Date?
+
+    public init(responseID: String? = nil, toolName: String? = nil, toolStatus: ExecutionStatus? = nil,
+                toolError: String? = nil, needsPermissionSettings: Bool = false,
+                workSeconds: Int? = nil, completedAt: Date? = nil) {
+        self.responseID = responseID
+        self.toolName = toolName
+        self.toolStatus = toolStatus
+        self.toolError = toolError
+        self.needsPermissionSettings = needsPermissionSettings
+        self.workSeconds = workSeconds
+        self.completedAt = completedAt
+    }
+}
+
 public struct StoredMessage: Sendable, Hashable, Identifiable {
     public var id: String
     public var conversationID: String
@@ -150,6 +173,7 @@ public struct StoredMessage: Sendable, Hashable, Identifiable {
     public var text: String
     public var createdAt: Date
     public var attachments: [AttachmentRef] = []
+    public var presentation: MessagePresentation? = nil
 }
 
 public struct ConversationStore: Sendable {
@@ -167,16 +191,30 @@ public struct ConversationStore: Sendable {
     }
 
     @discardableResult
-    public func append(conversationID: String, role: String, text: String, attachments: [AttachmentRef] = [], now: Date = Date()) throws -> StoredMessage {
+    public func append(conversationID: String, role: String, text: String, attachments: [AttachmentRef] = [], id: String = UUID().uuidString,
+                       presentation: MessagePresentation? = nil, now: Date = Date()) throws -> StoredMessage {
         let attachmentJSON = String(decoding: try JSONEncoder().encode(attachments), as: UTF8.self)
         return try db.transaction {
             let seq = try db.scalarInt("SELECT COALESCE(MAX(seq), 0) + 1 FROM messages WHERE conversation_id = ?", [conversationID])
-            let id = UUID().uuidString
-            try db.run("INSERT INTO messages(id, conversation_id, seq, role, text, created_at, attachments_json) VALUES(?,?,?,?,?,?,?)",
-                       [id, conversationID, seq, role, text, now, attachmentJSON])
+            try db.run("INSERT INTO messages(id, conversation_id, seq, role, text, created_at, attachments_json, presentation_json) VALUES(?,?,?,?,?,?,?,?)",
+                       [id, conversationID, seq, role, text, now, attachmentJSON, presentation.map(JSONText.encode)])
             try db.run("INSERT INTO messages_fts(id, conversation_id, text) VALUES(?,?,?)", [id, conversationID, text])
             try db.run("UPDATE conversations SET updated_at = ? WHERE id = ?", [now, conversationID])
-            return StoredMessage(id: id, conversationID: conversationID, seq: seq, role: role, text: text, createdAt: now, attachments: attachments)
+            return StoredMessage(id: id, conversationID: conversationID, seq: seq, role: role, text: text, createdAt: now, attachments: attachments, presentation: presentation)
+        }
+    }
+
+    public func message(_ id: String, conversationID: String) -> StoredMessage? {
+        (try? db.query("SELECT * FROM messages WHERE id = ? AND conversation_id = ?", [id, conversationID]))?
+            .first.map(Self.decode)
+    }
+
+    /// Update a recorded step without changing its ordering or duplicating its search entry.
+    public func updateMessage(_ id: String, conversationID: String, text: String, presentation: MessagePresentation) throws {
+        try db.transaction {
+            try db.run("UPDATE messages SET text = ?, presentation_json = ? WHERE id = ? AND conversation_id = ?",
+                       [text, JSONText.encode(presentation), id, conversationID])
+            try db.run("UPDATE messages_fts SET text = ? WHERE id = ? AND conversation_id = ?", [text, id, conversationID])
         }
     }
 
@@ -192,9 +230,10 @@ public struct ConversationStore: Sendable {
     }
 
     /// Page of messages ending before `beforeSeq` (newest page when nil), returned in ascending order.
-    public func messages(conversationID: String, limit: Int, beforeSeq: Int? = nil) -> [StoredMessage] {
+    public func messages(conversationID: String, limit: Int, beforeSeq: Int? = nil, dialogueOnly: Bool = false) -> [StoredMessage] {
+        let roleFilter = dialogueOnly ? "AND role IN ('user', 'assistant')" : ""
         let rows = (try? db.query("""
-            SELECT * FROM messages WHERE conversation_id = ? AND seq < ? ORDER BY seq DESC LIMIT ?
+            SELECT * FROM messages WHERE conversation_id = ? AND seq < ? \(roleFilter) ORDER BY seq DESC LIMIT ?
             """, [conversationID, beforeSeq ?? Int.max, limit])) ?? []
         return rows.reversed().map(Self.decode)
     }
@@ -227,7 +266,8 @@ public struct ConversationStore: Sendable {
         StoredMessage(id: r.string("id") ?? "", conversationID: r.string("conversation_id") ?? "", seq: r.int("seq") ?? 0,
                       role: r.string("role") ?? "", text: r.string("text") ?? "", createdAt: r.date("created_at") ?? .distantPast,
                       attachments: (try? JSONDecoder().decode([AttachmentRef].self,
-                          from: Data((r.string("attachments_json") ?? "[]").utf8))) ?? [])
+                          from: Data((r.string("attachments_json") ?? "[]").utf8))) ?? [],
+                      presentation: JSONText.decode(r.string("presentation_json"), as: MessagePresentation.self))
     }
 }
 

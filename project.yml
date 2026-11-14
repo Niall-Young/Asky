@@ -34,6 +34,9 @@ targets:
       - path: App/Resources/ThirdParty
         type: folder
         buildPhase: resources
+      - path: PluginSupport
+        type: folder
+        buildPhase: resources
     info:
       path: App/Info.plist
       properties:
@@ -47,7 +50,7 @@ targets:
         NSRemindersFullAccessUsageDescription: Asky 在你明确要求时读取或创建提醒事项。
         NSContactsUsageDescription: Asky 用于在你发起的任务中确认联系人。
         NSAppleEventsUsageDescription: Asky 用于列出与切换 Chrome 标签、在授权的备忘录文件夹中搜索与追加内容。
-        # Dev builds locate AgentRuntime/dist next to the sources; release builds bundle it under Resources.
+        # Development diagnostics can locate source fixtures through this path.
         KHSourceRoot: $(SRCROOT)
     entitlements:
       path: App/Asky.entitlements

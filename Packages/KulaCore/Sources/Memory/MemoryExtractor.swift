@@ -46,7 +46,7 @@ public struct MemoryExtractor: Sendable {
         guard sourceID.hasPrefix(Self.conversationPrefix) else { return [] }
         let cid = String(sourceID.dropFirst(Self.conversationPrefix.count))
         let after = Int(store.setting(Self.cursorKey(sourceID)) ?? "") ?? 0
-        let messages = ConversationStore(store).messages(conversationID: cid, limit: maxMessages)
+        let messages = ConversationStore(store).messages(conversationID: cid, limit: maxMessages, dialogueOnly: true)
             .filter { $0.seq > after && ($0.role == "user" || $0.role == "assistant") }
         guard let last = messages.last?.seq else { return [] }
         guard messages.contains(where: { $0.role == "user" }) else {

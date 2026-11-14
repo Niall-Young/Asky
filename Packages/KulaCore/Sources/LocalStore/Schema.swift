@@ -75,6 +75,10 @@ public enum Schema {
         "ALTER TABLE memories ADD COLUMN last_used_at REAL;",
         // v5: one copied selection preserves all original file references.
         "ALTER TABLE clipboard ADD COLUMN file_paths_json TEXT NOT NULL DEFAULT '[]';",
+        // v6: native transcript presentation, independent of the model session format.
+        "ALTER TABLE messages ADD COLUMN presentation_json TEXT;",
+        // v7: failed history file deletions survive process exits and can be retried.
+        "CREATE TABLE conversation_file_cleanup (path TEXT PRIMARY KEY, kind TEXT NOT NULL);",
     ]
 
     public static func migrate(_ db: Database) throws {

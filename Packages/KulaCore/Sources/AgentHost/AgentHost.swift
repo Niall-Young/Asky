@@ -50,7 +50,7 @@ public enum AgentHostError: LocalizedError, Equatable {
     }
 }
 
-/// Manages the Pi helper process: launch only on explicit AI submission, coalesced starts,
+/// Manages an on-demand runtime: start only on explicit AI submission, coalesced starts,
 /// keep-alive while work or confirmations are pending, 60 s idle exit, and process-group teardown.
 public actor AgentHost {
     public typealias Launcher = @Sendable () throws -> any RuntimeProcess
@@ -97,7 +97,7 @@ public actor AgentHost {
         self.guidanceProvider = guidanceProvider
     }
 
-    public var runningPID: Int32? { process?.pid }
+    public var runningPID: Int32? { process.flatMap { $0.pid > 0 ? $0.pid : nil } }
 
     /// Restores the runtime session file reference persisted in the conversation projection.
     public func setSessionFile(_ path: String?, for sessionID: String) {
@@ -105,6 +105,12 @@ public actor AgentHost {
     }
 
     public func sessionFile(for sessionID: String) -> String? { sessionFiles[sessionID] }
+
+    public func forgetSessions(_ ids: Set<String>) {
+        for id in ids where !tasks.values.contains(where: { $0.sessionID == id }) {
+            sessionFiles.removeValue(forKey: id)
+        }
+    }
 
     // MARK: submit / cancel
 
@@ -127,7 +133,8 @@ public actor AgentHost {
         guard tasks[taskID] != nil else { return }
         try? process?.write(HostMessage.cancel(taskID: taskID).encoded())
         for (key, value) in toolTasks where key.hasPrefix(taskID + ":") { value.cancel() }
-        finish(taskID, tasks[taskID]?.hadWrite == true ? .pendingVerification : .cancelled)
+        let uncertain = tasks[taskID]?.hadWrite == true || (tasks[taskID]?.pendingTools ?? 0) > 0
+        finish(taskID, uncertain ? .pendingVerification : .cancelled)
     }
 
     /// App quit: cancel everything and make sure no helper process survives.

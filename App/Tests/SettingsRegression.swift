@@ -58,6 +58,77 @@ enum SettingsRegression {
                     ["keyword": "go", "name": "Custom", "urlTemplate": "https://example.com"],
                 ]])
                 let model = try AppModel(root: root)
+                if CommandLine.arguments.contains("--conversation-retention") {
+                    defer { try? FileManager.default.removeItem(at: root) }
+                    precondition(model.settings.conversationRetention == .thirtyDays)
+                    var legacy = try JSONSerialization.jsonObject(with: JSONEncoder().encode(model.settings)) as! [String: Any]
+                    legacy.removeValue(forKey: "conversationRetentionDays")
+                    legacy["clipboardEnabled"] = false
+                    let decoded = try JSONDecoder().decode(AppSettings.self, from: JSONSerialization.data(withJSONObject: legacy))
+                    precondition(decoded.conversationRetention == .thirtyDays && !decoded.clipboardEnabled)
+                    var invalid = decoded
+                    invalid.conversationRetentionDays = 999
+                    precondition(invalid.conversationRetention == .thirtyDays)
+                    try model.memory.ensureExists()
+                    let memoryBefore = try Data(contentsOf: model.memory.indexURL)
+                    let chat = AgentModel(app: model)
+                    model.settingsTab = SettingsPage.model.rawValue
+                    let window = SettingsWindow.make(app: model)
+                    let presentation = WindowPresentation()
+                    presentation.show(window)
+                    let labels = ["7 天", "30 天", "90 天", "永久"].map { NSLocalizedString($0, comment: "") }
+                    func popup(in view: NSView) -> NSPopUpButton? {
+                        if let button = view as? NSPopUpButton, button.itemTitles == labels { return button }
+                        return view.subviews.lazy.compactMap { popup(in: $0) }.first
+                    }
+                    try await Task.sleep(for: .milliseconds(350))
+                    let choice = popup(in: window.contentView!)!
+                    precondition(choice.indexOfSelectedItem == 1)
+                    choice.selectItem(at: 2)
+                    _ = choice.sendAction(choice.action, to: choice.target)
+                    try await Task.sleep(for: .milliseconds(100))
+                    precondition(model.settings.conversationRetention == .ninetyDays)
+                    let old = Date().addingTimeInterval(-40 * 86400)
+                    let cid = try ConversationStore(model.store).create(title: "Retained conversation", now: old)
+                    try ConversationStore(model.store).append(conversationID: cid, role: "user", text: "历史正文", now: old)
+                    chat.open(cid)
+                    precondition(!chat.items.isEmpty)
+                    await model.maintainConversationHistory()
+                    precondition(ConversationStore(model.store).list(limit: 10).contains { $0.id == cid })
+                    choice.selectItem(at: 0)
+                    _ = choice.sendAction(choice.action, to: choice.target)
+                    try await Task.sleep(for: .milliseconds(150))
+                    await model.maintainConversationHistory()
+                    precondition(model.settings.conversationRetention == .sevenDays)
+                    precondition(ConversationStore(model.store).list(limit: 10).isEmpty)
+                    precondition(chat.conversationID == nil && chat.items.isEmpty)
+                    let manualID = try ConversationStore(model.store).create(title: "Manual deletion")
+                    chat.open(manualID)
+                    chat.delete(manualID)
+                    try await Task.sleep(for: .milliseconds(150))
+                    precondition(chat.conversationID == nil && ConversationStore(model.store).list(limit: 10).isEmpty)
+                    let memoryAfter = try Data(contentsOf: model.memory.indexURL)
+                    precondition(memoryAfter == memoryBefore)
+                    let reopened = try AppModel(root: root)
+                    precondition(reopened.settings.conversationRetention == .sevenDays)
+                    for appearance in ["light", "dark"] {
+                        model.preferences.appearance = appearance
+                        try await Task.sleep(for: .milliseconds(300))
+                        choice.scrollToVisible(choice.bounds)
+                        window.contentView?.layoutSubtreeIfNeeded()
+                        let view = window.contentView!
+                        guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { fatalError("capture") }
+                        view.cacheDisplay(in: view.bounds, to: bitmap)
+                        try bitmap.representation(using: .png, properties: [:])!.write(to: URL(filePath: "build/settings-conversation-history-\(appearance).png"))
+                    }
+                    choice.selectItem(at: 3)
+                    _ = choice.sendAction(choice.action, to: choice.target)
+                    try await Task.sleep(for: .milliseconds(100))
+                    precondition(model.settings.conversationRetention == .forever)
+                    print("Conversation retention settings: native choices, legacy defaults, persistence, immediate cleanup and unchanged memory passed")
+                    window.close()
+                    exit(0)
+                }
                 if CommandLine.arguments.contains("--command-layout") {
                     defer { try? FileManager.default.removeItem(at: root) }
                     model.settingsTab = "keywords"

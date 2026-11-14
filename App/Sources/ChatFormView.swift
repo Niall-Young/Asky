@@ -4,18 +4,17 @@ import Theme
 
 struct ChatReplyView: View {
     let text: String
-    let streaming: Bool
     var values: Binding<[String: [String]]> = .constant([:])
     var active = false
     var submit: () -> Void = {}
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            ForEach(ChatFormParser.parse(text, streaming: streaming)) { part in
+            ForEach(ChatFormParser.parse(text, streaming: false)) { part in
                 switch part.content {
                 case .markdown(let text): ChatMarkdownView(text: text)
                 case .form(let form):
-                    ChatFormView(form: form, streaming: streaming, values: values, active: active, submit: submit)
+                    ChatFormView(form: form, values: values, active: active, submit: submit)
                 }
             }
         }
@@ -24,7 +23,6 @@ struct ChatReplyView: View {
 
 struct ChatFormView: View {
     let form: ChatForm
-    let streaming: Bool
     @Binding var values: [String: [String]]
     let active: Bool
     let submit: () -> Void
@@ -41,8 +39,8 @@ struct ChatFormView: View {
                     control(field).disabled(!active)
                 }
             }
-            if streaming || !form.isComplete {
-                Text(NSLocalizedString(streaming ? "正在生成表单…" : "表单未生成完整，请在输入框回复。", comment: ""))
+            if !form.isComplete {
+                Text(NSLocalizedString("表单未生成完整，请在输入框回复。", comment: ""))
                     .font(.system(size: 12)).foregroundStyle(ThemeColor.kTextSubtle)
             } else if active {
                 SettingsButton(NSLocalizedString("提交回复", comment: ""), action: submit)

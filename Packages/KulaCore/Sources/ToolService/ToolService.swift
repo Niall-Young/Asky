@@ -94,6 +94,8 @@ public actor ToolService {
     private let timeout: Duration
     private let writeLock = AsyncLock()
     private var inFlight: [String: Task<ExecutionResult, Never>] = [:]
+    private var inFlightSessions: [String: String] = [:]
+    public var activeAgentSessionIDs: Set<String> { Set(inFlightSessions.values) }
 
     public init(store: LocalStore, policy: @escaping @Sendable () -> PolicySnapshot,
                 presenter: @escaping ConfirmationPresenter, timeout: Duration = ToolService.defaultTimeout,
@@ -127,8 +129,10 @@ public actor ToolService {
         if let running = inFlight[request.requestID] { return await running.value }
         let task = Task { await self.process(request) }
         inFlight[request.requestID] = task
+        if case .agent(let id) = request.origin { inFlightSessions[request.requestID] = id }
         let result = await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
         inFlight[request.requestID] = nil
+        inFlightSessions[request.requestID] = nil
         return result
     }
 

@@ -21,6 +21,24 @@ struct ChatItem: Identifiable, Hashable {
     var responseID: String? = nil
     var attachments: [AttachmentRef] = []
 
+    var storedRole: String {
+        switch kind {
+        case .user: "user"
+        case .assistant: "assistant"
+        case .tool: "tool"
+        case .notice: "notice"
+        case .error: "error"
+        }
+    }
+
+    var presentation: MessagePresentation {
+        let status: ExecutionStatus?
+        if case .tool(let value) = kind { status = value } else { status = nil }
+        return MessagePresentation(responseID: responseID, toolName: toolName, toolStatus: status,
+            toolError: toolError, needsPermissionSettings: needsPermissionSettings,
+            workSeconds: workSeconds, completedAt: completedAt)
+    }
+
     var toolSource: DataSourceID? {
         guard let name = toolName else { return nil }
         return DataSourceID.allCases.first { name.hasPrefix($0.rawValue + "_") }
@@ -30,6 +48,23 @@ struct ChatItem: Identifiable, Hashable {
         guard let name = toolName, name.hasPrefix("plugin_"),
               let end = name.range(of: "__") else { return nil }
         return String(name[name.index(name.startIndex, offsetBy: 7)..<end.lowerBound])
+    }
+
+    var activityToolName: String {
+        if let pluginID { return ["orca": "Orca", "lark": "Lark"][pluginID] ?? pluginID }
+        switch toolSource {
+        case .calendar: return NSLocalizedString("日历", comment: "")
+        case .reminders: return NSLocalizedString("提醒事项", comment: "")
+        case .notes: return NSLocalizedString("备忘录", comment: "")
+        case .contacts: return NSLocalizedString("通讯录", comment: "")
+        case .chrome: return "Chrome"
+        case .shortcuts: return NSLocalizedString("快捷指令", comment: "")
+        case .messages: return NSLocalizedString("信息", comment: "")
+        case .maps: return "MapKit"
+        case .memory: return NSLocalizedString("记忆", comment: "")
+        case .web: return NSLocalizedString("联网搜索", comment: "")
+        default: return toolName ?? text
+        }
     }
 
     var toolSymbol: String {
@@ -70,7 +105,7 @@ final class AgentModel {
     private(set) var conversations: [ConversationSummary] = []
     private(set) var conversationID: String?
     private(set) var items: [ChatItem] = []
-    private(set) var streaming = ""
+    @ObservationIgnored private var pendingReply: String?
     private(set) var taskID: String?
     private(set) var taskStartedAt: Date?
     private var responseStartIndex = 0
@@ -83,13 +118,25 @@ final class AgentModel {
     var attachments: [AttachmentRef] = []
     var attachmentThumbnails: [String: Data] = [:]
 
-    var canSend: Bool { !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty }
+    var canSend: Bool { !app.isCleaningConversationHistory && (!draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty) }
 
     private let app: AppModel
     private var oldestSeq: Int?
     private var streamTask: Task<Void, Never>?
 
-    init(app: AppModel) { self.app = app }
+    init(app: AppModel) {
+        self.app = app
+        app.conversationDraftPaths = { [weak self] in Set(self?.attachments.map(\.path) ?? []) }
+        app.onConversationHistoryDeleted = { [weak self] ids in
+            guard let self else { return }
+            if let id = self.conversationID, ids.contains(id) {
+                self.open(nil)
+                let drafts = Set(self.attachments.map(\.id))
+                self.attachmentThumbnails = self.attachmentThumbnails.filter { drafts.contains($0.key) }
+            }
+            self.reloadConversations()
+        }
+    }
 
     private var store: ConversationStore { ConversationStore(app.store) }
 
@@ -132,7 +179,7 @@ final class AgentModel {
         draft = ""
         attachments = []
         attachmentThumbnails = [:]
-        streaming = ""
+        pendingReply = nil
         state = nil
         newConversationRevision += 1
         extractMemories()
@@ -149,17 +196,35 @@ final class AgentModel {
     }
 
     func delete(_ id: String) {
-        try? store.delete(id)
-        if conversationID == id { open(nil) }
-        reloadConversations()
+        guard !isRunning else { return }
+        Task {
+            if !(await app.deleteConversationHistory(id)), let message = app.conversationCleanupError {
+                let alert = AppDialog.make()
+                alert.messageText = message
+                _ = await AppDialog.present(alert)
+            }
+        }
     }
 
     private static func item(_ m: StoredMessage) -> ChatItem {
-        ChatItem(id: m.id, kind: m.role == "user" ? .user : m.role == "assistant" ? .assistant : .notice, text: m.text, completedAt: m.role == "assistant" ? m.createdAt : nil, responseID: m.role == "assistant" ? m.id : nil, attachments: m.attachments)
+        let p = m.presentation
+        let kind: ChatItem.Kind
+        switch m.role {
+        case "user": kind = .user
+        case "assistant": kind = .assistant
+        case "tool": kind = .tool(p?.toolStatus ?? .pendingVerification)
+        case "error": kind = .error
+        default: kind = .notice
+        }
+        return ChatItem(id: m.id, kind: kind, text: m.text,
+            needsPermissionSettings: p?.needsPermissionSettings ?? false,
+            toolName: p?.toolName, toolError: p?.toolError, workSeconds: p?.workSeconds,
+            completedAt: p?.completedAt ?? (p == nil && m.role == "assistant" ? m.createdAt : nil),
+            responseID: p?.responseID ?? (m.role == "assistant" ? m.id : nil), attachments: m.attachments)
     }
 
     private func pruneFormValues() {
-        let visible = Set(items.map(\.id)).union(["streaming"])
+        let visible = Set(items.map(\.id))
         formValues = formValues.filter { visible.contains($0.key) }
     }
 
@@ -169,13 +234,17 @@ final class AgentModel {
             item.responseID = taskID
             item.completedAt = nil
         }
+        if item.kind != .user, let cid = conversationID {
+            _ = try? store.append(conversationID: cid, role: item.storedRole, text: item.text,
+                                  attachments: item.attachments, id: item.id, presentation: item.presentation)
+        }
         items.append(item)
         if items.count > Self.window {
             let removed = items.count - Self.window
             items.removeFirst(removed)
             responseStartIndex = max(0, responseStartIndex - removed)
             hasOlder = true
-            oldestSeq = nil
+            oldestSeq = conversationID.flatMap { cid in items.first.flatMap { store.message($0.id, conversationID: cid)?.seq } }
             pruneFormValues()
         }
     }
@@ -183,7 +252,6 @@ final class AgentModel {
     // MARK: Submit (explicit only)
 
     func formIsActive(_ messageID: String) -> Bool {
-        if messageID == "streaming" { return isRunning }
         guard let index = items.firstIndex(where: { $0.id == messageID && $0.kind == .assistant }) else { return false }
         return (!isRunning || items[index].responseID == taskID) && !items.dropFirst(index + 1).contains(where: { $0.kind == .user || $0.kind == .assistant })
     }
@@ -203,7 +271,7 @@ final class AgentModel {
     @discardableResult private func sendInput(_ submittedText: String, fromComposer: Bool) -> Bool {
         let input = submittedText.trimmingCharacters(in: .whitespacesAndNewlines)
         let submittedAttachments = fromComposer ? attachments : []
-        guard (!input.isEmpty || !submittedAttachments.isEmpty), !isRunning else { return false }
+        guard (!input.isEmpty || !submittedAttachments.isEmpty), !isRunning, !app.isCleaningConversationHistory else { return false }
         let text = input.isEmpty ? NSLocalizedString("请分析这些附件", comment: "") : input
         guard let agent = app.agent else {
             appendTrimmed(ChatItem(id: UUID().uuidString, kind: .error, text: app.agentUnavailableReason ?? NSLocalizedString("AI 运行时不可用", comment: "")))
@@ -253,30 +321,34 @@ final class AgentModel {
 
     func beginResponse(taskID: String, now: Date = Date()) {
         self.taskID = taskID
+        if let conversationID { app.activeConversationIDs.insert(conversationID) }
         taskStartedAt = now
         responseStartIndex = items.count
         state = .starting
-        streaming = ""
-        formValues.removeValue(forKey: "streaming")
+        pendingReply = nil
     }
 
     private func appendAssistant(_ text: String, conversationID: String) {
-        if let message = try? store.append(conversationID: conversationID, role: "assistant", text: text) {
-            formValues[message.id] = formValues.removeValue(forKey: "streaming")
-            appendTrimmed(Self.item(message))
-        }
+        let item = ChatItem(id: UUID().uuidString, kind: .assistant, text: text)
+        appendTrimmed(item)
+    }
+
+    private func savePresentation(_ item: ChatItem, conversationID: String) {
+        try? store.updateMessage(item.id, conversationID: conversationID, text: item.text, presentation: item.presentation)
     }
 
     func handle(_ event: AgentEvent, conversationID cid: String) {
         switch event {
         case .taskState(_, let s):
             state = s
-        case .textDelta(_, let d):
-            streaming += d
+        case .textDelta:
+            // Transport streaming is not a chat presentation event.
+            break
         case .message(_, let text):
-            streaming = ""
-            appendAssistant(text, conversationID: cid)
+            pendingReply = text
         case .toolCall(_, let req):
+            // A completion followed by tools is progress narration, not the final reply.
+            pendingReply = nil
             appendTrimmed(ChatItem(id: req.requestID, kind: .tool(nil), text: String(format: NSLocalizedString("调用 %@…", comment: ""), req.tool), toolName: req.tool))
         case .toolResult(_, let r):
             if let i = items.lastIndex(where: { $0.id == r.requestID }) {
@@ -284,15 +356,20 @@ final class AgentModel {
                 items[i].kind = .tool(r.status)
                 items[i].text = items[i].text.replacingOccurrences(of: "…", with: "")
                 items[i].toolError = r.error?.message
+                savePresentation(items[i], conversationID: cid)
+            } else if let saved = store.message(r.requestID, conversationID: cid) {
+                // A long response may have evicted the original call from the visible window.
+                var item = Self.item(saved)
+                item.kind = .tool(r.status)
+                item.text = item.text.replacingOccurrences(of: "…", with: "")
+                item.needsPermissionSettings = r.error?.code == .permissionDenied || r.error?.code == .sourceDisabled
+                item.toolError = r.error?.message
+                savePresentation(item, conversationID: cid)
             } else {
                 appendTrimmed(ChatItem(id: r.requestID, kind: .tool(r.status), text: NSLocalizedString("工具调用", comment: ""), needsPermissionSettings: r.error?.code == .permissionDenied || r.error?.code == .sourceDisabled, toolError: r.error?.message))
             }
         case .clarification(_, let q):
-            // The clarification is the authoritative reply for this turn. Do not
-            // flush earlier model narration as another reply when the stream ends.
-            streaming = ""
-            formValues.removeValue(forKey: "streaming")
-            appendAssistant(q, conversationID: cid)
+            pendingReply = q
         case .confirmationRequired:
             state = .awaitingConfirmation
         case .error(_, let msg):
@@ -303,20 +380,33 @@ final class AgentModel {
     }
 
     func finishTask(conversationID cid: String, now: Date = Date()) {
-        if !streaming.isEmpty {
-            appendAssistant(streaming, conversationID: cid)
-            streaming = ""
+        if state != .cancelled, let pendingReply, !pendingReply.isEmpty {
+            appendAssistant(pendingReply, conversationID: cid)
+        } else if state == .cancelled {
+            appendTrimmed(ChatItem(id: UUID().uuidString, kind: .notice, text: NSLocalizedString("已停止", comment: "")))
         }
+        pendingReply = nil
         if state == .pendingVerification {
             appendTrimmed(ChatItem(id: UUID().uuidString, kind: .notice, text: NSLocalizedString("任务中断，涉及写入的结果待核实；请勿假定已完成。", comment: "")))
         }
         if let started = taskStartedAt,
-           let index = items.indices.last(where: { $0 >= responseStartIndex && items[$0].kind == .assistant }) {
+           let index = items.indices.last(where: { $0 >= responseStartIndex && items[$0].kind == .assistant })
+                ?? items.indices.last(where: { $0 >= responseStartIndex }) {
             items[index].workSeconds = max(0, Int(now.timeIntervalSince(started)))
         }
         for index in items.indices where items[index].responseID == taskID && items[index].kind == .assistant {
             items[index].completedAt = now
         }
+        for index in items.indices where items[index].responseID == taskID {
+            if case .tool(nil) = items[index].kind {
+                items[index].kind = .tool(.pendingVerification)
+                items[index].text = items[index].text.replacingOccurrences(of: "…", with: "")
+            }
+        }
+        for item in items where item.responseID == taskID {
+            savePresentation(item, conversationID: cid)
+        }
+        app.activeConversationIDs.remove(cid)
         taskStartedAt = nil
         taskID = nil
         streamTask = nil

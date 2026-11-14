@@ -1,9 +1,9 @@
 {
   "id": "text_tools",
   "name": "Text Tools",
-  "version": "1.0.0",
-  "apiVersion": 1,
-  "entry": "index.mjs",
+  "version": "1.0.1",
+  "apiVersion": 2,
+  "entry": "text-tools",
   "tools": [
     {
       "name": "transform",

@@ -9,8 +9,6 @@ parser = argparse.ArgumentParser(description="Package a built Asky release as DM
 parser.add_argument('--version', required=True)
 parser.add_argument('--build', required=True)
 parser.add_argument('--derived-data', required=True, type=Path)
-parser.add_argument('--runtime', required=True, type=Path)
-parser.add_argument('--node-root', required=True, type=Path)
 parser.add_argument('--signing-identity', default=RELEASE_IDENTITY)
 parser.add_argument('--notary-profile', default=DEFAULT_PROFILE)
 args = parser.parse_args()
@@ -29,11 +27,11 @@ if app.exists():
 shutil.copytree(args.derived_data / 'Build/Products/Release/Asky.app', app, symlinks=True)
 resources = app / 'Contents/Resources'
 shutil.copy2(repo / 'LICENSE', resources / 'LICENSE')
-shutil.copytree(args.runtime, resources / 'AgentRuntime', symlinks=True)
-node_dir = resources / 'node'
-(node_dir / 'bin').mkdir(parents=True)
-shutil.copy2(args.node_root / 'bin/node', node_dir / 'bin/node')
-shutil.copy2(args.node_root / 'LICENSE', node_dir / 'LICENSE')
+for retired in ('AgentRuntime', 'node'):
+    if (resources / retired).exists():
+        raise SystemExit(f'Rebuild the native app without retired runtime resources: {retired}')
+if not (resources / 'PluginSupport/plugin-runner.mjs').is_file():
+    raise SystemExit('Legacy plugin compatibility resource is missing')
 info_path = app / 'Contents/Info.plist'
 with info_path.open('rb') as f:
     info = plistlib.load(f)
@@ -44,12 +42,6 @@ info.pop('KHSourceRoot', None)
 with info_path.open('wb') as f:
     plistlib.dump(info, f)
 sign_bundle(app, args.signing_identity)
-with tempfile.TemporaryDirectory(prefix='kulahere-release-smoke-') as data_dir:
-    result = subprocess.run([str(node_dir / 'bin/node'), str(resources / 'AgentRuntime/dist/src/main.js'), '--data-dir', data_dir], input='{"type":"hello","protocol":2}\n{"type":"shutdown"}\n', text=True, capture_output=True, timeout=30, env={'HOME': data_dir, 'PATH': '/usr/bin:/bin', 'TMPDIR': data_dir})
-    (root / f'release-{args.version}-bundled-runtime-smoke.log').write_text(result.stdout + result.stderr)
-    assert result.returncode == 0, result.stderr
-    frames = [json.loads(line) for line in result.stdout.splitlines()]
-    assert any(frame.get('type') == 'ready' and frame.get('protocol') == 2 for frame in frames), result.stdout
 with tempfile.TemporaryDirectory(prefix='asky-notarize-') as temporary:
     archive = Path(temporary) / 'Asky.zip'
     subprocess.run(['ditto', '-c', '-k', '--sequesterRsrc', '--keepParent', str(app), str(archive)], check=True)

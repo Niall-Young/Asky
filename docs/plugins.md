@@ -1,10 +1,37 @@
 # GitHub 插件
 
+当前 Agent 已迁移为 Swift 原生运行时，Asky 不再随包分发 Node / Pi。插件清单、安装配置、启停、工具命名和确认策略保持兼容。API v2 可执行文件由 Swift ToolService 直接启动；旧 API v1 JavaScript 插件使用本机 Node.js 22+，缺少 Node 时仅该插件调用不可用，不影响 Agent 与原生工具。
+
+## API v2 原生插件
+
+清单沿用下文全部配置、tools、commands 和指导字段，将 `apiVersion` 改为 `2`，`entry` 指向插件目录内有执行权限的程序。建议分发签名的 macOS arm64 Swift 可执行文件；Git 必须保留入口的可执行位。安装时验证文件与权限，不在用户设备编译、不安装 npm 依赖。示例源码与清单见 [native-echo](../examples/plugins/native-echo/main.swift)，作者在发布仓库前执行 `xcrun swiftc -O main.swift -o native-echo`，提交编译产物和清单；应用不内置或自动安装这个示例。
+
+每次工具执行或回读启动一个进程，通过 stdin / stdout 交换单行 JSON。stdin 第一行包含 `tool`、`arguments`、`requestID`、`configuration`、`state`、`inputSchema`、`readback`、`output`；`entry` 是宿主已校验的入口路径。宿主在执行前校验 JSON Schema。工具逻辑必须根据 `readback` 区分执行与核实，不重放写入。
+
+```json
+{"type":"result","value":{"text":"完成后的实际结果"}}
+```
+
+失败返回 `{"type":"result","error":"原因","errorCode":"invalidArguments"}`（其他错误为 adapterFailure）。stdout 仅承载协议，诊断写 stderr，由宿主限量保存到 execution.log。
+
+插件可以请求宿主保存状态或以 argv 执行 CLI，等待 stdin 中同一 id 的响应：
+
+```json
+{"type":"rpc","id":1,"method":"state","value":{"checkpoint":"attempting"}}
+{"type":"rpc","id":2,"method":"exec","executable":"/path/to/cli","arguments":["status","--json"],"timeoutSeconds":20}
+```
+
+宿主响应为 `{"id":1,"value":true}` 或 `{"id":2,"value":{"stdout":"...","stderr":"...","exitCode":0}}`，失败为 `{"id":2,"error":"原因"}`。id 在调用内唯一。状态与 CLI 仍经 ToolService，模型 Key 不进入环境。API v2 复用 API v1 的超时、取消、输出上限、版本租约、回读和未知结果策略。可信插件仍不是沙箱；其自身代码拥有当前用户权限。
+
+Orca / 飞书插件已提供 API v2 Swift 原生入口，插件执行器不再需要 Node / npm。CLI 本身的安装、登录与运行环境仍由用户准备。插件 ID、工具名、配置字段与持久化状态保持兼容，旧安装可通过插件更新迁移；旧 API v1 版本仍可回退并通过本机 Node 兼容入口运行。独立仓库是否已发布，以其默认分支清单为准。
+
 Asky 插件是用户主动安装的可信本机代码。主应用携带插件宿主，不携带官方插件实现；官方与自行安装的插件使用同一套安装和执行接口。官方插件各自拥有独立仓库，包括 [Orca](https://github.com/Niall-Young/asky-plugin-orca) 与 [飞书 / Lark](https://github.com/Niall-Young/asky-plugin-lark)。不提供系统沙箱，也不宣称能力声明能限制插件自行执行的代码。
 
 插件可以同时提供启动器功能和 Agent 工具，也可以只提供其中一种。启动器命令无需模型配置、不启动 AI 会话；既有只声明 `tools` 的插件继续兼容。已有 Orca / 飞书插件不会自动获得启动器入口，需要插件作者声明 `commands`。
 
 ## 启动器功能扩展
+
+`tools` 与 `commands` 共用 API v2 原生入口及权限生命周期：Agent 通过工具名调用，聚焦搜索通过命令引用调用，不启动模型。纯功能插件将工具的 `agentVisible` 设为 false；混合插件可同时声明两类入口。动态输入仍由宿主防抖、取消和丢弃过期结果，原生插件无需实现 UI。
 
 安装并启用后，在普通搜索中按命令标题、插件名称或触发词查找入口，回车进入。唯一且未与已有内置指令、网页指令或别名冲突的触发词可用 `触发词 空格` 直接进入。重名触发词不抢占已有路由，仍可按标题选择入口。Esc 返回普通搜索并保留输入，空输入退格退出；隐藏窗口取消当前调用并清理临时结果，不撤销已完成的外部操作。
 
@@ -42,7 +69,7 @@ return {
 
 列表项 `id` 在本次结果中唯一，`title` 非空，`subtitle` 可选。`copy` 添加复制动作，`url` 添加 HTTP/HTTPS 打开动作；同时声明时复制为主动作，打开位于 `⌘K` 菜单。无动作的项目只展示。`text` 生成可复制的单条结果，`items: []` 显示无匹配状态。宿主不会执行返回内容中的 HTML、脚本、Shell 或工具调用。写命令只有执行完成并通过原有回读流程后才展示成功结果；未知结果显示待核实，不自动重放。
 
-可运行的 [Text Tools 示例](../examples/plugins/text-tools/asky-plugin.json) 提供 URL 编解码、Base64 编码和 UUID 生成，无 npm 依赖。将 `examples/plugins/text-tools/` 的内容放到公开 GitHub 仓库根目录，即可沿用设置中的 GitHub 安装流程；应用不会自动安装示例，也不修改用户现有插件配置。本版使用原生结果列表，不提供插件自定义 HTML 或任意窗口视图接口。
+可运行的 API v2 [Text Tools 示例](../examples/plugins/text-tools/asky-plugin.json) 提供 URL 编解码、Base64 编码和 UUID 生成，是不向 Agent 暴露工具的纯聚焦搜索插件。原生 `text-tools` 可执行文件随示例分发，用户无需 Node、npm 或编译器。作者修改 Swift 源码后先运行 `./examples/plugins/text-tools/build.sh`，再将该目录内容放到公开 GitHub 仓库根目录，即可沿用设置中的 GitHub 安装流程；应用不会自动安装示例，也不修改用户现有插件配置。本版使用原生结果列表，不提供插件自定义 HTML 或任意窗口视图接口。
 
 ## 安装与生命周期
 
@@ -54,7 +81,7 @@ return {
 
 安装需要 Git。插件存放在现有应用数据根目录的 `plugins/<id>/`；配置、来源、commit、启用状态和运行状态保存在 LocalStore。安装时一次说明本机代码执行能力；安装完成默认停用，需要用户手动开启；更新或回退保留用户选择的启用状态，缺少必填配置时不提供工具。不会自动安装任何插件。
 
-插件提供可直接运行的 JS/ESM 入口；不执行构建命令。有运行依赖时要求 package-lock.json 和本机 npm，执行 `npm ci --omit=dev --ignore-scripts --no-audit --no-fund`。首版不支持需要安装脚本的依赖。Orca 无 npm 依赖，使用 Asky 的随包 Node。
+API v1 插件提供可直接运行的 JS/ESM 入口；不执行构建命令。有运行依赖时要求 package-lock.json 和本机 npm，执行 `npm ci --omit=dev --ignore-scripts --no-audit --no-fund`。不支持需要安装脚本的依赖。旧版 Orca 无 npm 依赖，使用用户本机 Node；不再使用随包 Node。
 
 下载、清单检查和依赖安装在临时目录完成后切换。更新由用户触发，失败保留旧版本，成功后保留一个旧版供回退。执行期间固定版本与配置，更新/卸载等待该插件的调用和回读结束。停用立即阻止后续调用；工具与指导在下一次 AI 请求刷新，不取消其他会话。
 

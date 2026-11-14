@@ -77,7 +77,7 @@ public actor PluginManager {
             try await waitUntilIdle(m.id)
         }
         let package = staging.appending(path: "package.json")
-        if FileManager.default.fileExists(atPath: package.path) {
+        if m.apiVersion == 1 && FileManager.default.fileExists(atPath: package.path) {
             let value = try JSONDecoder().decode(JSONValue.self, from: Data(contentsOf: package))
             if !(value["dependencies"]?.objectValue ?? [:]).isEmpty {
                 guard FileManager.default.fileExists(atPath: staging.appending(path: "package-lock.json").path) else { throw ToolError(.invalidArguments, CoreLocalization.text("插件依赖需要 package-lock.json")) }
@@ -193,7 +193,6 @@ public actor PluginManager {
     func invoke(pluginID: String, tool: String, arguments: JSONValue, requestID: String, readback: Bool, output: JSONValue?) async throws -> JSONValue {
         guard let p = leases[requestID], p.id == pluginID,
               readback || records.first(where: { $0.id == pluginID })?.enabled == true else { throw ToolError(.sourceDisabled, CoreLocalization.text("插件已停用或正在更新")) }
-        guard let node = runtime.nodePath, let runner = runtime.runnerPath else { throw ToolError(.unavailable, CoreLocalization.text("插件运行时不可用，请检查 Asky 的 Node 与 AgentRuntime")) }
         let directory = root.appending(path: pluginID)
         let entry = try PluginManifest.resource(p.manifest.entry, at: directory)
         let stateKey = "plugins.state.\(pluginID)"
@@ -201,7 +200,17 @@ public actor PluginManager {
         let payload: JSONValue = ["entry": .string(entry.path), "tool": .string(tool), "arguments": arguments,
                                   "requestID": .string(requestID), "configuration": .object(p.configuration),
                                   "state": currentState, "inputSchema": p.manifest.tools.first(where: { $0.name == tool })?.inputSchema ?? [:], "readback": .bool(readback), "output": output ?? .null]
-        return try await PluginWorker.run(node: node, runner: runner, directory: directory, payload: payload,
+        if !readback { try PluginArguments.validate(arguments, schema: payload["inputSchema"] ?? [:]) }
+        let executable: String, workerArguments: [String]
+        if p.manifest.apiVersion == 2 {
+            executable = entry.path; workerArguments = []
+        } else {
+            guard let node = runtime.nodePath ?? (try? PluginProcess.executable("node")), let runner = runtime.runnerPath else {
+                throw ToolError(.unavailable, CoreLocalization.text("此旧版 JavaScript 插件需要本机 Node.js 22+；请安装 Node 或更新为原生 API v2 插件。"))
+            }
+            executable = node; workerArguments = [runner]
+        }
+        return try await PluginWorker.run(executable: executable, arguments: workerArguments, directory: directory, payload: payload,
                                          saveState: { [store] value in store.setCodableSetting(stateKey, value) })
     }
 }

@@ -188,7 +188,7 @@ enum AgentReplyRegression {
 
     static func formPreview(app: AppModel, model: AgentModel) async throws {
         let store = ConversationStore(app.store)
-        let cid = try store.create(title: "原生流式表单")
+        let cid = try store.create(title: "会议安排")
         try store.append(conversationID: cid, role: "user", text: "帮我安排会议，先让我选择时间和议题。")
         model.open(cid)
         let prefix = "请补充会议信息：\n\n```asky-form\n{\"title\":\"会议安排\"}\n{\"id\":\"title\",\"type\":\"text\",\"label\":\"会议名称\",\"required\":true}\n"
@@ -236,24 +236,26 @@ enum AgentReplyRegression {
         }
         model.beginResponse(taskID: "form-stream")
         model.handle(.textDelta(taskID: "form-stream", prefix), conversationID: cid)
-        try await Task.sleep(for: .milliseconds(500))
-        precondition(ChatFormParser.parse(model.streaming, streaming: true).contains {
-            if case .form(let f) = $0.content { f.fields.count == 1 && !f.isComplete } else { false }
-        })
+        try await Task.sleep(for: .milliseconds(150))
+        precondition(!model.items.contains { $0.kind == .assistant }, "Forms must stay hidden while the reply is being prepared")
+        try capture("pending")
+        model.handle(.message(taskID: "form-stream", prefix + rest), conversationID: cid)
+        precondition(!model.items.contains { $0.kind == .assistant }, "Even a complete message must wait for task completion")
+        model.handle(.taskState(taskID: "form-stream", .completed), conversationID: cid)
+        model.finishTask(conversationID: cid)
+        let messageID = model.items.last!.id
+        try await Task.sleep(for: .milliseconds(250))
         func editableField(_ view: NSView) -> NSTextField? {
             if let field = view as? NSTextField, field.isEditable { return field }
             return view.subviews.compactMap { editableField($0) }.first
         }
-        // Edit the real native field while the reply is still streaming.
-        let streamingField = editableField(window.contentView!)
-        if let field = editableField(window.contentView!), window.makeFirstResponder(field), let editor = field.currentEditor() {
+        let answerField = editableField(window.contentView!)
+        if let field = answerField, window.makeFirstResponder(field), let editor = field.currentEditor() {
             editor.insertText("原生输入回归")
             try await Task.sleep(for: .milliseconds(100))
-            precondition(model.formValues["streaming"]?["title"] == ["原生输入回归"])
-        } else { preconditionFailure("the streaming form must expose an editable native text field") }
-        try capture("streaming")
-        model.handle(.textDelta(taskID: "form-stream", rest), conversationID: cid)
-        try await Task.sleep(for: .milliseconds(100))
+            precondition(model.formValues[messageID]?["title"] == ["原生输入回归"])
+        } else { preconditionFailure("The complete reply must expose an editable native form") }
+        try capture("complete")
         func popup(_ view: NSView) -> NSPopUpButton? {
             if let button = view as? NSPopUpButton, button.numberOfItems == 3 { return button }
             return view.subviews.compactMap { popup($0) }.first
@@ -261,9 +263,9 @@ enum AgentReplyRegression {
         let picker = popup(window.contentView!)!
         picker.selectItem(at: 1)
         NSApplication.shared.sendAction(picker.action!, to: picker.target, from: picker)
-        precondition(model.formValues["streaming"]?["duration"] == ["30 分钟"], "native popup selection must update the answer")
-        model.formValues["streaming"]?["topics"] = ["设计方案"]
-        model.formValues["streaming"]?["day"] = ["2026-10-22"]
+        precondition(model.formValues[messageID]?["duration"] == ["30 分钟"], "native popup selection must update the answer")
+        model.formValues[messageID]?["topics"] = ["设计方案"]
+        model.formValues[messageID]?["day"] = ["2026-10-22"]
         if testingRadio {
             func radio(_ title: String, in view: NSView) -> NSButton? {
                 if let button = view as? NSButton, button.title == title { return button }
@@ -282,10 +284,10 @@ enum AgentReplyRegression {
             }
             choose(a)
             try await Task.sleep(for: .milliseconds(50))
-            precondition(model.formValues["streaming"]?["plan"] == ["方案 A"])
+            precondition(model.formValues[messageID]?["plan"] == ["方案 A"])
             choose(c)
             try await Task.sleep(for: .milliseconds(50))
-            precondition(model.formValues["streaming"]?["plan"] == ["方案 C"])
+            precondition(model.formValues[messageID]?["plan"] == ["方案 C"])
             precondition(a.state == .off && b.state == .off && c.state == .on, "a radio group must keep only one selection")
             choose(later)
             try await Task.sleep(for: .milliseconds(50))
@@ -317,20 +319,12 @@ enum AgentReplyRegression {
                 try await choose(leading[0], 3)
                 try await choose(row(leading[0])[1], 30)
                 try await choose(leading[1], 30)
-                precondition(model.formValues["streaming"]?["countdown"] == ["03:30"])
-                precondition(model.formValues["streaming"]?["seconds"] == ["30"])
+                precondition(model.formValues[messageID]?["countdown"] == ["03:30"])
+                precondition(model.formValues[messageID]?["seconds"] == ["30"])
             }
-            precondition(model.formValues["streaming"]?["time"] == [testingComponents ? "14:30:45" : "14:30"], "only requested time components must be submitted")
+            precondition(model.formValues[messageID]?["time"] == [testingComponents ? "14:30:45" : "14:30"], "only requested time components must be submitted")
         }
-        precondition(!model.submitForm("streaming"), "cannot submit a running response")
-        model.handle(.message(taskID: "form-stream", prefix + rest), conversationID: cid)
-        let messageID = model.items.last!.id
-        precondition(model.formValues[messageID]?["title"] == ["原生输入回归"], "completion must preserve typed input")
-        precondition(!model.submitForm(messageID), "wait for task completion before submitting")
-        model.finishTask(conversationID: cid)
-        try await Task.sleep(for: .milliseconds(150))
-        precondition(editableField(window.contentView!) === streamingField, "completion must preserve the native field instance")
-        precondition(streamingField?.currentEditor() != nil, "completion must preserve input focus")
+        precondition(editableField(window.contentView!) === answerField, "Editing must retain the same native field")
         precondition(model.formIsActive(messageID))
         precondition(ChatFormParser.form(in: model.items.last!.text)!.accepts(model.formValues[messageID]!))
         for (name, appearance, width) in [("light", NSAppearance.Name.aqua, 760.0),
@@ -413,13 +407,119 @@ enum AgentReplyRegression {
         precondition(!model.formIsActive(messageID) && !model.submitForm(messageID))
         try await Task.sleep(for: .milliseconds(150))
         try capture("field-dark-disabled")
-        precondition(model.items.last!.text == reply)
+        // The intentionally missing credential appends an error after the submitted reply.
+        precondition(model.state == .failed, "The test credential must fail without a real model call")
+        precondition(model.items.filter { $0.kind == .user && $0.text == reply }.count == 1,
+                     "The form reply must survive history exactly once, including when the request fails")
         precondition(ChatFormParser.form(in: model.items[1].text)?.fields.count == (testingTime || testingRadio ? 5 : 4))
         // New session and opening history are native-only; no model calls are needed for rendering.
         await model.startNewConversation()
         precondition(model.formValues.isEmpty)
         await app.shutdown()
-        print("Native form UI: early editable field, real native typing, completion transfer, light/dark/narrow captures, history, replay prevention and conversation cleanup passed")
+        print("Native form UI: hidden until completion, native typing, light/dark/narrow captures, history, replay prevention and cleanup passed")
+    }
+
+    static func historyRegression(app: AppModel) throws {
+        let store = ConversationStore(app.store)
+        let cid = try store.create(title: "工具历史回归")
+        let model = AgentModel(app: app)
+        model.open(cid)
+        let startedAt = Date()
+        model.beginResponse(taskID: "history-turn", now: startedAt)
+        model.handle(.message(taskID: "history-turn", "先检查日历"), conversationID: cid)
+        for index in 0..<45 {
+            let request = ActionRequest(requestID: "history-call-\(index)", tool: "calendar_search", arguments: .object([:]),
+                taskID: "history-turn", origin: .agent(sessionID: cid), intent: .explicitRequest)
+            model.handle(.toolCall(taskID: "history-turn", request), conversationID: cid)
+            if index < 44 {
+                model.handle(.toolResult(taskID: "history-turn", .failure(request.requestID, .permissionDenied, "请授权日历")), conversationID: cid)
+            }
+        }
+        model.handle(.error(taskID: "history-turn", "执行已中断"), conversationID: cid)
+        model.handle(.taskState(taskID: "history-turn", .pendingVerification), conversationID: cid)
+        model.handle(.message(taskID: "history-turn", "请检查授权"), conversationID: cid)
+        model.finishTask(conversationID: cid, now: startedAt.addingTimeInterval(13))
+        let expected = model.items
+        let reopened = AgentModel(app: app)
+        reopened.open(cid)
+        precondition(reopened.items.count == AgentModel.firstPage)
+        reopened.loadOlder()
+        precondition(reopened.items == expected, "Tool state, errors, ordering, response groups and elapsed time must survive paging/reopening")
+        precondition(reopened.items.filter { if case .tool = $0.kind { true } else { false } }.count == 45)
+        precondition(reopened.items.contains { $0.kind == .tool(.pendingVerification) })
+        precondition(reopened.items.contains { $0.kind == .tool(.failed) && $0.needsPermissionSettings && $0.toolError == "请授权日历" })
+        precondition(reopened.items.last(where: { $0.kind == .assistant })?.workSeconds == 13)
+        precondition(!reopened.isRunning)
+        let longID = try store.create(title: "长工具历史")
+        reopened.open(longID)
+        reopened.beginResponse(taskID: "long-turn")
+        for index in 0..<125 {
+            let request = ActionRequest(requestID: "long-call-\(index)", tool: "calendar_search", arguments: .object([:]),
+                taskID: "long-turn", origin: .agent(sessionID: longID), intent: .explicitRequest)
+            reopened.handle(.toolCall(taskID: "long-turn", request), conversationID: longID)
+        }
+        reopened.handle(.toolResult(taskID: "long-turn", .failure("long-call-0", .permissionDenied, "迟到的结果")), conversationID: longID)
+        reopened.finishTask(conversationID: longID)
+        precondition(store.message("long-call-0", conversationID: longID)?.presentation?.toolStatus == .failed)
+        precondition(store.messages(conversationID: longID, limit: 200).count == 125, "Evicted tool results must update their original record")
+        reopened.loadOlder()
+        precondition(reopened.items.first?.id == "long-call-0", "History must remain pageable after the live window is trimmed")
+        print("Historical transcript regression passed: tools, failure/permission state, interrupted tool, notices, errors, grouping, timing and pagination")
+    }
+
+    static func completeReplyRegression(app: AppModel, capture: Bool = false) async throws {
+        let model = AgentModel(app: app)
+        let store = ConversationStore(app.store)
+        let cid = try store.create(title: "打开 Claude Code")
+        try store.append(conversationID: cid, role: "user", text: "帮我在 Orca 的 Asky 项目中打开 Claude Code")
+        model.open(cid)
+        model.beginResponse(taskID: "complete-reply", now: Date().addingTimeInterval(-8))
+        model.handle(.taskState(taskID: "complete-reply", .running), conversationID: cid)
+        let controller = capture ? AgentWindowController(model: model, presentation: WindowPresentation()) : nil
+        if let controller { controller.show() }
+        func group() -> ChatResponseGroup {
+            ChatResponseGroup(id: "complete-reply", items: model.items.filter { $0.responseID == "complete-reply" }, isRunning: model.isRunning, state: model.state)
+        }
+        func snapshot(_ name: String) async throws {
+            guard capture else { return }
+            try await Task.sleep(for: .milliseconds(300))
+            let view = NSApplication.shared.windows.first { $0.title == "Asky AI" }!.contentView!
+            view.layoutSubtreeIfNeeded()
+            let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds)!
+            view.cacheDisplay(in: view.bounds, to: bitmap)
+            try bitmap.representation(using: .png, properties: [:])!.write(to: URL(filePath: "build/reply-activity-\(name).png"))
+        }
+        precondition(group().activityLabel == NSLocalizedString("思考中…", comment: ""))
+        try await snapshot("thinking")
+        for (index, text) in ["先查看项目。", "已找到项目，继续查看工作区。"].enumerated() {
+            model.handle(.textDelta(taskID: "complete-reply", text), conversationID: cid)
+            model.handle(.message(taskID: "complete-reply", text), conversationID: cid)
+            precondition(!model.items.contains { $0.kind == .assistant }, "Progress narration must never enter the transcript")
+            let request = ActionRequest(requestID: "activity-tool-\(index)", tool: "plugin_orca__cli_query", arguments: [:], origin: .agent(sessionID: cid), intent: .explicitRequest)
+            model.handle(.toolCall(taskID: "complete-reply", request), conversationID: cid)
+            precondition(group().activityLabel == String(format: NSLocalizedString("正在使用 %@…", comment: ""), "Orca"))
+            if index == 0 { try await snapshot("tool") }
+            model.handle(.toolResult(taskID: "complete-reply", ExecutionResult(requestID: request.requestID, status: .completed)), conversationID: cid)
+            precondition(group().activityLabel == NSLocalizedString("思考中…", comment: ""))
+        }
+        model.handle(.taskState(taskID: "complete-reply", .compacting), conversationID: cid)
+        precondition(group().activityLabel == NSLocalizedString("正在压缩上下文…", comment: ""))
+        model.handle(.taskState(taskID: "complete-reply", .running), conversationID: cid)
+        let final = "### 已启动 Claude Code\n\n- 项目：**Asky**\n- 打开方式：CLI 终端窗口\n- 终端句柄：`term_5`"
+        model.handle(.textDelta(taskID: "complete-reply", final), conversationID: cid)
+        model.handle(.message(taskID: "complete-reply", final), conversationID: cid)
+        precondition(!model.items.contains { $0.kind == .assistant }, "The complete reply must appear atomically after completion")
+        try await snapshot("pending-result")
+        model.handle(.taskState(taskID: "complete-reply", .completed), conversationID: cid)
+        model.finishTask(conversationID: cid)
+        precondition(!model.isRunning)
+        precondition(model.items.filter { $0.kind == .assistant }.count == 1)
+        precondition(model.items.last?.text == final)
+        try await snapshot("completed")
+        model.open(cid)
+        precondition(model.items.filter { $0.kind == .assistant }.count == 1, "History must contain only the completed answer")
+        if capture { NSApplication.shared.windows.first { $0.title == "Asky AI" }?.close() }
+        print("Complete reply regression passed: thinking/tool/context activity, no partial text, one final answer and history")
     }
 
     static func main() async throws {
@@ -437,6 +537,9 @@ enum AgentReplyRegression {
         defer { try? FileManager.default.removeItem(at: root) }
         let app = try AppModel(root: root)
         let model = AgentModel(app: app)
+        try await completeReplyRegression(app: app, capture: CommandLine.arguments.contains("--reply-activity-preview"))
+        if CommandLine.arguments.contains("--reply-activity-preview") { return }
+        try historyRegression(app: app)
         if CommandLine.arguments.contains("--forms-preview") {
             try await formPreview(app: app, model: model)
             return
@@ -579,7 +682,6 @@ enum AgentReplyRegression {
         precondition(model.items[0].completedAt == completedAt)
         precondition(model.items[0].responseID == "clarification")
         precondition(model.items.count == 1, "clarification must have only one reply/copy button")
-        precondition(model.streaming.isEmpty)
         precondition(model.items[0].workSeconds == 13, "finished reply retains elapsed time")
         precondition(store.messages(conversationID: cid, limit: 40).count == 1)
         model.open(cid)
@@ -594,7 +696,7 @@ enum AgentReplyRegression {
         model.handle(.textDelta(taskID: "stopped", "停止时保留的部分回答"), conversationID: cid)
         model.handle(.taskState(taskID: "stopped", .cancelled), conversationID: cid)
         model.finishTask(conversationID: cid)
-        precondition(model.items.count == 3 && model.items.last?.workSeconds != nil)
+        precondition(model.items.count == 3 && model.items.last?.kind == .notice && model.items.last?.text == NSLocalizedString("已停止", comment: ""))
         precondition(model.taskStartedAt == nil && !model.isRunning)
         let clock = Date(timeIntervalSince1970: 1_800_000_000)
         for (age, key, value) in [(0, "刚刚", 0), (59, "刚刚", 0), (60, "%d 分钟前", 1),
@@ -630,7 +732,7 @@ enum AgentReplyRegression {
         model.attachmentThumbnails = ["old": Data([1])]
         let revision = model.newConversationRevision
         await model.startNewConversation()
-        precondition(model.conversationID == nil && model.items.isEmpty && model.streaming.isEmpty)
+        precondition(model.conversationID == nil && model.items.isEmpty)
         precondition(model.draft.isEmpty && model.attachments.isEmpty && model.attachmentThumbnails.isEmpty)
         precondition(model.state == nil && model.newConversationRevision == revision + 1)
         precondition(!store.messages(conversationID: attachmentID, limit: 40).isEmpty, "new conversation preserves old history")

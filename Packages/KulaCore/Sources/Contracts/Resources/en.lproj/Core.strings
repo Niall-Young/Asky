@@ -145,7 +145,6 @@
 "插件清单无效或 API 版本不兼容" = "The plugin manifest is invalid or its API version is incompatible";
 "插件清单过大" = "The plugin manifest is too large";
 "插件运行协议无效" = "Invalid plugin runtime protocol";
-"插件运行时不可用，请检查 Asky 的 Node 与 AgentRuntime" = "The plugin runtime is unavailable. Check Asky's Node and AgentRuntime";
 "插件配置字段无效" = "Invalid plugin configuration field";
 "握手响应无效" = "Unexpected handshake reply";
 "搜索响应编码无法解析" = "The search response encoding could not be decoded";
@@ -335,3 +334,17 @@
 "插件结果必须包含文本或列表" = "Plugin output must contain text or items";
 "插件结果格式无效" = "Invalid plugin result";
 "插件结果链接必须使用 HTTP 或 HTTPS" = "Plugin result URLs must use HTTP or HTTPS";
+"会话标识无效" = "Invalid session identifier";
+"会话路径无效" = "Invalid session path";
+"文件超过读取上限" = "File exceeds the read limit";
+"会话记录无效" = "Invalid session record";
+"旧会话路径无效" = "Invalid legacy session path";
+"会话超过保存上限" = "Session exceeds the storage limit";
+"附件数量超过上限" = "Too many attachments";
+"图片格式不受支持" = "Unsupported image format";
+"API v2 插件入口必须是可执行文件" = "An API v2 plugin entry must be executable";
+"此旧版 JavaScript 插件需要本机 Node.js 22+；请安装 Node 或更新为原生 API v2 插件。" = "This legacy JavaScript plugin requires local Node.js 22+. Install Node or update the plugin to native API v2.";
+"模型 API 地址无效" = "Invalid model API URL";
+"模型请求失败（HTTP %d）" = "Model request failed (HTTP %d)";
+"模型响应无效：%@" = "Invalid model response: %@";
+"模型响应超过大小上限" = "Model response exceeds the size limit";

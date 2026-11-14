@@ -141,6 +141,7 @@ func tempRoot() -> URL {
         let row = try #require(db.query("SELECT * FROM messages WHERE id = 'message'").first)
         #expect(ConversationStore.decode(row).text == "old text")
         #expect(ConversationStore.decode(row).attachments.isEmpty)
+        #expect(ConversationStore.decode(row).presentation == nil)
     }
 
     @Test func messageAttachmentsSurviveReopeningAndPaging() throws {
@@ -162,6 +163,39 @@ func tempRoot() -> URL {
         #expect(reopened.search("查看").first?.attachments == refs)
         try reopened.delete(cid)
         #expect(reopened.messages(conversationID: cid, limit: 40).isEmpty)
+    }
+
+    @Test func transcriptStepsSurviveDiskReopenPagingAndUpdates() throws {
+        let root = tempRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = ConversationStore(try LocalStore(root: root))
+        let cid = try store.create(title: "工具记录")
+        let user = try store.append(conversationID: cid, role: "user", text: "检查日历")
+        let started = MessagePresentation(responseID: "turn", toolName: "calendar_search")
+        let call = try store.append(conversationID: cid, role: "tool", text: "调用 calendar_search…",
+                                    id: "call", presentation: started)
+        let ended = MessagePresentation(responseID: "turn", toolName: "calendar_search", toolStatus: .failed,
+                                        toolError: "缺少权限", needsPermissionSettings: true)
+        try store.updateMessage(call.id, conversationID: cid, text: "调用 calendar_search", presentation: ended)
+        let completedAt = Date(timeIntervalSince1970: 1800000000)
+        let reply = MessagePresentation(responseID: "turn", workSeconds: 13, completedAt: completedAt)
+        try store.append(conversationID: cid, role: "error", text: "请求失败", presentation: .init(responseID: "turn"))
+        try store.append(conversationID: cid, role: "assistant", text: "请授权", presentation: reply)
+        let reopened = ConversationStore(try LocalStore(root: root))
+        let newest = reopened.messages(conversationID: cid, limit: 2)
+        #expect(newest.map(\.role) == ["error", "assistant"])
+        #expect(newest.last?.presentation == reply)
+        let older = reopened.messages(conversationID: cid, limit: 2, beforeSeq: newest[0].seq)
+        #expect(older.map(\.id) == [user.id, call.id])
+        #expect(older.last?.presentation == ended)
+        #expect(older.last?.text == "调用 calendar_search")
+        #expect(reopened.search("calendar").count == 1)
+        #expect(reopened.search("calendar").first?.presentation == ended)
+        #expect(older.first?.presentation == nil)
+        #expect(reopened.messages(conversationID: cid, limit: 2, dialogueOnly: true).map(\.role) == ["user", "assistant"])
+        try reopened.delete(cid)
+        #expect(reopened.messages(conversationID: cid, limit: 40).isEmpty)
+        #expect(reopened.search("calendar").isEmpty)
     }
 
     @Test func mcpInstanceLookupByHashOnly() throws {

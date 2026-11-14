@@ -7,6 +7,12 @@ public struct PluginRuntimeConfiguration: Sendable {
     public init(nodePath: String? = nil, runnerPath: String? = nil) {
         self.nodePath = nodePath; self.runnerPath = runnerPath
     }
+    /// API v1 compatibility uses the user's Node installation, never a bundled runtime.
+    public static func legacyCompatibility(bundleResources: URL?) -> Self {
+        let node = try? PluginProcess.executable("node")
+        let bundled = bundleResources?.appending(path: "PluginSupport/plugin-runner.mjs")
+        return .init(nodePath: node, runnerPath: bundled.flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0.path : nil })
+    }
 }
 public struct PluginConfigurationField: Codable, Sendable, Hashable, Identifiable {
     public var key: String
@@ -60,12 +66,15 @@ public struct PluginManifest: Codable, Sendable, Hashable {
 
     public func validate(at root: URL) throws {
         let valid: (String) -> Bool = { $0.range(of: "^[a-z][a-z0-9_-]{0,63}$", options: .regularExpression) != nil }
-        guard apiVersion == 1, valid(id), !name.isEmpty, !version.isEmpty, !tools.isEmpty,
+        guard [1, 2].contains(apiVersion), valid(id), !name.isEmpty, !version.isEmpty, !tools.isEmpty,
               Set(tools.map(\.name)).count == tools.count,
               Set((configuration ?? []).map(\.key)).count == (configuration ?? []).count else {
             throw ToolError(.invalidArguments, CoreLocalization.text("插件清单无效或 API 版本不兼容"))
         }
-        _ = try Self.resource(entry, at: root)
+        let executable = try Self.resource(entry, at: root)
+        if apiVersion == 2, !FileManager.default.isExecutableFile(atPath: executable.path) {
+            throw ToolError(.invalidArguments, CoreLocalization.text("API v2 插件入口必须是可执行文件"))
+        }
         if let instructions { _ = try Self.resource(instructions, at: root) }
         for field in configuration ?? [] {
             guard valid(field.key), ["text", "path", "boolean", "enum"].contains(field.type),

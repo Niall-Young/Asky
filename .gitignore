@@ -13,7 +13,4 @@ KulaHere.xcodeproj/
 App/Info.plist
 App/Asky.entitlements
 App/KulaHere.entitlements
-# AgentRuntime
-AgentRuntime/node_modules/
-AgentRuntime/dist/
 /scripts/__pycache__/

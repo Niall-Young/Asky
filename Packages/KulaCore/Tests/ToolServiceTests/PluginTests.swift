@@ -94,7 +94,7 @@ private func installer(version: String = "1", dependency: Bool = false, failure:
         defer { try? FileManager.default.removeItem(at: root) }
         var repository = URL(filePath: #filePath)
         for _ in 0..<5 { repository.deleteLastPathComponent() }
-        let runner = repository.appending(path: "AgentRuntime/dist/src/plugin-runner.js")
+        let runner = repository.appending(path: "PluginSupport/plugin-runner.mjs")
         let node = try PluginProcess.executable("node")
         #expect(FileManager.default.fileExists(atPath: runner.path))
         let store = try LocalStore(root: root)
@@ -153,7 +153,7 @@ private func installer(version: String = "1", dependency: Bool = false, failure:
         for _ in 0..<5 { repository.deleteLastPathComponent() }
         let service = ToolService(store: try LocalStore(root: root),
             policy: { PolicySnapshot(enabledSources: [.plugins]) }, presenter: { _ in .rejected },
-            pluginRuntime: .init(nodePath: try PluginProcess.executable("node"), runnerPath: repository.appending(path: "AgentRuntime/dist/src/plugin-runner.js").path))
+            pluginRuntime: .init(nodePath: try PluginProcess.executable("node"), runnerPath: repository.appending(path: "PluginSupport/plugin-runner.mjs").path))
         // Validate optional unpublished source through ToolService and its worker,
         // without changing the user's installed plugin or sending Agent prompts.
         if let source = ProcessInfo.processInfo.environment["ASKY_ORCA_PLUGIN_SOURCE"] {

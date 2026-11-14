@@ -156,8 +156,6 @@
 "暂无记忆" = "No memories";
 "未固定" = "Unpinned";
 "未执行" = "Not executed";
-"未找到 AgentRuntime（请先在 AgentRuntime/ 运行 npm install && npm run build）。" = "AgentRuntime wasn't found (run npm install and npm run build in AgentRuntime/ first).";
-"未找到 Node（需要 Node 22+）。" = "Node wasn't found (Node 22 or later is required).";
 "未授权，请到系统设置开启" = "Not authorized. Enable in System Settings.";
 "未检查" = "Not checked";
 "未监听（无已启用实例）" = "Not listening (no enabled instances)";
@@ -854,7 +852,6 @@
 
 "必填" = "Required";
 
-"正在生成表单…" = "Generating form…";
 
 "表单未生成完整，请在输入框回复。" = "The form is incomplete. Reply in the message field.";
 
@@ -877,3 +874,23 @@
 "请先退出全屏，再切换屏幕" = "Exit full screen before moving to another display";
 
 "搜索插件或命令" = "Search plugins or commands";
+
+"对话历史" = "Conversation History";
+
+"保留时间" = "Retention";
+
+"90 天" = "90 days";
+
+"永久" = "Forever";
+
+"对话历史清理失败，将自动重试。" = "Conversation history cleanup failed. It will be retried automatically.";
+
+"部分对话文件未能清理，将自动重试。" = "Some conversation files could not be removed. They will be retried automatically.";
+
+"对话仍有任务正在执行，请稍后重试。" = "This conversation still has a running task. Try again shortly.";
+
+"思考中…" = "Thinking…";
+
+"正在使用 %@…" = "Using %@…";
+
+"信息" = "Messages";
