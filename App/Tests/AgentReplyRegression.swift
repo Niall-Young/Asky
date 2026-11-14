@@ -1203,9 +1203,120 @@ enum AgentReplyRegression {
         print("Selection regression passed: 5 colors in light/dark, formula source, real menu action, deduplication, composer focus, failed-send preservation, send and history restore")
     }
 
+    static func continuousSelectionPreview() async throws {
+        let window = NSWindow(contentRect: NSRect(x: 140, y: 140, width: 680, height: 620),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.title = "Asky Continuous Selection"
+        var quoted = ""
+        let wrapped = String(repeating: "自动换行文字 ", count: 16).trimmingCharacters(in: .whitespaces)
+        let fixture = """
+        开始段落 Alpha
+
+        - 第一项 Apple
+        - 第二项 Banana \(wrapped)
+          - 嵌套项 Cherry
+        - 第三项 Date
+
+        1. 有序一 Echo
+        2. 有序二 Foxtrot
+
+        结束段落 Omega 和 $x^2$。
+        """
+        window.contentView = NSHostingView(rootView: ChatMarkdownView(text: fixture)
+            .environment(\.chatQuoteAction, { quoted = $0 }).padding(28)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading))
+        window.makeKeyAndOrderFront(nil)
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        defer { window.orderOut(nil) }
+        try await Task.sleep(for: .milliseconds(500))
+        func descendants(_ node: NSView) -> [NSView] { [node] + node.subviews.flatMap(descendants) }
+        let texts = descendants(window.contentView!).compactMap { $0 as? ChatSelectableTextView }
+        for text in texts {
+            precondition(abs(text.bounds.width - text.textContainer!.containerSize.width) < 1,
+                         "Width probes must not alter the rendered text container")
+        }
+        let first = texts.first { $0.string.contains("开始段落") }!
+        let last = texts.first { $0.string.contains("结束段落") }!
+        precondition(texts.first { $0.string.contains("第二项") }!.bounds.height > first.bounds.height * 2)
+        let group = first.selectionGroup!
+        precondition(texts.allSatisfy { $0.selectionGroup === group })
+        func point(_ view: ChatSelectableTextView, _ index: Int) -> NSPoint {
+            let manager = view.layoutManager!, container = view.textContainer!
+            let glyph = manager.glyphRange(forCharacterRange: NSRange(location: index, length: 1), actualCharacterRange: nil)
+            let rect = manager.boundingRect(forGlyphRange: glyph, in: container)
+            return view.convert(NSPoint(x: rect.minX + view.textContainerOrigin.x + 0.1,
+                                        y: rect.midY + view.textContainerOrigin.y), to: nil)
+        }
+        func event(_ type: NSEvent.EventType, _ point: NSPoint, in target: NSWindow) -> NSEvent {
+            NSEvent.mouseEvent(with: type, location: point, modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: target.windowNumber,
+                context: nil, eventNumber: 1, clickCount: 1, pressure: type == .leftMouseUp ? 0 : 1)!
+        }
+        func drag(_ from: ChatSelectableTextView, _ start: Int, _ to: ChatSelectableTextView, _ end: Int) {
+            let destination = point(to, end)
+            NSApplication.shared.postEvent(event(.leftMouseDragged, destination, in: window), atStart: false)
+            NSApplication.shared.postEvent(event(.leftMouseUp, destination, in: window), atStart: false)
+            from.mouseDown(with: event(.leftMouseDown, point(from, start), in: window))
+        }
+        drag(first, 5, last, 10)
+        let expected = "Alpha\n•\t第一项 Apple\n•\t第二项 Banana \(wrapped)\n◦\t嵌套项 Cherry\n•\t第三项 Date\n1.\t有序一 Echo\n2.\t有序二 Foxtrot\n结束段落 Omega"
+        precondition(group.selectedText == expected, "Forward drag mismatch: \(group.selectedText.debugDescription)")
+        drag(last, 10, first, 5)
+        precondition(group.selectedText == expected, "Reverse drag must preserve reading order")
+        try await Task.sleep(for: .milliseconds(250))
+        let menu = window.childWindows!.first { $0 is SurfacePanel && $0.isVisible }!
+        if #available(macOS 26.0, *), let glass = menu.contentView as? NSGlassEffectView {
+            precondition(abs(glass.cornerRadius - menu.frame.height / 2) < 0.01, "Menu must be a true capsule")
+        }
+        let capture = Process()
+        capture.executableURL = URL(filePath: "/usr/sbin/screencapture")
+        capture.arguments = ["-x", "-o", "-l", String(window.windowNumber), "build/continuous-selection.png"]
+        try capture.run(); capture.waitUntilExit()
+        precondition(capture.terminationStatus == 0)
+        let actionPoint = NSPoint(x: menu.frame.width * 0.72, y: menu.frame.height / 2)
+        NSApplication.shared.sendEvent(event(.leftMouseDown, actionPoint, in: menu))
+        try await Task.sleep(for: .milliseconds(140))
+        if #available(macOS 26.0, *), let glass = menu.contentView as? NSGlassEffectView {
+            precondition(abs(glass.cornerRadius - menu.frame.height / 2) < 0.01, "Pressed glass must stay capsule-shaped")
+        }
+        NSApplication.shared.sendEvent(event(.leftMouseUp, actionPoint, in: menu))
+        try await Task.sleep(for: .milliseconds(300))
+        precondition(quoted == expected, "Add to Chat must receive the complete continuous selection")
+        first.selectAll(nil)
+        precondition(group.selectedText.contains("x^2"), "Select All must include inline formula source")
+        precondition(group.orderedViews.allSatisfy { $0.selectedRange().length == ($0.string as NSString).length })
+        for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+            NSApplication.shared.sendEvent(event(type, NSPoint(x: 650, y: 20), in: window))
+        }
+        precondition(group.selectedText.isEmpty, "Blank click must clear every paragraph, including list markers")
+        let apple = texts.first { $0.string.contains("第一项") }!
+        let foxtrot = texts.first { $0.string.contains("有序二") }!
+        drag(apple, 4, foxtrot, 7)
+        precondition(group.selectedText.hasPrefix("Apple\n•\t第二项"))
+        precondition(group.selectedText.hasSuffix("2.\t有序二 Fox"))
+        group.clear()
+        print("Continuous selection passed: forward/reverse native drags, nested and numbered lists, partial endpoints, quote payload, select-all, blank cancellation and capsule radius")
+    }
+
     static func main() async throws {
         let application = NSApplication.shared
         application.setActivationPolicy(.accessory)
+        if CommandLine.arguments.contains("--continuous-selection-preview") {
+            // Native mouse tracking changes run-loop modes; keep a real AppKit loop alive.
+            var completed = false
+            Task { @MainActor in
+                do { try await continuousSelectionPreview() }
+                catch { preconditionFailure("Continuous selection regression failed: \(error)") }
+                completed = true
+                application.stop(nil)
+                application.postEvent(NSEvent.otherEvent(with: .applicationDefined, location: .zero,
+                    modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil,
+                    subtype: 0, data1: 0, data2: 0)!, atStart: true)
+            }
+            application.run()
+            precondition(completed, "Native selection regression must run to completion")
+            return
+        }
         if CommandLine.arguments.contains("--sources-preview") {
             try await sourcesPreview()
             return

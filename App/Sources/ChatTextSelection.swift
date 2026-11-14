@@ -26,9 +26,12 @@ extension NSAttributedString.Key {
 /// Attachment glyphs retain readable source when copied or quoted.
 class ChatSelectableTextView: NSTextView {
     var quoteAction: ((String) -> Void)?
+    weak var selectionGroup: ChatSelectionGroup?
     private var selectionMenu: ChatSelectionMenu?
 
-    var selectedContent: String {
+    var selectedContent: String { selectionGroup?.selectedText ?? localSelectedContent }
+
+    var localSelectedContent: String {
         guard let storage = textStorage else { return "" }
         let range = selectedRange()
         guard range.location != NSNotFound, range.length > 0, NSMaxRange(range) <= storage.length else { return "" }
@@ -40,17 +43,32 @@ class ChatSelectableTextView: NSTextView {
         return result
     }
 
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        if newSize.width > 0, let container = textContainer, !container.widthTracksTextView {
+            container.containerSize = NSSize(width: newSize.width, height: .greatestFiniteMagnitude)
+        }
+    }
+
     override func copy(_ sender: Any?) { _ = MessageClipboard.copy(selectedContent) }
+
+    override func selectAll(_ sender: Any?) {
+        if let selectionGroup { selectionGroup.selectAll(); showSelectionMenu() }
+        else { super.selectAll(sender) }
+    }
 
     override func mouseDown(with event: NSEvent) {
         selectionMenu?.close(clearSelection: false)
+        if selectionGroup?.trackDrag(from: self, event: event) == true { return }
+        selectionGroup?.clear(except: self)
         super.mouseDown(with: event)
         showSelectionMenu()
     }
 
     override func keyDown(with event: NSEvent) {
         selectionMenu?.close(clearSelection: event.keyCode == 53)
-        if event.keyCode == 53 { return }
+        if event.keyCode == 53 { selectionGroup?.clear(); return }
+        if !event.modifierFlags.contains(.command) { selectionGroup?.clear(except: self) }
         super.keyDown(with: event)
         if event.keyCode != 53 { showSelectionMenu() }
     }
@@ -95,7 +113,10 @@ final class ChatSelectionMenu {
         rect.origin.y += textView.textContainerOrigin.y
         rect = rect.intersection(textView.visibleRect)
         guard !rect.isEmpty else { return }
-        Self.active?.close()
+        if let active = Self.active {
+            let sameGroup = textView.selectionGroup != nil && active.textView?.selectionGroup === textView.selectionGroup
+            active.close(clearSelection: !sameGroup)
+        }
         Self.active = self
         let selection = textView.selectedContent
         let action = textView.quoteAction
@@ -116,7 +137,8 @@ final class ChatSelectionMenu {
         // This compact text menu keeps the glass rim without an extra dark window shadow.
         panel.hasShadow = false
         panel.setContentSize(size)
-        panel.contentView = WindowSurface.glassContentView(host, cornerRadius: 16)
+        panel.contentView = WindowSurface.glassContentView(host, cornerRadius: size.height / 2)
+        if let surface = panel.contentView { WindowSurface.updateCorners(of: surface, radius: size.height / 2, circular: true) }
         panel.appearance = parent.effectiveAppearance
         let anchor = parent.convertToScreen(textView.convert(rect, to: nil))
         let limits = screen.visibleFrame.intersection(parent.frame).insetBy(dx: 8, dy: 8)
@@ -132,6 +154,9 @@ final class ChatSelectionMenu {
                 y: frame.minY - frame.height * growth / 2,
                 width: frame.width * (1 + growth), height: frame.height * (1 + growth))
             self.panel.setFrame(expanded, display: true)
+            if let surface = self.panel.contentView {
+                WindowSurface.updateCorners(of: surface, radius: self.panel.frame.height / 2, circular: true)
+            }
         }
         parent.addChildWindow(panel, ordered: .above)
         panel.matchesActiveAppearance = parent.isKeyWindow
@@ -176,7 +201,9 @@ final class ChatSelectionMenu {
     }
 
     func close(clearSelection: Bool = true) {
+        if Self.active === self { Self.active = nil }
         if clearSelection, let textView {
+            textView.selectionGroup?.clear()
             let location = min(textView.selectedRange().location, (textView.string as NSString).length)
             textView.setSelectedRange(NSRange(location: location, length: 0))
             textView.needsDisplay = true
@@ -220,11 +247,11 @@ private struct ChatSelectionActions: View {
         }
         .font(.system(size: 13)).foregroundStyle(ThemeColor.kText)
         .padding(4)
-        .windowSurfaceBackground(in: RoundedRectangle(cornerRadius: 16))
+        .windowSurfaceBackground(in: Capsule())
         .background {
             // A broad light wash across one continuous surface, matching the supplied recording.
             // It fades through the middle instead of ending at either button's bounds.
-            RoundedRectangle(cornerRadius: 16)
+            Capsule()
                 .fill(LinearGradient(stops: [
                     .init(color: .white.opacity(leadingLight * 0.16), location: 0),
                     .init(color: .white.opacity(leadingLight * 0.07 + trailingLight * 0.01), location: 0.4),
@@ -235,7 +262,7 @@ private struct ChatSelectionActions: View {
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
         }
-        .glassPointerFeedback(pressed: pressed, in: RoundedRectangle(cornerRadius: 16), illumination: false)
+        .glassPointerFeedback(pressed: pressed, in: Capsule(), illumination: false)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: leadingLight)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: trailingLight)
         .onAppear { pressChanged(false, reduceMotion, false) }

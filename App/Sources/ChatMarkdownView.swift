@@ -6,6 +6,7 @@ import ToolService
 /// Shared by live replies and reopened history; the stored content remains Markdown source.
 struct ChatMarkdownView: View {
     let text: String
+    @State private var selectionGroup = ChatSelectionGroup()
     @Environment(\.colorScheme) private var colorScheme
 
     private static let bodyStyle = TextStyle(size: 14, weight: 400, mode: .default)
@@ -40,8 +41,18 @@ struct ChatMarkdownView: View {
                 ForegroundColor(ThemeColor("textPrimary").color(for: colorScheme))
                 UnderlineStyle(.single)
             }
+            .markdownBlockStyle(\.bulletedListMarker) { configuration in
+                ChatInlineText(markdown: ["•", "◦", "▪"][min(max(configuration.listLevel - 1, 0), 2)],
+                               literal: true, shrinkToFit: true)
+                    .frame(minWidth: 21, alignment: .trailing)
+            }
+            .markdownBlockStyle(\.numberedListMarker) { configuration in
+                ChatInlineText(markdown: "\(configuration.itemNumber).", literal: true, shrinkToFit: true)
+                    .frame(minWidth: 21, alignment: .trailing)
+            }
             .markdownBlockStyle(\.listItem) { configuration in
                 configuration.label
+                    .labelStyle(ChatListItemLabelStyle())
                     // Tight Markdown lists discard bottom margins between items.
                     // A top margin keeps item boundaries distinct from wrapped lines.
                     .markdownMargin(top: 14, bottom: 14)
@@ -96,6 +107,7 @@ struct ChatMarkdownView: View {
             .markdownImageProvider(ChatImageProvider())
             .markdownInlineImageProvider(ChatInlineImageProvider(color: NSColor(ThemeColor("text").color(for: colorScheme))))
             .textSelection(.enabled)
+            .environment(\.chatSelectionGroup, selectionGroup)
     }
 
     // Headings follow ordinary message typography, including reopened history.
@@ -120,6 +132,15 @@ private extension EnvironmentValues {
     var chatTableRowCount: Int {
         get { self[ChatTableRowCountKey.self] }
         set { self[ChatTableRowCountKey.self] = newValue }
+    }
+}
+
+private struct ChatListItemLabelStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            configuration.icon
+            configuration.title
+        }
     }
 }
 
@@ -257,6 +278,7 @@ private struct ChatInlineNativeText: NSViewRepresentable {
     var weight: NSFont.Weight = .regular
     @Environment(\.chatSelectionColor) private var selectionColor
     @Environment(\.chatQuoteAction) private var quoteAction
+    @Environment(\.chatSelectionGroup) private var selectionGroup
     let images: [URL: Data]
     let sourceName: String?
     let foreground: NSColor
@@ -352,6 +374,8 @@ private struct ChatInlineNativeText: NSViewRepresentable {
         }
         if let selectable = view as? ChatSelectableTextView {
             selectable.quoteAction = quoteAction
+            selectable.selectionGroup = selectionGroup
+            selectionGroup?.register(selectable)
             selectable.selectedTextAttributes = [.backgroundColor: NSColor(selectionColor).withAlphaComponent(0.45)]
         }
         view.linkTextAttributes = [.foregroundColor: linkColor, .underlineStyle: NSUnderlineStyle.single.rawValue]
@@ -376,10 +400,15 @@ private struct ChatInlineNativeText: NSViewRepresentable {
         } else { proposedWidth = proposal.width }
         guard let width = proposedWidth, width > 0, let container = view.textContainer,
               let manager = view.layoutManager else { return nil }
-        view.setFrameSize(NSSize(width: width, height: view.frame.height))
+        // Measuring a proposed width must not change the rendered frame or leave the
+        // text container at a temporary HStack probe width. AppKit receives the final
+        // SwiftUI frame through ChatSelectableTextView.setFrameSize.
+        let renderedSize = container.containerSize
         container.containerSize = NSSize(width: width, height: CGFloat.greatestFiniteMagnitude)
         manager.ensureLayout(for: container)
-        return CGSize(width: width, height: ceil(manager.usedRect(for: container).height) + 4)
+        let height = ceil(manager.usedRect(for: container).height) + 4
+        container.containerSize = renderedSize
+        return CGSize(width: width, height: height)
     }
 }
 
