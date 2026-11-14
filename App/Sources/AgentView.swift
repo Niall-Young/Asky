@@ -97,6 +97,7 @@ struct AgentView: View {
     var close: () -> Void = {}
     var setPinned: (Bool) -> Void = { _ in }
     @State private var pinned = false
+    @State private var toolbarPressed = false
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -153,9 +154,10 @@ struct AgentView: View {
             Spacer(minLength: 0)
             AgentToolbarControls(
                 pinned: pinned,
-                onPin: togglePin, onClose: close)
+                onPin: togglePin, onClose: close, onPressChanged: { toolbarPressed = $0 })
                 .fixedSize()
-                .nativeGlassBackground(in: Capsule(), interactive: true, clear: true, glassOpacity: 0.35)
+                .nativeGlassBackground(in: Capsule(), clear: true, glassOpacity: 0.35)
+                .glassPointerFeedback(pressed: toolbarPressed, in: Capsule())
         }
         .padding(.horizontal, 16)
         .frame(height: AgentLayout.headerHeight)
@@ -209,6 +211,7 @@ private struct AgentToolbarControls: NSViewRepresentable {
     var pinned: Bool
     var onPin: () -> Void
     var onClose: () -> Void
+    var onPressChanged: (Bool) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -219,7 +222,7 @@ private struct AgentToolbarControls: NSViewRepresentable {
         stack.alignment = .centerY
         stack.detachesHiddenViews = false
         for index in 0..<2 {
-            let button = NSButton(title: "", target: context.coordinator, action: #selector(Coordinator.activate(_:)))
+            let button = GlassPointerButton(title: "", target: context.coordinator, action: #selector(Coordinator.activate(_:)))
             button.setButtonType(.momentaryPushIn)
             button.bezelStyle = .accessoryBarAction
             button.tag = index
@@ -244,6 +247,7 @@ private struct AgentToolbarControls: NSViewRepresentable {
         for (index, view) in stack.arrangedSubviews.enumerated() {
             guard let button = view as? NSButton else { continue }
             let title = NSLocalizedString(titles[index], comment: "")
+            (button as? GlassPointerButton)?.onPressChanged = onPressChanged
             button.image = MingCute.image(symbols[index], size: 18)
             button.image?.accessibilityDescription = title
             button.toolTip = title
@@ -293,19 +297,11 @@ private struct AgentHeaderBackdrop: View {
 
 private struct AgentHeaderButtonStyle: ButtonStyle {
     let colorScheme: ColorScheme
-    @Environment(\.isEnabled) private var isEnabled
-    @State private var hovering = false
     func makeBody(configuration: Configuration) -> some View {
         configuration.label.font(.system(size: 14)).foregroundStyle(ThemeColor.kTextSubtle.color(for: colorScheme))
-            .nativeGlassBackground(in: Circle(), interactive: true)
-            .overlay {
-                if isEnabled && (hovering || configuration.isPressed) {
-                    Circle().fill(ThemeColor.kInteractionHover.color(for: colorScheme))
-                }
-            }
+            .nativeGlassBackground(in: Circle())
             .contentShape(.interaction, Circle())
-            .opacity(isEnabled && configuration.isPressed ? 0.7 : 1)
-            .onHover { hovering = $0 }
+            .glassPointerFeedback(pressed: configuration.isPressed, in: Circle())
     }
 }
 
@@ -323,6 +319,7 @@ struct AgentIconButtonStyle: ButtonStyle {
                 }
             }
             .onHover { hovering = $0 }
+            .glassPointerFeedback(pressed: configuration.isPressed, in: RoundedRectangle(cornerRadius: cornerRadius), illumination: false)
     }
 }
 
@@ -1019,9 +1016,9 @@ private struct ComposerSubmitButtonStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .opacity(configuration.isPressed ? 0.7 : 1)
             .foregroundStyle(ThemeColor("iconInverted"))
             // Fade only the fill so the arrow keeps its contrast when disabled.
             .background(ThemeColor.kBackgroundPrimary.opacity(isEnabled ? 1 : 0.3), in: .circle)
+            .glassPointerFeedback(pressed: configuration.isPressed, in: Circle())
     }
 }
