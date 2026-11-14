@@ -91,6 +91,11 @@ final class AgentModel {
 
     var shortcutPreferences: SettingsPreferences { app.preferences }
 
+    var avatarColor: AgentAvatarColor {
+        get { AgentAvatarColor(rawValue: app.preferences.agentAvatarColor) ?? .blue }
+        set { app.preferences.agentAvatarColor = newValue.rawValue }
+    }
+
     var pluginManager: PluginManager { app.tools.plugins }
 
     /// Global setting shared by every conversation; ToolService reads it on each call.

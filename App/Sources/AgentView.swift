@@ -170,15 +170,8 @@ struct AgentView: View {
 
     private var header: some View {
         HStack(spacing: 12) {
-            AgentToolbarControls(history: true, showingHistory: showingHistory,
-                pinned: pinned, running: model.isRunning,
-                onHistory: toggleHistory, onNew: newConversation,
-                onPin: togglePin, onClose: close,
-                onPressChanged: { historyPressed = $0 })
-                .fixedSize()
-                .nativeGlassBackground(in: Circle(), interactive: true, clear: true, glassOpacity: 0.35)
-                .liquidGlassInteraction(pressed: historyPressed, hovered: historyHovered)
-                .onHover { historyHovered = $0 }
+            AgentAvatarPicker(color: Binding(get: { model.avatarColor }, set: { model.avatarColor = $0 }))
+                .frame(width: 36, height: 36)
             if showingHistory {
                 HStack(spacing: 8) {
                     Image(mingCute: "magnifyingglass", size: 14)

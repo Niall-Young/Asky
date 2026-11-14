@@ -897,3 +897,11 @@
 
 "自己填写" = "Write my own";
 "输入你的回答" = "Enter your answer";
+
+/* Conversation avatar palette */
+"头像颜色" = "Avatar color";
+"蓝色" = "Blue";
+"黄色" = "Yellow";
+"紫色" = "Purple";
+"绿色" = "Green";
+"粉色" = "Pink";
