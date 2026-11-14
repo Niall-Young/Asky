@@ -77,7 +77,7 @@ struct AgentAvatarPicker: View {
                                 .glassEffectTransition(.matchedGeometry)
                         } else {
                             trigger
-                                .glassEffect(.clear, in: Circle())
+                                .nativeGlassBackground(in: Circle())
                                 .glassPointerFeedback(pressed: pressed, in: Circle())
                                 .glassEffectID("avatar", in: glassNamespace)
                                 .glassEffectTransition(.matchedGeometry)
@@ -89,7 +89,7 @@ struct AgentAvatarPicker: View {
                     if showing {
                         menu.nativeGlassBackground(in: RoundedRectangle(cornerRadius: 18))
                     } else {
-                        trigger.nativeGlassBackground(in: Circle(), clear: true, glassOpacity: 0.35)
+                        trigger.nativeGlassBackground(in: Circle())
                             .glassPointerFeedback(pressed: pressed, in: Circle())
                     }
                 }
