@@ -90,7 +90,7 @@ struct LauncherActionLabel: View {
 struct LauncherActionButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .nativeGlassBackground(in: Capsule(), clear: true)
+            .nativeGlassBackground(in: Capsule(), clear: true, glassOpacity: 0.85)
             .contentShape(.interaction, Capsule())
             .glassPointerFeedback(pressed: configuration.isPressed, in: Capsule())
     }
