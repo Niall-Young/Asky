@@ -609,7 +609,7 @@ private struct ResponseGroupView: View {
                     .transition(reduceMotion ? .opacity : .opacity.combined(with: .offset(y: 5)))
             }
             if group.showsThinkingIndicator {
-                ChatTypingBubble(bubbleMotion: bubbleMotion)
+                ChatTypingBubble(color: model.avatarColor, bubbleMotion: bubbleMotion)
                     .transition(.opacity)
             }
         }
@@ -631,6 +631,7 @@ private struct ResponseGroupView: View {
 
 /// Only this placeholder is visible until the complete answer is committed.
 private struct ChatTypingBubble: View {
+    let color: AgentAvatarColor
     let bubbleMotion: Namespace.ID
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -649,7 +650,7 @@ private struct ChatTypingBubble: View {
             }
             .padding(.horizontal, 16).padding(.vertical, 16)
             .background {
-                RoundedRectangle(cornerRadius: 16).fill(ThemeColor.kBackgroundNeutral)
+                RoundedRectangle(cornerRadius: 16).fill(AgentReplyBubbleStyle(color: color))
                     .matchedGeometryEffect(id: "reply-surface", in: bubbleMotion, properties: reduceMotion ? [] : .frame, anchor: .topLeading)
             }
         }
@@ -716,7 +717,7 @@ private struct ChatBubble: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 12).padding(.vertical, 10)
                     .background {
-                        RoundedRectangle(cornerRadius: 16).fill(ThemeColor.kBackgroundNeutral)
+                        RoundedRectangle(cornerRadius: 16).fill(AgentReplyBubbleStyle(color: model.avatarColor))
                             .matchedGeometryEffect(id: showsReplyActions ? "reply-surface" : item.id,
                                                    in: bubbleMotion, properties: reduceMotion ? [] : .frame, anchor: .topLeading)
                     }

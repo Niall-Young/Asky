@@ -24,6 +24,34 @@ enum AgentAvatarColor: String, CaseIterable {
         case .pink: 115
         }
     }
+
+    /// Muted message fills share the avatar's hue, with readable light/dark variants.
+    func replyBubbleBackground(for scheme: ColorScheme, opaque: Bool = false) -> Color {
+        let rgb: UInt32 = switch (self, scheme) {
+        case (.blue, .dark): 0x304C60
+        case (.yellow, .dark): 0x5A5031
+        case (.purple, .dark): 0x483C5D
+        case (.green, .dark): 0x3B503D
+        case (.pink, .dark): 0x5D3B4D
+        case (.blue, _): 0xD6E9F8
+        case (.yellow, _): 0xF2E7BC
+        case (.purple, _): 0xE6DDF6
+        case (.green, _): 0xDCEBD5
+        case (.pink, _): 0xF4DFE8
+        }
+        return Color(.sRGB, red: Double((rgb >> 16) & 0xFF) / 255,
+                     green: Double((rgb >> 8) & 0xFF) / 255,
+                     blue: Double(rgb & 0xFF) / 255, opacity: opaque ? 1 : 0.9)
+    }
+}
+
+struct AgentReplyBubbleStyle: ShapeStyle {
+    let color: AgentAvatarColor
+
+    func resolve(in environment: EnvironmentValues) -> Color {
+        color.replyBubbleBackground(for: environment.colorScheme,
+            opaque: environment.accessibilityReduceTransparency || environment.colorSchemeContrast == .increased)
+    }
 }
 
 struct AgentMonsterAvatar: View {
