@@ -338,9 +338,11 @@ private struct Transcript: View {
                     ResponseGroupView(group: group, model: model)
                         .padding(.top, index == 0 ? 0 : (group.items.first?.kind == .user ? 20 : 12))
                 }
-                Color.clear.frame(height: 1).id("bottom")
+                // Include the bottom inset in the target so scrolling and the
+                // viewport's bottom detection agree on the end of the content.
+                Color.clear.frame(height: 13).id("bottom")
             }
-            .padding(.horizontal, 12).padding(.vertical, 12)
+            .padding(.horizontal, 12).padding(.top, 12)
             .padding(.top, AgentLayout.headerHeight)
         }
     }
@@ -503,7 +505,11 @@ private struct LegacyTranscriptScroll<Content: View>: View {
                 .overlay(alignment: .bottom) {
                     if !isAtBottom {
                         Button {
-                            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
+                            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2), completionCriteria: .removed) {
+                                proxy.scrollTo("bottom", anchor: .bottom)
+                            } completion: {
+                                // Lazy rows resolve their heights during the animation.
+                                // Align once more against the completed layout.
                                 proxy.scrollTo("bottom", anchor: .bottom)
                             }
                         } label: {

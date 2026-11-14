@@ -624,6 +624,12 @@ enum AgentReplyRegression {
         let model = AgentModel(app: app)
         let store = ConversationStore(app.store)
         let cid = try store.create(title: "Reading position")
+        if CommandLine.arguments.contains("--scroll-history") {
+            for index in 0..<30 {
+                let text = (0...(index % 7)).map { "历史消息 \(index)，段落 \($0)：用于验证不同高度的对话气泡。" }.joined(separator: "\n\n")
+                try store.append(conversationID: cid, role: index.isMultiple(of: 2) ? "user" : "assistant", text: text)
+            }
+        }
         try store.append(conversationID: cid, role: "user", text: "请给我一篇长回答")
         model.open(cid)
         model.beginResponse(taskID: "reading-scroll")
@@ -656,8 +662,26 @@ enum AgentReplyRegression {
         scroll.contentView.scroll(to: NSPoint(x: 0, y: 200))
         scroll.reflectScrolledClipView(scroll.contentView)
         try await Task.sleep(for: .milliseconds(150))
-        precondition(abs(scroll.contentView.bounds.minY - 200) < 2, "Reader must be able to scroll down manually")
-        print("Reading scroll regression passed: long answer preserves offset and manual scrolling works")
+        if !CommandLine.arguments.contains("--scroll-history") {
+            precondition(abs(scroll.contentView.bounds.minY - 200) < 2, "Reader must be able to scroll down manually")
+        }
+        // Lazy history rows can refine their estimated heights after the move.
+        precondition(scroll.documentView!.bounds.maxY - scroll.documentVisibleRect.maxY > 100,
+                     "The click must start well above the bottom")
+        // Send a native click through the window to the visible bottom-center control.
+        let point = scroll.convert(NSPoint(x: scroll.bounds.midX,
+            y: scroll.isFlipped ? scroll.bounds.maxY - 24 : scroll.bounds.minY + 24), to: nil)
+        for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+            let event = NSEvent.mouseEvent(with: type, location: point, modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                context: nil, eventNumber: 1, clickCount: 1, pressure: type == .leftMouseDown ? 1 : 0)!
+            window.sendEvent(event)
+        }
+        try await Task.sleep(for: .milliseconds(700))
+        window.contentView!.layoutSubtreeIfNeeded()
+        let gap = scroll.documentView!.bounds.maxY - scroll.documentVisibleRect.maxY
+        precondition(abs(gap) <= 1, "One button press must reach the actual bottom, including padding: gap=\(gap)")
+        print("Reading scroll regression passed: preserved reading position, manual scrolling, one-click bottom; gap=\(gap)")
     }
 
     static func main() async throws {
