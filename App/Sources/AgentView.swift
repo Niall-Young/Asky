@@ -913,21 +913,27 @@ private struct ChatBubble: View {
                                 .overlay {
                                     RoundedRectangle(cornerRadius: 16).fill(model.avatarColor.userBubbleTint(for: scheme))
                                 }
-                        } }
-                    HStack(spacing: 6) {
-                        if let emoji = item.agentReaction {
-                            Text(emoji)
-                                .font(.system(size: 15))
-                                .padding(.horizontal, 7).padding(.vertical, 3)
-                                .background(Capsule().fill(ThemeColor.kBackgroundNeutral))
-                                .overlay(Capsule().strokeBorder(ThemeColor.kTextSubtlest.opacity(0.16), lineWidth: 0.5))
-                                .accessibilityLabel(String(format: NSLocalizedString("Asky 回应了 %@", comment: ""), emoji))
                         }
-                        copyButton
-                            .onHover { copyHovering = $0 }
-                            .opacity(hovering || copyHovering || copyFocused || copyFeedbackID != nil ? 1 : 0)
+                        .overlay(alignment: .bottomLeading) {
+                            if let emoji = item.agentReaction {
+                                Text(emoji)
+                                    .font(.system(size: 15))
+                                    .padding(.horizontal, 7)
+                                    .frame(height: 26)
+                                    .background(Capsule().fill(ThemeColor.kBackgroundNeutral))
+                                    .overlay(Capsule().strokeBorder(ThemeColor.kTextSubtlest.opacity(0.16), lineWidth: 0.5))
+                                    // Cross the bubble's lower-left edge by half the badge height.
+                                    // Its upper half stays within the 14 pt bottom text inset.
+                                    .offset(x: -8, y: 13)
+                                    .allowsHitTesting(false)
+                                    .accessibilityLabel(String(format: NSLocalizedString("Asky 回应了 %@", comment: ""), emoji))
+                            }
+                        }
                     }
-                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    copyButton
+                        .onHover { copyHovering = $0 }
+                        .opacity(hovering || copyHovering || copyFocused || copyFeedbackID != nil ? 1 : 0)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
