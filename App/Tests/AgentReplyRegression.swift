@@ -209,6 +209,41 @@ enum AgentReplyRegression {
         print("Math parsing, native layout, invalid-source fallback and light/dark window captures passed")
     }
 
+    static func formLifecycleRegression(app: AppModel) async throws {
+        let store = ConversationStore(app.store)
+        let model = AgentModel(app: app)
+        let cid = try store.create(title: "表单生命周期")
+        try store.append(conversationID: cid, role: "user", text: "帮我写公式")
+        model.open(cid)
+        model.beginResponse(taskID: "form-lifecycle")
+        let schema = "```asky-form\n{\"title\":\"公式需求\"}\n{\"id\":\"goal\",\"type\":\"text\",\"label\":\"这个公式要算什么\",\"required\":true}\n```"
+        model.handle(.message(taskID: "form-lifecycle", schema), conversationID: cid)
+        model.finishTask(conversationID: cid)
+        let messageID = model.items.last!.id
+        model.formValues[messageID] = ["goal": ["求和"]]
+        // finishTask schedules this real cleanup even when retention deletes nothing.
+        await app.maintainConversationHistory()
+        precondition(model.formIsActive(messageID), "cleanup must not expire a just-completed form")
+        precondition(model.formValues[messageID]?["goal"] == ["求和"], "cleanup must retain unsubmitted answers")
+        model.resumeTimeline()
+        precondition(model.conversationID == nil && model.formIsActive(messageID), "timeline must resolve the form's original storage segment")
+        model.formValues[messageID] = ["goal": ["求平均值"]]
+        let unrelated = try store.create(title: "待删除的其他记录")
+        try store.append(conversationID: unrelated, role: "user", text: "其他记录", now: Date.distantPast)
+        let deletedUnrelated = await app.deleteConversationHistory(unrelated)
+        precondition(deletedUnrelated)
+        precondition(model.formIsActive(messageID) && model.formValues[messageID]?["goal"] == ["求平均值"], "unrelated deletion must preserve the active form and answers")
+        let later = try store.create(title: "后续问题")
+        try store.append(conversationID: later, role: "user", text: "改用文字回答")
+        model.resumeTimeline()
+        precondition(!model.formIsActive(messageID), "a later user message must retire an old form across storage segments")
+        model.open(cid)
+        let deletedForm = await app.deleteConversationHistory(cid)
+        precondition(deletedForm)
+        precondition(!model.formIsActive(messageID) && !model.submitForm(messageID), "deleted forms must never submit")
+        print("Form lifecycle passed: completion cleanup, draft preservation, timeline reopen, unrelated deletion, later input and deleted form rejection")
+    }
+
     static func formPreview(app: AppModel, model: AgentModel) async throws {
         let store = ConversationStore(app.store)
         let cid = try store.create(title: "会议安排")
@@ -252,6 +287,8 @@ enum AgentReplyRegression {
         }
         let controller = AgentWindowController(model: model, presentation: WindowPresentation())
         controller.show()
+        // show() restores the global timeline; bind the simulated reply to its real segment.
+        model.open(cid)
         let window = NSApplication.shared.windows.first { $0.title == "Asky AI" }!
         window.setContentSize(NSSize(width: 760, height: 800))
         defer { window.orderOut(nil) }
@@ -273,6 +310,7 @@ enum AgentReplyRegression {
         model.finishTask(conversationID: cid)
         let messageID = model.items.last!.id
         try await Task.sleep(for: .milliseconds(250))
+        precondition(model.formIsActive(messageID), "completed form must remain active after scheduled cleanup")
         func editableField(_ view: NSView) -> NSTextField? {
             if let field = view as? NSTextField, field.isEditable { return field }
             return view.subviews.compactMap { editableField($0) }.first
@@ -468,13 +506,14 @@ enum AgentReplyRegression {
         let attachment = AttachmentRef(id: "draft-only", kind: .file, path: "/draft-only", mimeType: "text/plain", byteSize: 0, temporary: false)
         model.attachments = [attachment]
         precondition(model.submitForm(messageID), "valid form must enter the normal submit path")
-        precondition(model.conversationID == cid && model.items.last!.text == reply)
+        let submittedCID = model.conversationID!
+        precondition(submittedCID != cid && model.items.last!.text == reply, "timeline replies use a fresh storage segment")
         precondition(model.items.last!.attachments.isEmpty, "form submission must not send composer attachments")
         precondition(model.draft == "保留输入框草稿" && model.attachments == [attachment])
         precondition(!model.submitForm(messageID), "double submission must be rejected")
         for _ in 0..<100 where model.isRunning { try await Task.sleep(for: .milliseconds(20)) }
         precondition(!model.isRunning)
-        model.open(cid)
+        model.resumeTimeline()
         precondition(!model.formIsActive(messageID) && !model.submitForm(messageID))
         try await Task.sleep(for: .milliseconds(150))
         try capture("field-dark-disabled")
@@ -482,7 +521,7 @@ enum AgentReplyRegression {
         precondition(model.state == .failed, "The test credential must fail without a real model call")
         precondition(model.items.filter { $0.kind == .user && $0.text == reply }.count == 1,
                      "The form reply must survive history exactly once, including when the request fails")
-        precondition(ChatFormParser.form(in: model.items[1].text)?.fields.count == (testingTime || testingRadio ? 5 : 4))
+        precondition(ChatFormParser.form(in: model.items.first { $0.id == messageID }!.text)?.fields.count == (testingTime || testingRadio ? 5 : 4))
         // New session and opening history are native-only; no model calls are needed for rendering.
         await model.startNewConversation()
         precondition(model.formValues.isEmpty)
@@ -716,6 +755,7 @@ enum AgentReplyRegression {
         let root = FileManager.default.temporaryDirectory.appending(path: "Asky-reply-\(UUID())")
         defer { try? FileManager.default.removeItem(at: root) }
         let app = try AppModel(root: root)
+        try await formLifecycleRegression(app: app)
         let model = AgentModel(app: app)
         if CommandLine.arguments.contains("--reading-scroll") {
             try await readingScrollRegression(app: app)

@@ -20,6 +20,7 @@ struct ChatItem: Identifiable, Hashable {
     var completedAt: Date? = nil
     var responseID: String? = nil
     var attachments: [AttachmentRef] = []
+    var conversationID: String? = nil
 
     var storedRole: String {
         switch kind {
@@ -120,14 +121,20 @@ final class AgentModel {
         self.app = app
         app.conversationDraftPaths = { [weak self] in Set(self?.attachments.map(\.path) ?? []) }
         app.onConversationHistoryDeleted = { [weak self] ids in
-            guard let self else { return }
+            guard let self, !ids.isEmpty else { return }
+            let refreshTimeline = self.timelineMode
             if let id = self.conversationID, ids.contains(id) {
                 self.open(nil)
                 let drafts = Set(self.attachments.map(\.id))
                 self.attachmentThumbnails = self.attachmentThumbnails.filter { drafts.contains($0.key) }
             }
             self.reloadConversations()
-            self.resumeTimeline()
+            if refreshTimeline {
+                let answers = self.formValues
+                self.resumeTimeline()
+                self.formValues = answers
+                self.pruneFormValues()
+            }
         }
     }
 
@@ -237,7 +244,8 @@ final class AgentModel {
             needsPermissionSettings: p?.needsPermissionSettings ?? false,
             toolName: p?.toolName, toolError: p?.toolError, workSeconds: p?.workSeconds,
             completedAt: p?.completedAt ?? (p == nil && m.role == "assistant" ? m.createdAt : nil),
-            responseID: p?.responseID ?? (m.role == "assistant" ? m.id : nil), attachments: m.attachments)
+            responseID: p?.responseID ?? (m.role == "assistant" ? m.id : nil), attachments: m.attachments,
+            conversationID: m.conversationID)
     }
 
     private func pruneFormValues() {
@@ -252,6 +260,7 @@ final class AgentModel {
             item.completedAt = nil
         }
         if item.kind != .user, let cid = conversationID {
+            item.conversationID = cid
             _ = try? store.append(conversationID: cid, role: item.storedRole, text: item.text,
                                   attachments: item.attachments, id: item.id, presentation: item.presentation)
         }
@@ -269,8 +278,9 @@ final class AgentModel {
     // MARK: Submit (explicit only)
 
     func formIsActive(_ messageID: String) -> Bool {
-        guard let cid = conversationID, store.message(messageID, conversationID: cid) != nil else { return false }
-        guard let index = items.firstIndex(where: { $0.id == messageID && $0.kind == .assistant }) else { return false }
+        guard let index = items.firstIndex(where: { $0.id == messageID && $0.kind == .assistant }),
+              let cid = items[index].conversationID,
+              store.message(messageID, conversationID: cid) != nil else { return false }
         return (!isRunning || items[index].responseID == taskID) && !items.dropFirst(index + 1).contains(where: { $0.kind == .user || $0.kind == .assistant })
     }
 
