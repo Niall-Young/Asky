@@ -92,12 +92,13 @@ struct SettingsListHeader<Trailing: View>: View {
 
 struct SettingsInsetBox<Content: View>: View {
     @ViewBuilder let content: Content
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) { content }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .settingsInputChrome(scheme: scheme, focused: false, cornerRadius: 8)
     }
 }
