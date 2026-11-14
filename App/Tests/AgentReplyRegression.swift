@@ -221,7 +221,8 @@ enum AgentReplyRegression {
         {"id":"day","type":"date","label":"会议日期","required":true}
         ```
         """
-        let testingRadio = CommandLine.arguments.contains("--radio-preview")
+        let testingCustom = CommandLine.arguments.contains("--custom-preview")
+        let testingRadio = CommandLine.arguments.contains("--radio-preview") || testingCustom
         let testingComponents = CommandLine.arguments.contains("--components-preview")
         let testingTime = CommandLine.arguments.contains("--time-preview") || testingComponents
         if testingTime {
@@ -244,6 +245,10 @@ enum AgentReplyRegression {
             {"id":"topics","type":"multi","label":"讨论议题（多选）","options":["设计方案","开发计划"]}
             ```
             """
+        }
+        if testingCustom {
+            rest = rest.replacingOccurrences(of: "\"type\":\"radio\"", with: "\"allowCustom\":true,\"type\":\"radio\"")
+            rest = rest.replacingOccurrences(of: "\"type\":\"select\"", with: "\"allowCustom\":true,\"type\":\"select\"")
         }
         let controller = AgentWindowController(model: model, presentation: WindowPresentation())
         controller.show()
@@ -280,13 +285,32 @@ enum AgentReplyRegression {
         } else { preconditionFailure("The complete reply must expose an editable native form") }
         try capture("complete")
         func popup(_ view: NSView) -> NSPopUpButton? {
-            if let button = view as? NSPopUpButton, button.numberOfItems == 3 { return button }
+            if let button = view as? NSPopUpButton, button.numberOfItems == (testingCustom ? 4 : 3) { return button }
             return view.subviews.compactMap { popup($0) }.first
         }
         let picker = popup(window.contentView!)!
         picker.selectItem(at: 1)
         NSApplication.shared.sendAction(picker.action!, to: picker.target, from: picker)
         precondition(model.formValues[messageID]?["duration"] == ["30 分钟"], "native popup selection must update the answer")
+        if testingCustom {
+            picker.selectItem(at: 3)
+            NSApplication.shared.sendAction(picker.action!, to: picker.target, from: picker)
+            try await Task.sleep(for: .milliseconds(100))
+            func customInput(_ view: NSView) -> NSTextField? {
+                if let field = view as? NSTextField, field.isEditable,
+                   field.placeholderString == NSLocalizedString("输入你的回答", comment: "") { return field }
+                return view.subviews.compactMap { customInput($0) }.first
+            }
+            let input = customInput(window.contentView!)!
+            precondition(window.makeFirstResponder(input))
+            input.currentEditor()!.insertText("45 分钟")
+            try await Task.sleep(for: .milliseconds(100))
+            precondition(model.formValues[messageID]?["duration"] == ["45 分钟"])
+            picker.selectItem(at: 1)
+            NSApplication.shared.sendAction(picker.action!, to: picker.target, from: picker)
+            try await Task.sleep(for: .milliseconds(100))
+            precondition(model.formValues[messageID]?["duration"] == ["30 分钟"])
+        }
         model.formValues[messageID]?["topics"] = ["设计方案"]
         model.formValues[messageID]?["day"] = ["2026-10-22"]
         if testingRadio {
@@ -315,6 +339,30 @@ enum AgentReplyRegression {
             choose(later)
             try await Task.sleep(for: .milliseconds(50))
             precondition(c.state == .on && later.state == .on, "separate groups must not clear each other")
+            if testingCustom {
+                // Each group owns a separate custom field and remembers its draft across switches.
+                let custom = radio(NSLocalizedString("自己填写", comment: ""), in: window.contentView!)!
+                choose(custom)
+                try await Task.sleep(for: .milliseconds(100))
+                precondition(!ChatFormParser.form(in: prefix + rest)!.accepts(model.formValues[messageID]!))
+                func customField(_ view: NSView) -> NSTextField? {
+                    if let field = view as? NSTextField, field.isEditable,
+                       field.placeholderString == NSLocalizedString("输入你的回答", comment: "") { return field }
+                    return view.subviews.compactMap { customField($0) }.first
+                }
+                let field = customField(window.contentView!)!
+                precondition(window.makeFirstResponder(field))
+                field.currentEditor()!.insertText("先给我看改动，再决定")
+                try await Task.sleep(for: .milliseconds(100))
+                precondition(model.formValues[messageID]?["plan"] == ["先给我看改动，再决定"])
+                choose(a)
+                try await Task.sleep(for: .milliseconds(100))
+                precondition(model.formValues[messageID]?["plan"] == ["方案 A"])
+                choose(custom)
+                try await Task.sleep(for: .milliseconds(100))
+                precondition(model.formValues[messageID]?["plan"] == ["先给我看改动，再决定"])
+                precondition(model.formValues[messageID]?["when"] == ["稍后"])
+            }
         }
         if testingTime {
             func choices(_ view: NSView) -> [NSPopUpButton] {

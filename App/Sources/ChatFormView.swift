@@ -63,12 +63,20 @@ struct ChatFormView: View {
         case .text:
             SettingsInputField(field.label, text: scalar(field.id))
         case .select:
-            SettingsChoice(selection: scalar(field.id), options:
-                [("", NSLocalizedString("请选择", comment: ""))] + (field.options ?? []).map { ($0, $0) })
-                .accessibilityLabel(field.label)
-                .fixedSize(horizontal: false, vertical: true)
+            if field.allowsCustomAnswer {
+                ChatCustomChoice(field: field, answer: scalar(field.id))
+            } else {
+                SettingsChoice(selection: scalar(field.id), options:
+                    [("", NSLocalizedString("请选择", comment: ""))] + (field.options ?? []).map { ($0, $0) })
+                    .accessibilityLabel(field.label)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         case .radio:
-            SettingsRadioGroup(label: field.label, options: field.options ?? [], selection: scalar(field.id))
+            if field.allowsCustomAnswer {
+                ChatCustomChoice(field: field, answer: scalar(field.id))
+            } else {
+                SettingsRadioGroup(label: field.label, options: field.options ?? [], selection: scalar(field.id))
+            }
         case .multi:
             VStack(alignment: .leading, spacing: 8) {
                 ForEach(field.options ?? [], id: \.self) { option in
@@ -108,5 +116,53 @@ struct ChatFormView: View {
 
     private func scalar(_ id: String) -> Binding<String> {
         Binding(get: { values[id]?.first ?? "" }, set: { values[id] = [String($0.prefix(4000))] })
+    }
+}
+
+/// Keeps the custom draft while switching choices; only the active answer is submitted.
+private struct ChatCustomChoice: View {
+    let field: ChatForm.Field
+    @Binding var answer: String
+    @State private var usingCustom: Bool
+    @State private var customDraft: String
+
+    init(field: ChatForm.Field, answer: Binding<String>) {
+        self.field = field
+        _answer = answer
+        let custom = !answer.wrappedValue.isEmpty && !(field.options ?? []).contains(answer.wrappedValue)
+        _usingCustom = State(initialValue: custom)
+        _customDraft = State(initialValue: custom ? answer.wrappedValue : "")
+    }
+
+    private var customOption: String {
+        var label = NSLocalizedString("自己填写", comment: "")
+        while (field.options ?? []).contains(label) { label += "…" }
+        return label
+    }
+
+    private var selection: Binding<String> {
+        Binding(get: { usingCustom ? customOption : answer }, set: { value in
+            usingCustom = value == customOption
+            answer = usingCustom ? customDraft : value
+        })
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if field.type == .radio {
+                SettingsRadioGroup(label: field.label, options: (field.options ?? []) + [customOption], selection: selection)
+            } else {
+                SettingsChoice(selection: selection, options:
+                    [("", NSLocalizedString("请选择", comment: ""))] + ((field.options ?? []) + [customOption]).map { ($0, $0) })
+                    .accessibilityLabel(field.label)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if usingCustom {
+                SettingsInputField(NSLocalizedString("输入你的回答", comment: ""), text: Binding(get: { customDraft }, set: {
+                    customDraft = String($0.prefix(4000))
+                    answer = customDraft
+                }))
+            }
+        }
     }
 }

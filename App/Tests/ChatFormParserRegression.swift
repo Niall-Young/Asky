@@ -52,6 +52,20 @@ enum ChatFormParserRegression {
         precondition(!radio.accepts(["drink": ["茶", "水"]]))
         precondition(!radio.accepts(["drink": ["不存在的选项"]]))
         precondition(radio.reply(["drink": ["咖啡"]]).contains("饮品：咖啡"))
+        for kind in ["radio", "select"] {
+            let custom = ChatFormParser.form(in: "```asky-form\n{\"title\":\"确认方案\"}\n{\"id\":\"answer\",\"type\":\"\(kind)\",\"label\":\"怎么处理\",\"options\":[\"现在修改\",\"稍后处理\"],\"required\":true,\"allowCustom\":true}\n```")!
+            precondition(!custom.accepts([:]))
+            precondition(custom.accepts(["answer": ["现在修改"]]))
+            let own = ["answer": ["先给我看改动，再决定"]]
+            precondition(custom.accepts(own))
+            precondition(custom.reply(own) == "确认方案\n怎么处理：先给我看改动，再决定")
+            for invalid in [[""], [" \n "], [String(repeating: "字", count: 4001)], ["现在修改", "稍后处理"]] {
+                precondition(!custom.accepts(["answer": invalid]))
+            }
+            precondition(custom.accepts(["answer": [String(repeating: "字", count: 4000)]]))
+            let invalidType = "```asky-form\n{\"title\":\"测试\"}\n{\"id\":\"answer\",\"type\":\"multi\",\"label\":\"选择\",\"options\":[\"选项\"],\"allowCustom\":true}\n```"
+            precondition(ChatFormParser.form(in: invalidType) == nil)
+        }
         let values = ["title": ["评审"], "duration": ["30 分钟"], "topics": ["设计"], "day": ["2026-10-22"]]
         precondition(complete.accepts(values))
         precondition(complete.reply(values).contains("时长：30 分钟"))

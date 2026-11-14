@@ -20,7 +20,10 @@ struct ChatForm: Equatable {
         let label: String
         let required: Bool?
         let options: [String]?
+        let allowCustom: Bool?
         let components: [TimeUnit]?
+
+        var allowsCustomAnswer: Bool { allowCustom == true && (type == .radio || type == .select) }
 
         var timeUnits: [TimeUnit] { components ?? (type == .duration ? [.minute, .second] : [.hour, .minute]) }
         func maximum(at index: Int) -> Int {
@@ -53,6 +56,7 @@ struct ChatForm: Equatable {
 
         var isValid: Bool {
             guard !id.isEmpty, id.count <= 64, !label.isEmpty, label.count <= 200 else { return false }
+            if allowCustom == true && !allowsCustomAnswer { return false }
             if type == .select || type == .radio || type == .multi {
                 guard let options, (1...20).contains(options.count), Set(options).count == options.count,
                       options.allSatisfy({ !$0.isEmpty && $0.count <= 200 }) else { return false }
@@ -73,7 +77,10 @@ struct ChatForm: Equatable {
             if field.required == true && answer.allSatisfy({ $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) { return false }
             switch field.type {
             case .text: return answer.count <= 1 && answer.allSatisfy { $0.count <= 4000 }
-            case .select, .radio: return answer.count <= 1 && answer.allSatisfy { field.options!.contains($0) }
+            case .select, .radio:
+                return answer.count <= 1 && answer.allSatisfy {
+                    field.options!.contains($0) || (field.allowsCustomAnswer && $0.count <= 4000 && !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
             case .multi: return Set(answer).count == answer.count && answer.allSatisfy { field.options!.contains($0) }
             case .date: return answer.count <= 1 && answer.allSatisfy { Self.date($0) != nil }
             case .time, .duration: return answer.count <= 1 && answer.allSatisfy { field.temporalValues($0) != nil }

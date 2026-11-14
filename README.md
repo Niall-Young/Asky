@@ -50,7 +50,7 @@ Asky 是使用 SwiftUI 与 AppKit 构建的 macOS 原生效率入口。本地全
   - **紧凑对话窗口**：固定 560 pt 宽、26 pt 普通圆角，默认高 560 pt，可纵向调整至最低 480 pt；紧凑玻璃输入框采用 16 pt 圆角，附件与发送按钮均为 28 pt。顶部不显示会话标题，采用向下渐隐的背景模糊；左侧独立历史按钮，右侧为无分割线的连体胶囊按钮组，常驻新对话、置顶和电源符号关闭按钮；左右两侧均复用输入框的轻透 Clear 玻璃，并提供悬停、按压形变和松手回弹；开启“减少动态效果”时不缩放。
   - **Swift 原生 Agent**：模型请求、工具循环、会话恢复和上下文压缩均由 Swift 执行。运行时显示思考或当前工具，结束后一次展示完整回复；无需 Node / Pi 辅助进程，支持 OpenAI-compatible Chat Completions。
   - **对话历史**：新保存的会话保留工具调用状态、错误、回复分组与耗时，支持分页恢复；旧会话未保存的工具展示记录不会自动补回。在“设置 › 智能配置 › 对话历史”选择保留 7 天、30 天（默认）、90 天或永久；按最后活动时间清理，启动时、每天及修改期限后检查。到期或手动删除会清理会话、执行记录、索引及无引用的自有附件，已保存记忆独立保留，失败文件自动重试。
-  - **原生交互表单**：AI 回复完成后一次显示原生单选按钮组、下拉单选、多选、文本输入、日期及按需显示时、分、秒的时间/时长控件，填写后直接提交至同一会话。控件复用设置页组件，日期选择复用创建日程弹窗的月历。
+  - **原生交互表单**：AI 回复完成后一次显示原生单选按钮组、下拉单选、多选、文本输入、日期及按需显示时、分、秒的时间/时长控件，AI 澄清需求或确认方案时可同时提供预设选项与「自己填写」，选择或自填后点击「提交回复」自动发送到同一会话并继续处理。控件复用设置页组件，日期选择复用创建日程弹窗的月历。
   - **本地记忆与上下文**：基于本地 Markdown 存储用户偏好与记忆，支持长上下文智能压缩与网络实时检索。
   - **网页来源预览**：网页来源在对应段落末尾合并为“来源名称 +N”标签；悬停或点击展开来源列表，显示来源名称、标题和可获取的发布日期，点击条目打开原文。来源较多时可在卡片内滚动。
   - **本地数学公式排版**：原生支持行内与独立 LaTeX 公式（`$…$`、`$$…$$`）排版。
@@ -143,6 +143,7 @@ open -n build/DerivedData/Build/Products/Debug/Asky.app --args --show-agent
 (cd Packages/KulaCore && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test)
 # 完整回复与活动状态回归（先完成 Debug 构建）
 python3 App/Tests/run-agent-reply-regression.py --reply-activity-preview
+python3 App/Tests/run-agent-reply-regression.py --forms-preview --custom-preview
 ```
 
 启动器首帧诊断使用隔离数据，录制独立 Debug 进程的首次打开与再次打开；需要屏幕录制权限。输出保存在 `build/`，不操作日常安装和数据：
@@ -207,7 +208,7 @@ Asky is a native macOS efficiency launcher built with SwiftUI and AppKit. Local 
   - **Compact Chat Window**: Fixed at 560 pt wide with 26 pt circular corners, a default height of 560 pt and a minimum adjustable height of 480 pt; the compact glass composer uses 16 pt corners and matching 28 pt attachment and send buttons. The title-free header uses a fading material backdrop, a separate History button on the left, and a joined capsule group without dividers for New Chat, Pin and a power-symbol Close button on the right; both sides share the composer’s subdued Clear glass, with hover and press deformation and a spring release; Reduce Motion disables scaling.
   - **Native Swift Agent**: Swift handles model requests, tool loops, session recovery, and context compaction without a Node / Pi helper. Chat shows thinking or the active tool, then presents the complete reply at once; supports OpenAI-compatible Chat Completions.
   - **Conversation History**: Newly saved conversations retain tool statuses, errors, response groups, and elapsed time across paginated reloads. Tool display records missing from older conversations are not backfilled. Settings › AI Settings › Conversation History offers 7, 30 (default), or 90 days, or forever, based on the last activity. Cleanup runs at startup, daily, and after retention changes. Expiry and manual deletion remove sessions, execution records, indexes, and unreferenced managed attachments while preserving saved memory; failed file removals are retried.
-  - **Native Interactive Forms**: Completed AI replies display structured form controls (text fields, native radio groups, dropdowns, checkboxes, date pickers and configurable hour/minute/second time or duration controls) directly in chat, which submit straight back into the conversation. Controls reuse the Settings components; date selection uses the calendar from the event creation dialog.
+  - **Native Interactive Forms**: Completed AI replies display structured form controls (text fields, native radio groups, dropdowns, checkboxes, date pickers and configurable hour/minute/second time or duration controls) directly in chat, which submit straight back into the conversation. Clarification and plan choices can offer both suggested answers and “Write my own”; Submit Reply sends the active answer as a message in the same conversation so the assistant can continue. Controls reuse the Settings components; date selection uses the calendar from the event creation dialog.
   - **Local Memory & Context**: Stores user preferences and context in local Markdown files with automatic context compaction and web search.
   - **Web Source Previews**: Web sources are grouped into a source-name tag with a +N count at the end of each paragraph. Hover or click to expand a list of source names, titles, and available publication dates; click a row to open the original. Longer lists scroll within the card.
   - **Native LaTeX Rendering**: Renders inline and block LaTeX formulas (`$…$`, `$$…$$`) locally.
@@ -300,6 +301,7 @@ open -n build/DerivedData/Build/Products/Debug/Asky.app --args --show-agent
 (cd Packages/KulaCore && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test)
 # Complete reply and activity regression (build Debug first)
 python3 App/Tests/run-agent-reply-regression.py --reply-activity-preview
+python3 App/Tests/run-agent-reply-regression.py --forms-preview --custom-preview
 ```
 
 The launcher presentation diagnostic uses isolated data and records first and repeat presentation in separate Debug processes. Screen Recording access is required. Outputs stay in `build/`; the installed app and everyday data are untouched:
