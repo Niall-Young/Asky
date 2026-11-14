@@ -50,7 +50,7 @@ final class ProgressiveHeaderBlurView: NSView {
                                         locations: [0, 1]) else { return }
         context.drawLinearGradient(gradient, start: CGPoint(x: 0, y: 0), end: CGPoint(x: 0, y: 256), options: [])
         guard let mask = context.makeImage() else { return }
-        filter.setValue(18.0, forKey: "inputRadius")
+        filter.setValue(6.0, forKey: "inputRadius")
         filter.setValue(mask, forKey: "inputMaskImage")
         filter.setValue(true, forKey: "inputNormalizeEdges")
         CATransaction.begin()
