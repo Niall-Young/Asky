@@ -174,6 +174,6 @@ public enum WindowMetrics {
     public static let launcherWidth: Double = 640
     public static let launcherMaxHeight: Double = 640
     public static let agentWidth: Double = 560
-    public static let agentInitialSize = (width: agentWidth, height: 560.0)
-    public static let agentMinSize = (width: agentWidth, height: 480.0)
+    public static let agentInitialSize = (width: agentWidth, height: 680.0)
+    public static let agentMinSize = agentInitialSize
 }

@@ -659,6 +659,99 @@ enum AgentReplyRegression {
         print("Bubble reply regression passed: hidden tools and partial text, typing placeholder, complete answer and history")
     }
 
+    static func bottomPushRegression(app: AppModel) async throws {
+        let model = AgentModel(app: app)
+        let store = ConversationStore(app.store)
+        let cid = try store.create(title: "Bottom push")
+        try store.append(conversationID: cid, role: "user", text: "你好")
+        try store.append(conversationID: cid, role: "assistant", text: "晚上好，今天有什么要做的？")
+        model.open(cid)
+        let controller = AgentWindowController(model: model, presentation: WindowPresentation())
+        controller.show()
+        let window = NSApplication.shared.windows.first { $0.title == "Asky AI" }!
+        defer { window.orderOut(nil) }
+        precondition(window.frame.size == NSSize(width: 560, height: 680), "Chat must open at 560 × 680")
+        precondition(!window.styleMask.contains(.resizable), "Chat must not allow user resizing")
+        precondition(window.minSize == window.maxSize, "Chat size limits must be fixed")
+        try await Task.sleep(for: .milliseconds(600))
+        func findScroll(_ view: NSView) -> NSScrollView? {
+            if let scroll = view as? NSScrollView, scroll.contentSize.height > 200 { return scroll }
+            return view.subviews.compactMap(findScroll).first
+        }
+        let scroll = findScroll(window.contentView!)!
+        func capture(_ name: String) throws {
+            let view = window.contentView!
+            view.layoutSubtreeIfNeeded()
+            let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds)!
+            view.cacheDisplay(in: view.bounds, to: bitmap)
+            try bitmap.representation(using: .png, properties: [:])!.write(to: URL(filePath: "build/bottom-push-" + name + ".png"))
+        }
+        try capture("before")
+        precondition(scroll.documentView!.bounds.height >= scroll.contentSize.height - 1,
+                     "Short chat must fill the viewport so messages rest at its bottom")
+        try store.append(conversationID: cid, role: "user", text: "晚上好")
+        model.open(cid)
+        model.beginResponse(taskID: "bottom-push")
+        try await Task.sleep(for: .milliseconds(800))
+        try capture("after")
+        var gap = scroll.documentView!.bounds.maxY - scroll.documentVisibleRect.maxY
+        precondition(abs(gap) <= 1, "New message and waiting bubble must be visible at the bottom: gap=\(gap)")
+        model.handle(.taskState(taskID: "bottom-push", .cancelled), conversationID: cid)
+        model.finishTask(conversationID: cid)
+        for index in 0..<20 {
+            try store.append(conversationID: cid, role: index.isMultiple(of: 2) ? "assistant" : "user",
+                text: String(repeating: "历史内容应该向上推。", count: 8))
+        }
+        model.open(cid)
+        try await Task.sleep(for: .milliseconds(800))
+        try store.append(conversationID: cid, role: "user", text: "新的消息")
+        model.open(cid)
+        model.beginResponse(taskID: "bottom-push-overflow")
+        try await Task.sleep(for: .milliseconds(1400))
+        gap = scroll.documentView!.bounds.maxY - scroll.documentVisibleRect.maxY
+        precondition(abs(gap) <= 1, "Overflowing chat must settle at the actual bottom: gap=\(gap)")
+        try capture("overflow")
+        precondition(scroll.documentView!.bounds.height > scroll.contentSize.height * 2, "History must really overflow")
+        model.handle(.taskState(taskID: "bottom-push-overflow", .cancelled), conversationID: cid)
+        model.finishTask(conversationID: cid)
+        try store.append(conversationID: cid, role: "user", text: "请给我一篇长回答")
+        model.open(cid)
+        model.beginResponse(taskID: "fast-reply")
+        try await Task.sleep(for: .milliseconds(40))
+        let answer = String(repeating: "回答应该从开头往下读，首次展示四行，剩余内容向下阅读，完成时不能跳到结尾。", count: 80)
+        model.handle(.message(taskID: "fast-reply", answer), conversationID: cid)
+        model.handle(.taskState(taskID: "fast-reply", .completed), conversationID: cid)
+        model.finishTask(conversationID: cid)
+        try await Task.sleep(for: .milliseconds(1400))
+        func replyMarker(_ view: NSView) -> NSView? {
+            if view.identifier?.rawValue.hasPrefix("transcript-reply-") == true { return view }
+            return view.subviews.compactMap(replyMarker).last
+        }
+        let reply = replyMarker(window.contentView!)!
+        let rect = scroll.contentView.convert(reply.bounds, from: reply)
+        let visible = scroll.contentView.bounds.maxY - rect.minY
+        let fourLines = CGFloat(88)
+        try capture("completed")
+        precondition(abs(visible - fourLines) < 2,
+                     "Long replies must reveal the first four lines, not their ending: visible=\(visible), expected=\(fourLines)")
+        try capture("completed")
+        try store.append(conversationID: cid, role: "user", text: "收到")
+        model.open(cid)
+        model.beginResponse(taskID: "short-reply")
+        try await Task.sleep(for: .milliseconds(40))
+        model.handle(.message(taskID: "short-reply", "好的，晚上好。"), conversationID: cid)
+        model.handle(.taskState(taskID: "short-reply", .completed), conversationID: cid)
+        model.finishTask(conversationID: cid)
+        try await Task.sleep(for: .milliseconds(1400))
+        let shortReply = replyMarker(window.contentView!)!
+        let shortRect = scroll.contentView.convert(shortReply.bounds, from: shortReply)
+        precondition(shortRect.height < fourLines, "Short fixture must be fewer than four lines")
+        precondition(shortRect.minY >= scroll.contentView.bounds.minY && shortRect.maxY <= scroll.contentView.bounds.maxY,
+                     "Replies shorter than four lines must be fully visible")
+        try capture("short")
+        print("Bottom push passed: short and overflowing chat, new message and waiting bubble, bottom gap=\(gap)")
+    }
+
     static func readingScrollRegression(app: AppModel) async throws {
         let model = AgentModel(app: app)
         let store = ConversationStore(app.store)
@@ -677,7 +770,9 @@ enum AgentReplyRegression {
         controller.show()
         let window = NSApplication.shared.windows.first { $0.title == "Asky AI" }!
         defer { window.orderOut(nil) }
-        window.setContentSize(NSSize(width: 560, height: 600))
+        precondition(window.frame.size == NSSize(width: 560, height: 680), "Chat must open at 560 × 680")
+        precondition(!window.styleMask.contains(.resizable), "Chat must not allow user resizing")
+        precondition(window.minSize == window.maxSize, "Chat size limits must be fixed")
         try await Task.sleep(for: .milliseconds(500))
         func findScroll(_ view: NSView) -> NSScrollView? {
             if let scroll = view as? NSScrollView, scroll.contentSize.height > 200 { return scroll }
@@ -690,6 +785,7 @@ enum AgentReplyRegression {
             return view.subviews.contains(where: historyButtonExists)
         }
         precondition(!historyButtonExists(window.contentView!), "Retired history entry must be absent")
+        NotificationCenter.default.post(name: NSScrollView.willStartLiveScrollNotification, object: scroll)
         let before = scroll.contentView.bounds.minY
         let answer = (1...70).map { "第 \($0) 段：这是一篇需要从上往下阅读的长回答。" }.joined(separator: "\n\n")
         model.handle(.message(taskID: "reading-scroll", answer), conversationID: cid)
@@ -699,12 +795,9 @@ enum AgentReplyRegression {
         window.contentView!.layoutSubtreeIfNeeded()
         precondition(scroll.documentView!.bounds.height > scroll.contentSize.height * 2, "Fixture must overflow")
         precondition(abs(scroll.contentView.bounds.minY - before) < 2, "Long answer must retain the reading position: before=\(before), after=\(scroll.contentView.bounds.minY)")
-        // Repeat after revisiting older rows and resizing within the real window limits.
-        // The product fixes width to 560 pt; only height is user-resizable.
-        let sizes: [(Double, Double)] = [(560, 600), (560, 480), (560, 800),
-                                          (560, 600), (560, 900), (560, 480), (560, 600)]
+        // Revisit older rows repeatedly in the fixed production window.
+        let sizes: [(Double, Double)] = Array(repeating: (560, 680), count: 3)
         for (attempt, size) in sizes.enumerated() {
-            window.setContentSize(NSSize(width: size.0, height: size.1))
             try await Task.sleep(for: .milliseconds(300))
             scroll.contentView.scroll(to: NSPoint(x: 0, y: attempt == 0 ? 200 : 0))
             scroll.reflectScrolledClipView(scroll.contentView)
@@ -757,6 +850,10 @@ enum AgentReplyRegression {
         let app = try AppModel(root: root)
         try await formLifecycleRegression(app: app)
         let model = AgentModel(app: app)
+        if CommandLine.arguments.contains("--bottom-push") {
+            try await bottomPushRegression(app: app)
+            return
+        }
         if CommandLine.arguments.contains("--reading-scroll") {
             try await readingScrollRegression(app: app)
             return
