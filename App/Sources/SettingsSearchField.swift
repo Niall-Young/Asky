@@ -26,8 +26,8 @@ struct SettingsSearchField: View {
             }
         }
         .font(.system(size: 14))
-        .padding(.horizontal, 8)
+        .padding(.horizontal, 12)
         .frame(height: 28)
-        .settingsInputChrome(scheme: scheme, focused: focus.wrappedValue, cornerRadius: 8)
+        .settingsInputChrome(scheme: scheme, focused: focus.wrappedValue)
     }
 }

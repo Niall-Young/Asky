@@ -928,24 +928,26 @@ enum SettingsRegression {
         func capture(_ name: String) throws {
             let view = window.contentView!
             view.layoutSubtreeIfNeeded()
-            let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds)!
-            view.cacheDisplay(in: view.bounds, to: bitmap)
-            try bitmap.representation(using: .png, properties: [:])!.write(to: URL(filePath: "build/command-tabs-\(name).png"))
+            let capture = Process()
+            capture.executableURL = URL(filePath: "/usr/sbin/screencapture")
+            capture.arguments = ["-x", "-l", String(window.windowNumber), "build/command-tabs-\(name).png"]
+            try capture.run()
+            capture.waitUntilExit()
+            precondition(capture.terminationStatus == 0, "failed to capture native command controls")
         }
-        func tabs() -> [NSButton] {
-            descendants(window.contentView!).compactMap { $0 as? NSButton }
-                .filter { $0.accessibilityIdentifier().hasPrefix("command-tabs-") }
+        guard let tabs = descendants(window.contentView!).compactMap({ $0 as? NSSegmentedControl })
+            .first(where: { $0.accessibilityIdentifier() == "command-tabs" }) else {
+            fatalError("missing native command tabs")
         }
-        precondition(tabs().count == 2, "missing command tabs")
-        let tabBar = descendants(window.contentView!).compactMap { $0 as? SegmentedTabsView }.first
-        precondition(tabBar?.layer?.cornerRadius == 8, "command tabs must share the settings input surface")
-        precondition(tabs()[0].state == .on, "first tab must start selected")
+        precondition(tabs.segmentCount == 2, "missing command tabs")
+        precondition(tabs.selectedSegment == 0, "first tab must start selected")
         precondition(keywords().contains("ql") && !keywords().contains("go"))
         precondition(AppModel.searchCommands.first { $0.0 == "quickLinks" }?.1 == "搜索指令")
         try capture("search")
-        tabs()[1].performClick(nil)
+        tabs.selectedSegment = 1
+        _ = tabs.sendAction(tabs.action, to: tabs.target)
         try await Task.sleep(for: .milliseconds(200))
-        precondition(tabs()[1].state == .on && tabs()[0].state == .off, "selected tab must move")
+        precondition(tabs.selectedSegment == 1, "selected tab must move")
         precondition(keywords().contains("go") && !keywords().contains("ql"))
         try capture("built-in")
         guard let search = fields().first(where: { $0.placeholderString == NSLocalizedString("搜索指令或名称", comment: "") }) else {

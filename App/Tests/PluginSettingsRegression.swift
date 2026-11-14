@@ -66,23 +66,25 @@ private enum PluginSettingsRegression {
         guard let search = descendants(window.contentView!).compactMap({ $0 as? NSTextField }).first(where: { $0.placeholderString == NSLocalizedString("搜索插件或命令", comment: "") }) else {
             throw NSError(domain: "PluginSettings", code: 3, userInfo: [NSLocalizedDescriptionKey: "Missing shared search or tabs"])
         }
-        func tabButtons(in target: NSWindow) -> [NSButton] {
-            descendants(target.contentView!).compactMap { $0 as? NSButton }
-                .filter { $0.accessibilityIdentifier().hasPrefix("plugin-tabs-") }
+        guard let tabs = descendants(window.contentView!).compactMap({ $0 as? NSSegmentedControl })
+            .first(where: { $0.accessibilityIdentifier() == "plugin-tabs" }) else {
+            throw NSError(domain: "PluginSettings", code: 3, userInfo: [NSLocalizedDescriptionKey: "Missing native plugin tabs"])
         }
-        try require(tabButtons(in: window).count == 2, "plugin page must expose exactly two category tabs")
-        try require(descendants(window.contentView!).contains { $0 is SegmentedTabsView },
-                    "plugin tabs must use the settings input surface")
+        try require(tabs.segmentCount == 2, "plugin page must expose exactly two category tabs")
         func select(_ index: Int) {
-            tabButtons(in: window)[index].performClick(nil)
+            tabs.selectedSegment = index
+            _ = tabs.sendAction(tabs.action, to: tabs.target)
         }
         func capture(_ suffix: String, in target: NSWindow? = nil) throws {
             let view = (target ?? window).contentView!
             view.layoutSubtreeIfNeeded()
-            let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds)!
-            view.cacheDisplay(in: view.bounds, to: bitmap)
             let language = Bundle.main.preferredLocalizations.first ?? "unknown"
-            try bitmap.representation(using: .png, properties: [:])!.write(to: URL(filePath: "build/plugin-tabs-\(language)-\(suffix).png"))
+            let capture = Process()
+            capture.executableURL = URL(filePath: "/usr/sbin/screencapture")
+            capture.arguments = ["-x", "-l", String((target ?? window).windowNumber), "build/plugin-tabs-\(language)-\(suffix).png"]
+            try capture.run()
+            capture.waitUntilExit()
+            try require(capture.terminationStatus == 0, "failed to capture native plugin controls")
         }
         for appearance in ["light", "dark"] {
             app.preferences.appearance = appearance
@@ -128,7 +130,7 @@ private enum PluginSettingsRegression {
         editor.insertText("")
         try await Task.sleep(for: .milliseconds(150))
         try await until { switches(window).count == 2 }
-        try require(tabButtons(in: window)[0].state == .on && switches(window).count == 2,
+        try require(tabs.selectedSegment == 0 && switches(window).count == 2,
                     "clearing search must restore the selected tab")
         let buttons = descendants(window.contentView!).compactMap { $0 as? NSButton }
         try require(buttons.filter { $0.title == NSLocalizedString("安装", comment: "") }.count == 2,
@@ -182,7 +184,12 @@ private enum PluginSettingsRegression {
         emptyWindow.makeKeyAndOrderFront(nil)
         defer { emptyWindow.close() }
         try await until { switches(emptyWindow).count == 1 }
-        tabButtons(in: emptyWindow)[1].performClick(nil)
+        guard let emptyTabs = descendants(emptyWindow.contentView!).compactMap({ $0 as? NSSegmentedControl })
+            .first(where: { $0.accessibilityIdentifier() == "plugin-tabs" }) else {
+            throw NSError(domain: "PluginSettings", code: 3, userInfo: [NSLocalizedDescriptionKey: "Missing native plugin tabs"])
+        }
+        emptyTabs.selectedSegment = 1
+        _ = emptyTabs.sendAction(emptyTabs.action, to: emptyTabs.target)
         try await until { switches(emptyWindow).isEmpty }
         try capture("function-empty", in: emptyWindow)
         try require(descendants(emptyWindow.contentView!).compactMap { $0 as? NSButton }.filter { $0.title == NSLocalizedString("添加", comment: "") }.count == 1,
