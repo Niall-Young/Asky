@@ -330,16 +330,17 @@ private struct Transcript: View {
 
     var body: some View {
         CompatibleTranscriptScroll(submittedMessageID: items.last(where: { $0.kind == .user })?.id) {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                if hasOlder {
-                    Button(NSLocalizedString("加载更早的消息", comment: "")) { model.loadOlder() }.buttonStyle(.link).frame(maxWidth: .infinity)
+            VStack(spacing: 0) {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    if hasOlder {
+                        Button(NSLocalizedString("加载更早的消息", comment: "")) { model.loadOlder() }.buttonStyle(.link).frame(maxWidth: .infinity)
+                    }
+                    ForEach(Array(groups.enumerated()), id: \.element.id) { index, group in
+                        ResponseGroupView(group: group, model: model)
+                            .padding(.top, index == 0 ? 0 : (group.items.first?.kind == .user ? 20 : 12))
+                    }
                 }
-                ForEach(Array(groups.enumerated()), id: \.element.id) { index, group in
-                    ResponseGroupView(group: group, model: model)
-                        .padding(.top, index == 0 ? 0 : (group.items.first?.kind == .user ? 20 : 12))
-                }
-                // Include the bottom inset in the target so scrolling and the
-                // viewport's bottom detection agree on the end of the content.
+                // Keep the destination outside lazy row height estimation.
                 Color.clear.frame(height: 13).id("bottom")
             }
             .padding(.horizontal, 12).padding(.top, 12)
@@ -395,35 +396,89 @@ private struct CompatibleTranscriptScroll<Content: View>: View {
     }
 }
 
+/// Lazy rows can refine their heights over several layout passes after a jump.
+/// Keep this correction scoped to one explicit click; replies never start it.
+@MainActor
+private func alignTranscriptBottom(_ proxy: ScrollViewProxy, viewport: TranscriptViewport,
+                                   reduceMotion: Bool) -> Task<Void, Never> {
+    Task { @MainActor in
+        guard !Task.isCancelled else { return }
+        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
+            proxy.scrollTo("bottom", anchor: .bottom)
+        }
+        do {
+            try await Task.sleep(for: .milliseconds(reduceMotion ? 0 : 220))
+            var settledPasses = 0
+            for _ in 0..<12 {
+                try Task.checkCancellation()
+                viewport.alignBottom()
+                try await Task.sleep(for: .milliseconds(30))
+                settledPasses = viewport.isAtBottom ? settledPasses + 1 : 0
+                if settledPasses >= 3 { return }
+            }
+        } catch { /* The window closed or the reader took over. */ }
+    }
+}
+
+/// Resolve the actual clip/document bounds after SwiftUI's animated estimate.
+@MainActor
+private final class TranscriptViewport {
+    weak var scroll: NSScrollView?
+
+    private var bottomY: CGFloat? {
+        guard let scroll, let document = scroll.documentView else { return nil }
+        let bounds = scroll.contentView.convert(document.bounds, from: document)
+        return document.isFlipped
+            ? max(bounds.minY, bounds.maxY - scroll.contentView.bounds.height)
+            : bounds.minY
+    }
+
+    var isAtBottom: Bool {
+        guard let scroll, let bottomY else { return false }
+        return abs(scroll.contentView.bounds.minY - bottomY) <= 1
+    }
+
+    func alignBottom() {
+        guard let scroll else { return }
+        scroll.layoutSubtreeIfNeeded()
+        scroll.documentView?.layoutSubtreeIfNeeded()
+        guard let bottomY else { return }
+        scroll.contentView.scroll(to: NSPoint(x: scroll.contentView.bounds.minX, y: bottomY))
+        scroll.reflectScrolledClipView(scroll.contentView)
+    }
+}
+
 @available(macOS 15, *)
 private struct ModernTranscriptScroll<Content: View>: View {
     let submittedMessageID: String?
     var content: Content
     @State private var isAtBottom = true
+    @State private var bottomTask: Task<Void, Never>?
+    @State private var viewport = TranscriptViewport()
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                content
+                content.background {
+                    TranscriptPosition(viewport: viewport, onChange: { isAtBottom = $0 },
+                                       onUserScroll: { bottomTask?.cancel() })
+                }
             }
             .scrollIndicators(.hidden)
+            .onDisappear { bottomTask?.cancel() }
             .defaultScrollAnchor(.top, for: .initialOffset)
             .defaultScrollAnchor(.top, for: .sizeChanges)
-            .onAppear { proxy.scrollTo("bottom", anchor: .bottom) }
-            .onScrollGeometryChange(for: Bool.self) { geometry in
-                geometry.contentOffset.y + geometry.containerSize.height
-                    >= geometry.contentSize.height + geometry.contentInsets.bottom - 1
-            } action: { _, atBottom in
-                isAtBottom = atBottom
+            .onScrollPhaseChange { _, phase in
+                if phase == .interacting || phase == .tracking { bottomTask?.cancel() }
             }
+            .onAppear { proxy.scrollTo("bottom", anchor: .bottom) }
             .overlay(alignment: .bottom) {
                 if !isAtBottom {
                     Button {
-                        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
-                            proxy.scrollTo("bottom", anchor: .bottom)
-                        }
+                        bottomTask?.cancel()
+                        bottomTask = alignTranscriptBottom(proxy, viewport: viewport, reduceMotion: reduceMotion)
                     } label: {
                         Image(mingCute: "arrow.up", size: 20)
                             .rotationEffect(.degrees(180))
@@ -443,17 +498,23 @@ private struct ModernTranscriptScroll<Content: View>: View {
     }
 }
 
-/// AppKit bounds notifications also cover wheel events and programmatic scrolling on 14.
-private struct LegacyTranscriptPosition: NSViewRepresentable {
+/// AppKit bounds notifications cover wheel events and programmatic scrolling on all supported systems.
+private struct TranscriptPosition: NSViewRepresentable {
+    let viewport: TranscriptViewport
     var onChange: (Bool) -> Void
+    var onUserScroll: () -> Void
     func makeNSView(context: Context) -> ObserverView { ObserverView() }
     func updateNSView(_ view: ObserverView, context: Context) {
         view.onChange = onChange
+        view.onUserScroll = onUserScroll
+        view.viewport = viewport
         view.scheduleUpdate()
     }
 
     final class ObserverView: NSView {
         var onChange: ((Bool) -> Void)?
+        var onUserScroll: (() -> Void)?
+        var viewport: TranscriptViewport?
         private weak var observedScroll: NSScrollView?
 
         override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); scheduleUpdate() }
@@ -464,12 +525,16 @@ private struct LegacyTranscriptPosition: NSViewRepresentable {
         }
 
         @objc private func boundsChanged(_ notification: Notification) { scheduleUpdate() }
+        @objc private func userScrolled(_ notification: Notification) { onUserScroll?() }
 
         private func updatePosition() {
             guard let scroll = enclosingScrollView, let document = scroll.documentView else { return }
+            viewport?.scroll = scroll
             if observedScroll !== scroll {
                 NotificationCenter.default.removeObserver(self)
                 observedScroll = scroll
+                NotificationCenter.default.addObserver(self, selector: #selector(userScrolled(_:)),
+                    name: NSScrollView.willStartLiveScrollNotification, object: scroll)
                 scroll.contentView.postsBoundsChangedNotifications = true
                 document.postsFrameChangedNotifications = true
                 NotificationCenter.default.addObserver(self, selector: #selector(boundsChanged(_:)),
@@ -477,7 +542,7 @@ private struct LegacyTranscriptPosition: NSViewRepresentable {
                 NotificationCenter.default.addObserver(self, selector: #selector(boundsChanged(_:)),
                     name: NSView.frameDidChangeNotification, object: document)
             }
-            onChange?(scroll.documentVisibleRect.maxY >= document.bounds.maxY - 1)
+            onChange?(viewport?.isAtBottom ?? false)
         }
 
         deinit { NotificationCenter.default.removeObserver(self) }
@@ -488,6 +553,8 @@ private struct LegacyTranscriptScroll<Content: View>: View {
     let submittedMessageID: String?
     var content: Content
     @State private var isAtBottom = true
+    @State private var bottomTask: Task<Void, Never>?
+    @State private var viewport = TranscriptViewport()
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -496,22 +563,19 @@ private struct LegacyTranscriptScroll<Content: View>: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     content.background {
-                        LegacyTranscriptPosition { isAtBottom = $0 }
+                        TranscriptPosition(viewport: viewport, onChange: { isAtBottom = $0 },
+                                           onUserScroll: { bottomTask?.cancel() })
                     }
                 }
                 .scrollIndicators(.hidden)
+                .onDisappear { bottomTask?.cancel() }
                 .defaultScrollAnchor(.top)
                 .onAppear { proxy.scrollTo("bottom", anchor: .bottom) }
                 .overlay(alignment: .bottom) {
                     if !isAtBottom {
                         Button {
-                            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2), completionCriteria: .removed) {
-                                proxy.scrollTo("bottom", anchor: .bottom)
-                            } completion: {
-                                // Lazy rows resolve their heights during the animation.
-                                // Align once more against the completed layout.
-                                proxy.scrollTo("bottom", anchor: .bottom)
-                            }
+                            bottomTask?.cancel()
+                            bottomTask = alignTranscriptBottom(proxy, viewport: viewport, reduceMotion: reduceMotion)
                         } label: {
                             Image(mingCute: "arrow.up", size: 20)
                                 .rotationEffect(.degrees(180))
