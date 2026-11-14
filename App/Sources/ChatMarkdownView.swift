@@ -205,7 +205,7 @@ private struct ChatInlineText: View {
                 .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
         return hasText && content.runs.contains { run in
-            run.imageURL != nil || run.inlinePresentationIntent?.contains(.code) == true
+            run.imageURL != nil || run.link.map(ChatImageService.supports) == true || run.inlinePresentationIntent?.contains(.code) == true
         }
     }
 
@@ -243,7 +243,7 @@ private struct ChatInlineNativeText: NSViewRepresentable {
         container.widthTracksTextView = false
         storage.addLayoutManager(manager)
         manager.addTextContainer(container)
-        let view = NSTextView(frame: .zero, textContainer: container)
+        let view = ChatSourceTextView(frame: .zero, textContainer: container)
         view.isEditable = false
         view.isSelectable = true
         view.drawsBackground = false
@@ -270,6 +270,18 @@ private struct ChatInlineNativeText: NSViewRepresentable {
                 attributes[.link] = link
                 attributes[.foregroundColor] = linkColor
                 attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue
+            }
+            if let url = run.link, ChatImageService.supports(url) {
+                let label = String(content[run.range].characters)
+                if ChatSourceTextView.isCitation(label) {
+                    let attachment = NSTextAttachment()
+                    attachment.image = ChatSourceTextView.badge(label, foreground: foreground, background: background)
+                    attachment.bounds = NSRect(x: 0, y: -3, width: attachment.image!.size.width, height: 18)
+                    let fragment = NSMutableAttributedString(attachment: attachment)
+                    fragment.addAttributes([.link: url, .toolTip: url.host ?? label], range: NSRange(location: 0, length: fragment.length))
+                    result.append(fragment)
+                    continue
+                }
             }
             if intent.contains(.strikethrough) { attributes[.strikethroughStyle] = NSUnderlineStyle.single.rawValue }
             if let url = run.imageURL {

@@ -8,6 +8,72 @@ import ToolService
 @main
 @MainActor
 enum AgentReplyRegression {
+    static func sourcesPreview() async throws {
+        precondition(ChatSourceTextView.isCitation("[12]"))
+        precondition(ChatSourceTextView.isCitation("来源"))
+        precondition(!ChatSourceTextView.isCitation("打开官网"))
+        let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 640, height: 440),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.title = "Asky Source Preview"
+        for (name, scheme) in [("light", ColorScheme.light), ("dark", .dark)] {
+            window.appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
+            let view = NSHostingView(rootView: ChatMarkdownView(text: """
+            ## 联网搜索结果
+            安全仪表盘可以查看扫描结果、风险和修复进度。[1](https://devin.ai/)
+
+            - **扫描**：核对权限边界，找出潜在漏洞。[来源](https://devin.ai/)
+            - **修复**：使用 `Fix with Devin` 创建修复任务。[2](https://devin.ai/)
+
+            [打开官网](https://devin.ai/) 查看详细信息。
+            """).padding(28).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .background(scheme == .dark ? Color(white: 0.15) : .white).environment(\.colorScheme, scheme))
+            window.contentView = view
+            window.makeKeyAndOrderFront(nil)
+            try await Task.sleep(for: .milliseconds(500))
+            view.layoutSubtreeIfNeeded()
+            var badges = 0
+            var sourceText: ChatSourceTextView?
+            func inspect(_ node: NSView) {
+                if let text = node as? ChatSourceTextView, let storage = text.textStorage {
+                    if sourceText == nil { sourceText = text }
+                    storage.enumerateAttribute(.attachment, in: NSRange(location: 0, length: storage.length)) { value, range, _ in
+                        guard value is NSTextAttachment else { return }
+                        badges += 1
+                        precondition(storage.attribute(.link, at: range.location, effectiveRange: nil) as? URL != nil)
+                    }
+                }
+                node.subviews.forEach(inspect)
+            }
+            inspect(view)
+            precondition(badges == 3, "Source badges must work in paragraphs and lists")
+            guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { fatalError("capture") }
+            view.cacheDisplay(in: view.bounds, to: bitmap)
+            try bitmap.representation(using: .png, properties: [:])!.write(to: URL(filePath: "build/sources-" + name + ".png"))
+            if let text = sourceText, let storage = text.textStorage, let manager = text.layoutManager, let container = text.textContainer {
+                var linkRange = NSRange()
+                storage.enumerateAttribute(.link, in: NSRange(location: 0, length: storage.length)) { value, range, stop in
+                    if value != nil { linkRange = range; stop.pointee = true }
+                }
+                let rect = manager.boundingRect(forGlyphRange: manager.glyphRange(forCharacterRange: linkRange, actualCharacterRange: nil), in: container)
+                let local = NSPoint(x: rect.midX + text.textContainerOrigin.x, y: rect.midY + text.textContainerOrigin.y)
+                let point = text.convert(local, to: nil)
+                let event = NSEvent.mouseEvent(with: .mouseMoved, location: point, modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 0, pressure: 0)!
+                text.mouseMoved(with: event)
+                try await Task.sleep(for: .milliseconds(700))
+                precondition(text.preview?.isShown == true, "Hovering a source must open its card")
+                if let card = text.preview?.contentViewController?.view,
+                   let bitmap = card.bitmapImageRepForCachingDisplay(in: card.bounds) {
+                    card.cacheDisplay(in: card.bounds, to: bitmap)
+                    try bitmap.representation(using: .png, properties: [:])!.write(to: URL(filePath: "build/source-card-" + name + ".png"))
+                }
+                text.preview?.close()
+            }
+
+        }
+        window.orderOut(nil)
+        print("Source badges, retained links, list layout and light/dark window captures passed")
+    }
+
     static func mathPreview() async throws {
         let formulas = [
             #"E = mc^2"#,
@@ -320,6 +386,10 @@ enum AgentReplyRegression {
     static func main() async throws {
         let application = NSApplication.shared
         application.setActivationPolicy(.accessory)
+        if CommandLine.arguments.contains("--sources-preview") {
+            try await sourcesPreview()
+            return
+        }
         if CommandLine.arguments.contains("--math-preview") {
             try await mathPreview()
             return
