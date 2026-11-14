@@ -36,7 +36,7 @@ struct ComposerAttachmentCard: View {
     private var iconFill: Color {
         reduceTransparency
             ? ThemeColor.kBackground.color(for: colorScheme)
-            : ThemeColor.kBackgroundNeutral.color(for: colorScheme).opacity(0.5)
+            : ThemeColor.kBackgroundNeutral.color(for: colorScheme)
     }
     var body: some View {
         Group {

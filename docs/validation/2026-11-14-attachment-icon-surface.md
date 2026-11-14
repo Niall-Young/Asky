@@ -18,3 +18,12 @@
 - `git diff --check`：通过。构建及截图复用既有 `build/` 忽略规则，Swift 缓存复用既有 `Packages/KulaCore/.build/` 忽略规则。
 
 截图为本机回归窗口，未覆盖不同壁纸或减少透明度的实际显示效果。本轮未替换已安装 App、未打包或发布。
+
+## 后续调整：提高底座辨识度
+
+用户在 Debug 实际窗口中反馈 3% 底座过浅，因此仅将图标底座提高为 6% 中性色；外层卡片与图标保持不变。
+
+- 重新执行 `swift test`、`xcodegen generate`、Debug `xcodebuild`：通过。
+- 原生选区预览重新编译被并行构建中断：`Router.o was modified during the build`，本次不记为预览通过。Computer Use 读取实际窗口也超时，6% 效果尚未完成视觉复核。
+- 已重启 `build/DerivedData/Build/Products/Debug/Asky.app`，供实际查看。
+- README: unchanged，仅调整底座透明度，不影响使用说明。AGENTS.md: unchanged，开发命令和架构边界未改变。构建与截图沿用既有忽略规则。
