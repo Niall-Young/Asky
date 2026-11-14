@@ -79,7 +79,7 @@ struct AgentAvatarPicker: View {
             }
         }
         .frame(width: 36, height: 36, alignment: .topLeading)
-        .animation(reduceMotion ? nil : .spring(response: 0.36, dampingFraction: 0.58), value: showing)
+        .animation(reduceMotion ? nil : .spring(response: 0.28, dampingFraction: 0.58), value: showing)
         .onChange(of: showing) { _, value in value ? startMonitoring() : stopMonitoring() }
         .onDisappear { showing = false; stopMonitoring() }
     }
