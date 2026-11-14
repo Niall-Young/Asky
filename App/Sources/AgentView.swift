@@ -131,6 +131,12 @@ struct AgentView: View {
             Composer(model: model)
                 .padding(.horizontal, 12).padding(.bottom, 12)
         }
+        .overlay(alignment: .top) {
+            ProgressiveHeaderBlur()
+                .frame(height: AgentLayout.headerHeight + 32)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        }
         .overlay(alignment: .top) { header }
         .overlay(alignment: .topLeading) {
             AgentAvatarPicker(color: Binding(get: { model.avatarColor }, set: { model.avatarColor = $0 }))
@@ -161,7 +167,7 @@ struct AgentView: View {
                 pinned: pinned,
                 onPin: togglePin, onClose: close, onPressChanged: { toolbarPressed = $0 })
                 .fixedSize()
-                .nativeGlassBackground(in: Capsule())
+                .nativeGlassBackground(in: Capsule(), clear: true, glassOpacity: 0.35)
                 .glassPointerFeedback(pressed: toolbarPressed, in: Capsule())
         }
         .padding(.horizontal, 16)
