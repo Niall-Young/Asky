@@ -1,7 +1,7 @@
 import AppKit
 import ApplicationServices
 
-/// A paste belongs to the application that was in front before the history panel opened.
+/// A paste belongs to the native editor or external application focused before history opened.
 @MainActor
 public struct ClipboardPasteTarget {
     public enum Result: Equatable, Sendable {
@@ -13,13 +13,35 @@ public struct ClipboardPasteTarget {
     }
 
     private let application: NSRunningApplication?
+    private weak var localEditor: NSTextView? = nil
+    private weak var localWindow: NSWindow? = nil
+    private var isLocal: Bool = false
     public let focusState: FocusState
 
     public static var unavailable: Self { Self(application: nil, focusState: .nonInput) }
     /// Missing accessibility information is not proof that the app has no input focus.
-    public var canPaste: Bool { focusState != .nonInput && application?.isTerminated == false && AXIsProcessTrusted() }
+    public var canPaste: Bool {
+        if isLocal { return localInputIsAvailable }
+        return focusState != .nonInput && application?.isTerminated == false && AXIsProcessTrusted()
+    }
+
+    private var localInputIsAvailable: Bool {
+        guard let localEditor, let localWindow else { return false }
+        return localWindow.isVisible && localEditor.window === localWindow && localEditor.isEditable
+    }
 
     public static func capture() -> Self {
+        // Our nonactivating panels can own keyboard focus while another app is frontmost.
+        // Capture the actual native editor before the history panel takes its place.
+        if let window = NSApp.keyWindow {
+            guard let editor = window.firstResponder as? NSTextView,
+                  editor.isEditable, editor.window === window else { return .unavailable }
+            var target = Self(application: nil, focusState: .input)
+            target.localEditor = editor
+            target.localWindow = window
+            target.isLocal = true
+            return target
+        }
         let frontmost = NSWorkspace.shared.frontmostApplication
         let target = frontmost?.processIdentifier == ProcessInfo.processInfo.processIdentifier ? nil : frontmost
         return Self(application: target, focusState: target.map { focusedInput(in: $0) } ?? .nonInput)
@@ -27,6 +49,7 @@ public struct ClipboardPasteTarget {
 
     /// Check before dismissing the panel so a copy-only fallback can leave it open.
     public func prepare() -> Result {
+        if isLocal { return localInputIsAvailable ? .posted : .unavailable }
         guard let application, !application.isTerminated else { return .unavailable }
         guard AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": true] as CFDictionary) else {
             return .accessibilityRequired
@@ -40,6 +63,17 @@ public struct ClipboardPasteTarget {
     }
 
     func paste(expectedChangeCount: Int, validateFocus: @MainActor () -> Bool) async -> Result {
+        if isLocal {
+            guard !Task.isCancelled, localInputIsAvailable,
+                  let localWindow, let localEditor,
+                  NSPasteboard.general.changeCount == expectedChangeCount else { return .unavailable }
+            localWindow.makeKeyAndOrderFront(nil)
+            guard localWindow.makeFirstResponder(localEditor),
+                  localWindow.firstResponder === localEditor, validateFocus() else { return .noInputFocus }
+            // Dispatch through the editor so composer attachment handling and bindings still run.
+            localEditor.paste(nil)
+            return .posted
+        }
         guard let application, !application.isTerminated else { return .unavailable }
         guard AXIsProcessTrusted() else { return .accessibilityRequired }
         guard focusState != .nonInput else { return .noInputFocus }

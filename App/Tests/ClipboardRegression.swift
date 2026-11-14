@@ -32,6 +32,10 @@ enum ClipboardRegression {
                     try await verifyClearAll()
                     exit(0)
                 }
+                if CommandLine.arguments.contains("--local-paste-target") {
+                    try await verifyLocalPasteTarget()
+                    exit(0)
+                }
                 if CommandLine.arguments.contains("--paste-target") {
                     try await verifyPasteTarget()
                     exit(0)
@@ -1001,10 +1005,12 @@ enum ClipboardRegression {
         precondition(controller.handleActionKey(copyKey))
         precondition(controller.items.count == 1 && !controller.isActionsMenuPresented,
                      "Cmd Return must copy even when Delete is highlighted in More")
-        let field = descendants(panel.contentView!, of: CompletionTextField.self).first!
-        let delegate = field.delegate as! LauncherSearchField.Coordinator
-        precondition(delegate.control(field, textView: NSTextView(),
-            doCommandBy: #selector(NSResponder.insertNewline(_:))))
+        // Deliver a real Return event: the delegate consults NSApp.currentEvent, so calling
+        // it directly can accidentally reuse an earlier activation or Command Return event.
+        let returnKey = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
+            timestamp: 0, windowNumber: panel.windowNumber, context: nil, characters: "\r",
+            charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 36)!
+        NSApp.postEvent(returnKey, atStart: false)
         for _ in 0..<100 {
             if (try? String(contentsOf: root.appending(path: "text"), encoding: .utf8)) == "LeftPASTEPASTERight" { break }
             try await Task.sleep(for: .milliseconds(30))
@@ -1034,6 +1040,90 @@ enum ClipboardRegression {
         precondition(NSPasteboard.general.string(forType: .string) == "PASTE" && controller.isVisible)
         controller.hide()
         print("Clipboard paste passed: external cursor insertion, keep-open menu paste, preserved panel state, copy-only, no input, clipboard race")
+    }
+
+    private static func verifyLocalPasteTarget() async throws {
+        NSApp.setActivationPolicy(.regular)
+        func descendants<T: NSView>(_ view: NSView, of type: T.Type) -> [T] {
+            (view as? T).map { [$0] } ?? view.subviews.flatMap { descendants($0, of: type) }
+        }
+        let original = NSPasteboard.general.pasteboardItems?.map { item in
+            item.types.compactMap { type in item.data(forType: type).map { (type, $0) } }
+        } ?? []
+        defer {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.writeObjects(original.map { values in
+                let item = NSPasteboardItem()
+                for (type, data) in values { item.setData(data, forType: type) }
+                return item
+            })
+        }
+        let root = FileManager.default.temporaryDirectory.appending(path: "Asky-local-paste-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let app = try AppModel(root: root)
+        try ClipboardStore(app.store).insert(ClipboardItem(kind: .text, text: "PASTE", byteSize: 5,
+                                                         contentHash: "local-paste"))
+        var draft = "LeftRight"
+        var attachmentPastes = 0
+        let host = NSHostingView(rootView: ComposerTextEditor(
+            text: Binding(get: { draft }, set: { draft = $0 }), height: .constant(80),
+            isFocused: .constant(true), pasteAttachment: {
+                if NSPasteboard.general.data(forType: .png) != nil { attachmentPastes += 1; return true }
+                return false
+            }, submit: { preconditionFailure("paste must never submit the message") }))
+        let window = NSWindow(contentRect: NSRect(x: 200, y: 200, width: 500, height: 200),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        NSApp.activate()
+        window.makeKeyAndOrderFront(nil)
+        defer { window.close() }
+        try await Task.sleep(for: .milliseconds(250))
+        let editor = descendants(host, of: NSTextView.self).first!
+        NSApp.activate(ignoringOtherApps: true)
+        for _ in 0..<30 {
+            window.makeKeyAndOrderFront(nil)
+            if NSApp.keyWindow === window { break }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        precondition(window.makeFirstResponder(editor) && NSApp.keyWindow === window,
+                     "the composer window must own keyboard focus before capture")
+        editor.setSelectedRange(NSRange(location: 4, length: 0))
+        let controller = ClipboardController(app: app)
+        controller.show()
+        try await Task.sleep(for: .milliseconds(100))
+        precondition(controller.hasPasteTarget, "our own composer must be a paste target")
+        controller.submitSelection(copyOnly: false)
+        try await Task.sleep(for: .milliseconds(500))
+        precondition(!controller.isVisible && editor.string == "LeftPASTERight" && draft == editor.string,
+                     "Return must insert at the composer cursor and update its draft binding")
+        editor.setSelectedRange(NSRange(location: 4, length: 5))
+        controller.show()
+        controller.pasteSelection(keepingOpen: true)
+        try await Task.sleep(for: .milliseconds(350))
+        precondition(controller.isVisible && editor.string == "LeftPASTERight",
+                     "keep-open paste must replace the selection once")
+        controller.hide()
+        window.makeKeyAndOrderFront(nil)
+        precondition(window.makeFirstResponder(editor))
+        let target = ClipboardPasteTarget.capture()
+        precondition(target.canPaste && target.prepare() == .posted)
+        let stale = ClipboardAccess.changeCount
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setData(Data([1]), forType: .png)
+        let staleResult = await target.paste(expectedChangeCount: stale)
+        precondition(staleResult == .unavailable && attachmentPastes == 0)
+        let imageResult = await target.paste(expectedChangeCount: ClipboardAccess.changeCount)
+        precondition(imageResult == .posted && attachmentPastes == 1 && draft == "LeftPASTERight",
+                     "local paste must invoke the composer's existing image attachment handler")
+        editor.isEditable = false
+        precondition(!ClipboardPasteTarget.capture().canPaste, "read-only text is not an input")
+        editor.isEditable = true
+        window.orderOut(nil)
+        let closedResult = await target.paste(expectedChangeCount: ClipboardAccess.changeCount)
+        precondition(closedResult == .unavailable && attachmentPastes == 1,
+                     "a hidden target must not be reopened by a stale paste")
+        print("PASS: local composer cursor insertion, binding, selection replacement, keep-open, attachment dispatch, clipboard race, read-only and hidden target")
     }
 
     private static func verifyDragPasteTarget() async throws {
