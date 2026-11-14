@@ -81,7 +81,6 @@ struct AgentAvatarPicker: View {
                         .frame(width: showing ? 184 : 36, height: showing ? 252 : 36)
                         .glassEffect(showing ? .regular.interactive() : .clear,
                                      in: RoundedRectangle(cornerRadius: 18))
-                        .opacity(showing ? 1 : 0.60)
                         .overlay(alignment: .topLeading) {
                             if showing { menu } else { trigger }
                         }
@@ -95,7 +94,7 @@ struct AgentAvatarPicker: View {
                     if showing {
                         menu.nativeGlassBackground(in: RoundedRectangle(cornerRadius: 18))
                     } else {
-                        trigger.nativeGlassBackground(in: Circle(), clear: true, glassOpacity: 0.60)
+                        trigger.nativeGlassBackground(in: Circle(), clear: true)
                             .glassPointerFeedback(pressed: pressed, in: Circle())
                     }
                 }
