@@ -702,6 +702,55 @@ enum AgentReplyRegression {
         print("Bubble reply regression passed: hidden tools and partial text, typing placeholder, complete answer and history")
     }
 
+    static func restoredTranscriptRegression(app: AppModel) async throws {
+        let store = ConversationStore(app.store)
+        let cid = try store.create(title: "Restored transcript")
+        for index in 0..<38 {
+            let text = (0...(index.isMultiple(of: 2) ? 0 : 8 + index % 9)).map {
+                "历史消息 \(index)，段落 \($0)：恢复会话时直接显示消息，不需要点击窗口或回到底部。"
+            }.joined(separator: "\n\n")
+            try store.append(conversationID: cid, role: index.isMultiple(of: 2) ? "user" : "assistant", text: text)
+        }
+        try store.append(conversationID: cid, role: "user", text: "最后一个问题")
+        let answer = CommandLine.arguments.contains("--restored-long-reply")
+            ? (0..<24).map { "段落 \($0)：恢复时也要正确测量长回答。\n\n$$\\int_0^1 x^2 dx = \\frac{1}{3}$$\n\n| 写法 | 含义 |\n| --- | --- |\n| `x^2` | 平方 |" }.joined(separator: "\n\n")
+            : "重新打开后应立即看到这条回答。"
+        try store.append(conversationID: cid, role: "assistant", text: answer)
+        let model = AgentModel(app: app)
+        let controller = AgentWindowController(model: model, presentation: WindowPresentation())
+        controller.show()
+        let window = NSApplication.shared.windows.first { $0.title == "Asky AI" }!
+        defer { window.orderOut(nil) }
+        func findScroll(_ view: NSView) -> NSScrollView? {
+            if let scroll = view as? NSScrollView, scroll.contentSize.height > 200 { return scroll }
+            return view.subviews.compactMap(findScroll).first
+        }
+        func findReply(_ view: NSView, id: String) -> NSView? {
+            if view.identifier?.rawValue == "transcript-reply-" + id { return view }
+            return view.subviews.compactMap { findReply($0, id: id) }.first
+        }
+        for attempt in 0..<3 {
+            if attempt > 0 { window.close(); controller.show() }
+            // No clicks, scroll events or forced layout before inspecting the initial frame.
+            try await Task.sleep(for: .milliseconds(1000))
+            let scroll = findScroll(window.contentView!)!
+            let gap = scroll.documentView!.bounds.maxY - scroll.documentVisibleRect.maxY
+            print("Restored transcript attempt=\(attempt), gap=\(gap), document=\(scroll.documentView!.frame), clip=\(scroll.contentView.bounds)")
+            precondition(abs(gap) <= 1, "Opening history must reach the actual bottom without a click: gap=\(gap)")
+            let reply = findReply(window.contentView!, id: model.items.last(where: { $0.kind == .assistant })!.id)!
+            let rect = scroll.contentView.convert(reply.bounds, from: reply)
+            precondition(scroll.contentView.bounds.intersects(rect), "Restored reply must be visible without user interaction")
+        }
+        let scroll = findScroll(window.contentView!)!
+        NotificationCenter.default.post(name: NSScrollView.willStartLiveScrollNotification, object: scroll)
+        scroll.contentView.scroll(to: .zero)
+        scroll.reflectScrolledClipView(scroll.contentView)
+        try await Task.sleep(for: .milliseconds(350))
+        precondition(scroll.documentView!.bounds.maxY - scroll.documentVisibleRect.maxY > 100,
+                     "Initial layout following must stop as soon as the reader scrolls")
+        print("Restored transcript passed: cold open, repeated close/reopen and manual reading takeover")
+    }
+
     static func bottomPushRegression(app: AppModel) async throws {
         let model = AgentModel(app: app)
         let store = ConversationStore(app.store)
@@ -891,6 +940,10 @@ enum AgentReplyRegression {
         let root = FileManager.default.temporaryDirectory.appending(path: "Asky-reply-\(UUID())")
         defer { try? FileManager.default.removeItem(at: root) }
         let app = try AppModel(root: root)
+        if CommandLine.arguments.contains("--restored-transcript") {
+            try await restoredTranscriptRegression(app: app)
+            return
+        }
         if CommandLine.arguments.contains("--latex-form-preview") {
             try await latexFormPreview(app: app)
             return

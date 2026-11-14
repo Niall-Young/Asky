@@ -150,6 +150,8 @@ open -n build/DerivedData/Build/Products/Debug/Asky.app --args --show-agent
 python3 App/Tests/run-agent-reply-regression.py --reply-activity-preview
 python3 App/Tests/run-agent-reply-regression.py --reading-scroll
 python3 App/Tests/run-agent-reply-regression.py --bottom-push
+python3 App/Tests/run-agent-reply-regression.py --restored-transcript
+python3 App/Tests/run-agent-reply-regression.py --restored-transcript --restored-long-reply
 python3 App/Tests/run-agent-reply-regression.py --forms-preview --custom-preview
 python3 App/Tests/run-agent-reply-regression.py --latex-form-preview
 python3 App/Tests/run-agent-reply-regression.py --math-preview
@@ -319,6 +321,8 @@ open -n build/DerivedData/Build/Products/Debug/Asky.app --args --show-agent
 python3 App/Tests/run-agent-reply-regression.py --reply-activity-preview
 python3 App/Tests/run-agent-reply-regression.py --reading-scroll
 python3 App/Tests/run-agent-reply-regression.py --bottom-push
+python3 App/Tests/run-agent-reply-regression.py --restored-transcript
+python3 App/Tests/run-agent-reply-regression.py --restored-transcript --restored-long-reply
 python3 App/Tests/run-agent-reply-regression.py --forms-preview --custom-preview
 python3 App/Tests/run-agent-reply-regression.py --latex-form-preview
 python3 App/Tests/run-agent-reply-regression.py --math-preview
