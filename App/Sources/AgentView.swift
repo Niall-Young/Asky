@@ -316,6 +316,7 @@ private struct Transcript: View {
     private let taskStartedAt: Date?
     private let isRunning: Bool
     private let state: AgentTaskState?
+    @State private var viewport = TranscriptViewport()
 
     init(model: AgentModel) {
         self.model = model
@@ -329,22 +330,38 @@ private struct Transcript: View {
     }
 
     var body: some View {
-        CompatibleTranscriptScroll(submittedMessageID: items.last(where: { $0.kind == .user })?.id) {
-            VStack(spacing: 0) {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    if hasOlder {
-                        Button(NSLocalizedString("加载更早的消息", comment: "")) { model.loadOlder() }.buttonStyle(.link).frame(maxWidth: .infinity)
+        GeometryReader { geometry in
+            let allGroups = groups
+            let questionIndex = allGroups.lastIndex { $0.items.first?.kind == .user } ?? allGroups.count
+            CompatibleTranscriptScroll(submittedMessageID: items.last(where: { $0.kind == .user })?.id,
+                                       viewport: viewport) {
+                VStack(spacing: 0) {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        if hasOlder {
+                            Button(NSLocalizedString("加载更早的消息", comment: "")) { model.loadOlder() }.buttonStyle(.link).frame(maxWidth: .infinity)
+                        }
+                        ForEach(Array(allGroups.prefix(questionIndex).enumerated()), id: \.element.id) { index, group in
+                            ResponseGroupView(group: group, model: model)
+                                .padding(.top, index == 0 ? 0 : (group.items.first?.kind == .user ? 20 : 12))
+                        }
                     }
-                    ForEach(Array(groups.enumerated()), id: \.element.id) { index, group in
-                        ResponseGroupView(group: group, model: model)
-                            .padding(.top, index == 0 ? 0 : (group.items.first?.kind == .user ? 20 : 12))
+                    if questionIndex < allGroups.count {
+                        VStack(alignment: .leading, spacing: 12) {
+                            ForEach(Array(allGroups.suffix(from: questionIndex))) { group in
+                                ResponseGroupView(group: group, model: model)
+                            }
+                        }
+                        // Reserve room for this turn so even a short question can sit below the header.
+                        .frame(minHeight: max(0, geometry.size.height - AgentLayout.headerHeight - 13), alignment: .top)
+                        .background { TranscriptQuestionAnchor(viewport: viewport) }
+                        .padding(.top, questionIndex == 0 ? 0 : 20)
                     }
+                    // Keep the destination outside lazy row height estimation.
+                    Color.clear.frame(height: 13).id("bottom")
                 }
-                // Keep the destination outside lazy row height estimation.
-                Color.clear.frame(height: 13).id("bottom")
+                .padding(.horizontal, 12).padding(.top, 12)
+                .padding(.top, AgentLayout.headerHeight)
             }
-            .padding(.horizontal, 12).padding(.top, 12)
-            .padding(.top, AgentLayout.headerHeight)
         }
     }
 
@@ -385,13 +402,14 @@ private struct Transcript: View {
 
 private struct CompatibleTranscriptScroll<Content: View>: View {
     let submittedMessageID: String?
+    let viewport: TranscriptViewport
     @ViewBuilder var content: Content
 
     var body: some View {
         if #available(macOS 15, *), !SurfaceCompatibility.useMacOS14Compatibility {
-            ModernTranscriptScroll(submittedMessageID: submittedMessageID, content: content)
+            ModernTranscriptScroll(submittedMessageID: submittedMessageID, viewport: viewport, content: content)
         } else {
-            LegacyTranscriptScroll(submittedMessageID: submittedMessageID, content: content)
+            LegacyTranscriptScroll(submittedMessageID: submittedMessageID, viewport: viewport, content: content)
         }
     }
 }
@@ -424,6 +442,31 @@ private func alignTranscriptBottom(_ proxy: ScrollViewProxy, viewport: Transcrip
 @MainActor
 private final class TranscriptViewport {
     weak var scroll: NSScrollView?
+    weak var question: NSView?
+
+    private var questionY: CGFloat? {
+        guard let scroll, let document = scroll.documentView, let question,
+              question.enclosingScrollView === scroll else { return nil }
+        let rect = scroll.contentView.convert(question.bounds, from: question)
+        var bounds = scroll.contentView.bounds
+        bounds.origin.y = document.isFlipped
+            ? rect.minY - AgentLayout.headerHeight
+            : rect.maxY - bounds.height + AgentLayout.headerHeight
+        return scroll.contentView.constrainBoundsRect(bounds).minY
+    }
+
+    var isAtQuestion: Bool {
+        guard let scroll, let questionY else { return false }
+        return abs(scroll.contentView.bounds.minY - questionY) <= 1
+    }
+
+    func alignQuestion() {
+        scroll?.layoutSubtreeIfNeeded()
+        scroll?.documentView?.layoutSubtreeIfNeeded()
+        guard let scroll, let questionY else { return }
+        scroll.contentView.scroll(to: NSPoint(x: scroll.contentView.bounds.minX, y: questionY))
+        scroll.reflectScrolledClipView(scroll.contentView)
+    }
 
     private var bottomY: CGFloat? {
         guard let scroll, let document = scroll.documentView else { return nil }
@@ -448,13 +491,45 @@ private final class TranscriptViewport {
     }
 }
 
+/// A submission owns one bounded alignment; scrolling or closing cancels it.
+@MainActor
+private func alignSubmittedQuestion(viewport: TranscriptViewport) -> Task<Void, Never> {
+    Task { @MainActor in
+        await Task.yield()
+        guard !Task.isCancelled else { return }
+        viewport.alignQuestion()
+        do {
+            // The composer shrinks and the conversation transition lasts 240 ms.
+            try await Task.sleep(for: .milliseconds(260))
+            var settledPasses = 0
+            for _ in 0..<12 {
+                try Task.checkCancellation()
+                viewport.alignQuestion()
+                try await Task.sleep(for: .milliseconds(30))
+                settledPasses = viewport.isAtQuestion ? settledPasses + 1 : 0
+                if settledPasses >= 3 { return }
+            }
+        } catch { /* The reader took over or the window closed. */ }
+    }
+}
+
+private struct TranscriptQuestionAnchor: NSViewRepresentable {
+    let viewport: TranscriptViewport
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        view.setAccessibilityIdentifier("transcript-current-question")
+        return view
+    }
+    func updateNSView(_ view: NSView, context: Context) { viewport.question = view }
+}
+
 @available(macOS 15, *)
 private struct ModernTranscriptScroll<Content: View>: View {
     let submittedMessageID: String?
+    let viewport: TranscriptViewport
     var content: Content
     @State private var isAtBottom = true
     @State private var bottomTask: Task<Void, Never>?
-    @State private var viewport = TranscriptViewport()
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -491,8 +566,11 @@ private struct ModernTranscriptScroll<Content: View>: View {
                 }
             }
             .onChange(of: submittedMessageID) { oldID, newID in
-                // Only a new outgoing message moves the viewport; replies keep the reading position.
-                if let newID, newID != oldID { proxy.scrollTo("bottom", anchor: .bottom) }
+                // Start the new question below the header; replies keep the reading position.
+                if let newID, newID != oldID {
+                    bottomTask?.cancel()
+                    bottomTask = alignSubmittedQuestion(viewport: viewport)
+                }
             }
         }
     }
@@ -551,10 +629,10 @@ private struct TranscriptPosition: NSViewRepresentable {
 
 private struct LegacyTranscriptScroll<Content: View>: View {
     let submittedMessageID: String?
+    let viewport: TranscriptViewport
     var content: Content
     @State private var isAtBottom = true
     @State private var bottomTask: Task<Void, Never>?
-    @State private var viewport = TranscriptViewport()
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -588,7 +666,10 @@ private struct LegacyTranscriptScroll<Content: View>: View {
                     }
                 }
                 .onChange(of: submittedMessageID) { oldID, newID in
-                    if let newID, newID != oldID { proxy.scrollTo("bottom", anchor: .bottom) }
+                    if let newID, newID != oldID {
+                        bottomTask?.cancel()
+                        bottomTask = alignSubmittedQuestion(viewport: viewport)
+                    }
                 }
             }
         }

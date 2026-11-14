@@ -698,7 +698,54 @@ enum AgentReplyRegression {
         model.handle(.taskState(taskID: "reading-scroll-followup", .completed), conversationID: cid)
         model.finishTask(conversationID: cid)
         try await Task.sleep(for: .milliseconds(900))
-        precondition(abs(scroll.contentView.bounds.minY - settled) < 2, "Later replies must still preserve the reading position")
+        precondition(abs(scroll.contentView.bounds.minY - settled) < 2, "Later replies must still preserve the reading position: before=\(settled), after=\(scroll.contentView.bounds.minY)")
+        // Exercise real editing/submission with an absent credential: no remote model request.
+        app.preferences.automaticUpdates = false
+        await app.start()
+        precondition(app.agent != nil)
+        app.modelConfiguration = ModelConfiguration(baseURL: URL(string: "http://127.0.0.1:1/v1")!,
+            modelName: "composer-regression", credentialRef: "Asky-composer-unset-" + UUID().uuidString)
+        func findEditor(_ view: NSView) -> NSTextView? {
+            if let editor = view as? NSTextView, editor.isEditable { return editor }
+            return view.subviews.compactMap(findEditor).first
+        }
+        let editor = findEditor(window.contentView!)!
+        window.makeFirstResponder(editor)
+        for attempt in 0..<4 {
+            let beforeEditing = scroll.contentView.bounds.minY
+            editor.insertText("你好，第 \(attempt) 次提问", replacementRange: editor.selectedRange())
+            try await Task.sleep(for: .milliseconds(250))
+            precondition(abs(scroll.contentView.bounds.minY - beforeEditing) < 2,
+                         "Typing must preserve transcript position")
+            if attempt.isMultiple(of: 2) {
+                editor.insertText(String(repeating: "\n多行草稿", count: 6), replacementRange: editor.selectedRange())
+                try await Task.sleep(for: .milliseconds(250))
+            }
+            model.send()
+            precondition(model.draft.isEmpty, "Submission must clear the composer")
+            if attempt == 3 {
+                try await Task.sleep(for: .milliseconds(80))
+                NotificationCenter.default.post(name: NSScrollView.willStartLiveScrollNotification, object: scroll)
+                scroll.contentView.scroll(to: .zero)
+                scroll.reflectScrolledClipView(scroll.contentView)
+                let userPosition = scroll.contentView.bounds.minY
+                try await Task.sleep(for: .milliseconds(800))
+                precondition(abs(scroll.contentView.bounds.minY - userPosition) < 2,
+                             "User scrolling must cancel pending question alignment")
+                print("Submission alignment cancelled by user scroll")
+            } else {
+                try await Task.sleep(for: .milliseconds(800))
+                func questionAnchor(_ view: NSView) -> NSView? {
+                    if view.accessibilityIdentifier() == "transcript-current-question" { return view }
+                    return view.subviews.compactMap(questionAnchor).first
+                }
+                let anchor = questionAnchor(window.contentView!)!
+                let questionTop = scroll.documentView!.convert(anchor.bounds, from: anchor).minY - scroll.documentVisibleRect.minY
+                print("Submission question top: attempt=\(attempt), y=\(questionTop)")
+                precondition(abs(questionTop - 64) <= 1,
+                             "New question must settle below the floating header: \(questionTop)")
+            }
+        }
         print("Reading scroll regression passed: preserved reading position before and after manual bottom jumps")
     }
 
