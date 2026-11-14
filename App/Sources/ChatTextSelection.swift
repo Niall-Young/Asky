@@ -75,6 +75,11 @@ final class ChatSelectionMenu {
     private weak var textView: ChatSelectableTextView?
     private var monitor: Any?
     private var resignObserver: NSObjectProtocol?
+    private let pressSpring = SurfaceSpring()
+    private var restingFrame: NSRect?
+    private var dismissalTask: Task<Void, Never>?
+    private var activated = false
+    private var reduceMotion = false
 
     init(textView: ChatSelectableTextView) { self.textView = textView }
 
@@ -92,29 +97,22 @@ final class ChatSelectionMenu {
         Self.active = self
         let selection = textView.selectedContent
         let action = textView.quoteAction
-        let content = HStack(spacing: 2) {
-            Button { [weak self] in
-                if MessageClipboard.copy(selection) { self?.close() }
-            } label: {
-                Label { Text("复制") } icon: { Image("ChatCopy").resizable().frame(width: 14, height: 14) }
-                    .padding(.horizontal, 10).frame(height: 30)
-            }
-            Button { [weak self] in
-                self?.close()
-                action?(selection)
-            } label: {
-                Label { Text("添加到对话") } icon: { Image(mingCute: "plus", size: 14) }
-                    .padding(.horizontal, 10).frame(height: 30)
-            }
-        }
-        .font(.system(size: 13)).foregroundStyle(ThemeColor.kText)
-        .buttonStyle(AgentIconButtonStyle(cornerRadius: 12))
-        .padding(4)
-        .windowSurfaceBackground(in: RoundedRectangle(cornerRadius: 16))
+        let content = ChatSelectionActions(copy: { [weak self] in
+            guard let self, !self.activated else { return }
+            if MessageClipboard.copy(selection) { self.dismissAfterFeedback() }
+        }, quote: { [weak self] in
+            guard let self, !self.activated else { return }
+            action?(selection)
+            self.dismissAfterFeedback()
+        }, pressChanged: { [weak self] pressed, reduceMotion in
+            self?.setPressed(pressed, reduceMotion: reduceMotion)
+        })
         let size = SurfacePanel.fittingSize(of: content, maxWidth: 320)
         let host = FirstMouseHostingView(rootView: content)
         host.sizingOptions = []
         host.frame = NSRect(origin: .zero, size: size)
+        // This compact text menu keeps the glass rim without an extra dark window shadow.
+        panel.hasShadow = false
         panel.setContentSize(size)
         panel.contentView = WindowSurface.glassContentView(host, cornerRadius: 16)
         panel.appearance = parent.effectiveAppearance
@@ -124,6 +122,13 @@ final class ChatSelectionMenu {
         if y + size.height > limits.maxY { y = anchor.minY - size.height - 6 }
         let x = min(max(anchor.midX - size.width / 2, limits.minX), limits.maxX - size.width)
         panel.setFrameOrigin(NSPoint(x: x, y: max(limits.minY, y)))
+        restingFrame = panel.frame
+        pressSpring.onStep = { [weak self] progress in
+            guard let self, let frame = self.restingFrame else { return }
+            let growth = min(0.06, 3 / max(frame.width, frame.height, 1)) * progress
+            let expanded = frame.insetBy(dx: -frame.width * growth / 2, dy: -frame.height * growth / 2)
+            self.panel.setFrame(expanded, display: true)
+        }
         parent.addChildWindow(panel, ordered: .above)
         panel.matchesActiveAppearance = parent.isKeyWindow
         panel.orderFront(nil)
@@ -138,9 +143,60 @@ final class ChatSelectionMenu {
             }
     }
 
+    private func setPressed(_ pressed: Bool, reduceMotion: Bool) {
+        self.reduceMotion = reduceMotion
+        guard panel.isVisible else { return }
+        if reduceMotion { pressSpring.set(0) }
+        else { pressSpring.animate(to: pressed ? 1 : 0, response: pressed ? 0.18 : 0.34,
+                                   damping: pressed ? 1 : 0.42, in: panel) }
+    }
+
+    private func dismissAfterFeedback() {
+        activated = true
+        if reduceMotion { close(); return }
+        // Execute immediately, but keep the surface briefly so its release spring is visible.
+        dismissalTask = Task { @MainActor [weak self] in
+            do { try await Task.sleep(for: .milliseconds(220)) } catch { return }
+            self?.close()
+        }
+    }
+
     func close() {
+        dismissalTask?.cancel()
+        dismissalTask = nil
+        pressSpring.stop()
+        restingFrame = nil
         if let monitor { NSEvent.removeMonitor(monitor); self.monitor = nil }
         if let resignObserver { NotificationCenter.default.removeObserver(resignObserver); self.resignObserver = nil }
         panel.remove()
+    }
+}
+
+private struct ChatSelectionActions: View {
+    let copy: () -> Void
+    let quote: () -> Void
+    let pressChanged: (Bool, Bool) -> Void
+    @State private var pressed = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        HStack(spacing: 2) {
+            Button(action: copy) {
+                Label { Text("复制") } icon: { Image("ChatCopy").resizable().frame(width: 14, height: 14) }
+                    .padding(.horizontal, 10).frame(height: 30).contentShape(.rect)
+            }
+            Button(action: quote) {
+                Label { Text("添加到对话") } icon: { Image(mingCute: "bubble.left", size: 14) }
+                    .padding(.horizontal, 10).frame(height: 30).contentShape(.rect)
+            }
+        }
+        .font(.system(size: 13)).foregroundStyle(ThemeColor.kText)
+        .buttonStyle(GlassPressObserverStyle(pressed: $pressed))
+        .padding(4)
+        .windowSurfaceBackground(in: RoundedRectangle(cornerRadius: 16))
+        .glassPointerFeedback(pressed: pressed, in: RoundedRectangle(cornerRadius: 16))
+        .onAppear { pressChanged(false, reduceMotion) }
+        .onChange(of: pressed) { _, value in pressChanged(value, reduceMotion) }
+        .onChange(of: reduceMotion) { _, value in pressChanged(pressed, value) }
     }
 }

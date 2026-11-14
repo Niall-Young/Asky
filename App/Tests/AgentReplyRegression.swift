@@ -996,12 +996,21 @@ enum AgentReplyRegression {
             try process.run(); process.waitUntilExit()
             precondition(process.terminationStatus == 0)
         }
-        func click(_ window: NSWindow, point: NSPoint) {
+        func click(_ window: NSWindow, point: NSPoint) async throws {
+            let restingSize = window.frame.size
             for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
                 let event = NSEvent.mouseEvent(with: type, location: point, modifierFlags: [],
                     timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
                     context: nil, eventNumber: 1, clickCount: 1, pressure: type == .leftMouseDown ? 1 : 0)!
                 NSApplication.shared.sendEvent(event)
+                if type == .leftMouseDown {
+                    try await Task.sleep(for: .milliseconds(140))
+                    precondition(window.frame.width > restingSize.width + 1, "The glass window itself must expand on press")
+                    try capture("pressed-menu", window: window)
+                } else {
+                    try await Task.sleep(for: .milliseconds(50))
+                    precondition(window.isVisible, "Keep the release feedback visible before dismissing")
+                }
             }
         }
         for (appearance, name) in [(NSAppearance.Name.aqua, "light"), (.darkAqua, "dark")] {
@@ -1019,11 +1028,12 @@ enum AgentReplyRegression {
                 text.showSelectionMenu()
                 try await Task.sleep(for: .milliseconds(150))
                 let menu = window.childWindows!.first { $0 is SurfacePanel && $0.isVisible }!
+                precondition(!menu.hasShadow, "Selection actions must not add the heavy window shadow")
                 precondition(menu.frame.height < 60 && menu.frame.width < 320, "Selection menu is one compact horizontal row")
                 precondition(window.screen!.visibleFrame.contains(menu.frame))
                 if color == .purple { try capture(name, window: window); try capture(name + "-menu", window: menu) }
-                click(menu, point: NSPoint(x: menu.frame.width * 0.72, y: menu.frame.height / 2))
-                try await Task.sleep(for: .milliseconds(150))
+                try await click(menu, point: NSPoint(x: menu.frame.width * 0.72, y: menu.frame.height / 2))
+                try await Task.sleep(for: .milliseconds(250))
                 precondition(model.quotes.count == 1, "Add to Chat must add once and deduplicate repeated selections")
                 precondition(!menu.isVisible)
                 precondition((window.firstResponder as? NSTextView)?.isEditable == true, "Add to Chat must focus the composer")
