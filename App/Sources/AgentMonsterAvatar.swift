@@ -60,7 +60,6 @@ struct AgentMonsterAvatar: View {
 /// The avatar and menu share one native glass container and identity.
 struct AgentAvatarPicker: View {
     @Binding var color: AgentAvatarColor
-    @Namespace private var glassNamespace
     @State private var showing = false
     @State private var pressed = false
     @State private var focused = AgentAvatarColor.blue
@@ -68,25 +67,28 @@ struct AgentAvatarPicker: View {
     @State private var globalMonitor: Any?
     @State private var menuAnchor = AvatarMenuAnchor()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
 
     var body: some View {
         Group {
-            if #available(macOS 26, *), !SurfaceCompatibility.useLegacyMaterial {
+            if #available(macOS 26, *), !SurfaceCompatibility.useLegacyMaterial,
+               !reduceTransparency, contrast != .increased {
                 GlassEffectContainer {
-                    ZStack(alignment: .topLeading) {
-                        if showing {
-                            menu
-                                .nativeGlassBackground(in: RoundedRectangle(cornerRadius: 18), interactive: true)
-                                .glassEffectID("avatar", in: glassNamespace)
-                                .glassEffectTransition(.matchedGeometry)
-                        } else {
-                            trigger
-                                .nativeGlassBackground(in: Circle(), clear: true, glassOpacity: 0.60)
-                                .glassPointerFeedback(pressed: pressed, in: Circle())
-                                .glassEffectID("avatar", in: glassNamespace)
-                                .glassEffectTransition(.matchedGeometry)
+                    // Keep the same glass surface alive as its frame contracts.
+                    RoundedRectangle(cornerRadius: 18)
+                        .fill(.clear)
+                        .frame(width: showing ? 184 : 36, height: showing ? 252 : 36)
+                        .glassEffect(showing ? .regular.interactive() : .clear,
+                                     in: RoundedRectangle(cornerRadius: 18))
+                        .opacity(showing ? 1 : 0.60)
+                        .overlay(alignment: .topLeading) {
+                            if showing { menu } else { trigger }
                         }
-                    }
+                        // Mark the overlay as foreground content so the native
+                        // glass does not refract the avatar and menu themselves.
+                        .glassEffect(.identity)
+                        .glassPointerFeedback(pressed: pressed, in: RoundedRectangle(cornerRadius: 18))
                 }
             } else {
                 ZStack(alignment: .topLeading) {
