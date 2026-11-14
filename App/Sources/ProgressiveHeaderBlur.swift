@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// A tint-free backdrop whose grayscale mask controls blur radius, not opacity.
+/// A tint-free backdrop whose mask controls blur radius, not view opacity.
 struct ProgressiveHeaderBlur: NSViewRepresentable {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     func makeNSView(context: Context) -> ProgressiveHeaderBlurView { ProgressiveHeaderBlurView() }
@@ -17,10 +17,15 @@ final class ProgressiveHeaderBlurView: NSView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
+        layerUsesCoreImageFilters = false
         // Resolve compositor classes dynamically so unsupported systems can omit
         // the decoration without changing transcript rendering or interactions.
         if let type = NSClassFromString("CABackdropLayer") as? CALayer.Type {
             let backdrop = type.init()
+            // Sample the transcript in this window at full resolution, so the
+            // zero-radius end stays sharp instead of inheriting downsample blur.
+            backdrop.setValue(false, forKey: "windowServerAware")
+            backdrop.setValue(1.0, forKey: "scale")
             backdrop.masksToBounds = true
             layer?.addSublayer(backdrop)
             self.backdrop = backdrop
@@ -41,7 +46,7 @@ final class ProgressiveHeaderBlurView: NSView {
                                       bytesPerRow: 4, space: CGColorSpaceCreateDeviceRGB(),
                                       bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue),
               let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
-                                        colors: [NSColor.clear.cgColor, NSColor.white.cgColor] as CFArray,
+                                        colors: [NSColor.clear.cgColor, NSColor.black.cgColor] as CFArray,
                                         locations: [0, 1]) else { return }
         context.drawLinearGradient(gradient, start: CGPoint(x: 0, y: 0), end: CGPoint(x: 0, y: 256), options: [])
         guard let mask = context.makeImage() else { return }

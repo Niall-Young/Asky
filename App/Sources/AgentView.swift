@@ -133,7 +133,7 @@ struct AgentView: View {
         }
         .overlay(alignment: .top) {
             ProgressiveHeaderBlur()
-                .frame(height: AgentLayout.headerHeight + 32)
+                .frame(height: AgentLayout.headerHeight)
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
         }
