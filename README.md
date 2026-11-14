@@ -50,7 +50,7 @@ Asky 是使用 SwiftUI 与 AppKit 构建的 macOS 原生效率入口。本地全
   - **轻量按需启动**：无需常驻后台 AI 进程；兼容任意 OpenAI 协议模型服务商与自定义端点。
   - **原生交互表单**：支持 AI 在对话流中渲染原生单选按钮组、下拉单选、多选、文本输入、日期及按需显示时、分、秒的时间/时长控件，填写后直接提交至同一会话。控件复用设置页组件，日期选择复用创建日程弹窗的月历。
   - **本地记忆与上下文**：基于本地 Markdown 存储用户偏好与记忆，支持长上下文智能压缩与网络实时检索。
-  - **网页来源预览**：数字与“来源”类引用显示为紧凑标记，悬停网页链接查看封面、标题和域名，点击打开原文；封面不可用时保留文字卡片。
+  - **网页来源预览**：网页来源以真实 favicon 图标显示在对应段落末尾；悬停图标在其旁展示封面、标题和域名，空间不足时向上展开，点击打开原文。图标读取失败时使用通用网页图标。
   - **本地数学公式排版**：原生支持行内与独立 LaTeX 公式（`$…$`、`$$…$$`）排版。
   - **日程与路线规划**：集成系统 MapKit 能力，对比驾车、公交与步行耗时，自动为日程计算含缓冲时间的建议出发时间。
 
@@ -206,7 +206,7 @@ Asky is a native macOS efficiency launcher built with SwiftUI and AppKit. Local 
   - **On-Demand Lifecycle**: Keeps background resource usage minimal; connects to any OpenAI-compatible provider and custom endpoints.
   - **Native Interactive Forms**: AI can stream structured form controls (text fields, native radio groups, dropdowns, checkboxes, date pickers and configurable hour/minute/second time or duration controls) directly in chat, which submit straight back into the conversation. Controls reuse the Settings components; date selection uses the calendar from the event creation dialog.
   - **Local Memory & Context**: Stores user preferences and context in local Markdown files with automatic context compaction and web search.
-  - **Web Source Previews**: Numeric and source citations appear as compact badges. Hover over web links for a cover, title, and domain; click to open the original. Text cards remain available when covers cannot load.
+  - **Web Source Previews**: Web sources appear as real site favicons at the end of each paragraph. Hover over an icon for a nearby card with its cover, title, and domain; the card opens upward when needed. Click to open the source. A generic web icon is used if the favicon cannot load.
   - **Native LaTeX Rendering**: Renders inline and block LaTeX formulas (`$…$`, `$$…$$`) locally.
   - **Smart Travel & Calendar Planning**: Built-in MapKit support to compare driving, transit, and walking times, suggesting arrival-buffered departure times for your day.
 

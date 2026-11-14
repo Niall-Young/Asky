@@ -12,6 +12,16 @@ enum AgentReplyRegression {
         precondition(ChatSourceTextView.isCitation("[12]"))
         precondition(ChatSourceTextView.isCitation("来源"))
         precondition(!ChatSourceTextView.isCitation("打开官网"))
+        let screen = NSRect(x: -1200, y: -200, width: 1200, height: 900)
+        let viewport = NSRect(x: -1000, y: 0, width: 640, height: 500)
+        for anchor in [NSRect(x: -500, y: 20, width: 18, height: 18), NSRect(x: -30, y: 450, width: 18, height: 18)] {
+            let frame = ChatSourcePopover.frame(size: NSSize(width: 300, height: 260), anchor: anchor, screen: screen, viewport: viewport)
+            precondition(screen.contains(frame), "Card must fit its source's screen, including negative origins")
+            if anchor.minY < 100 { precondition(frame.minY >= anchor.maxY + 8, "Low sources must open upward") }
+        }
+        let linked = try AttributedString(markdown: "[Moonshot AI 官网](https://example.com) 与 [来源](https://example.com)")
+        precondition(ChatSourceTextView.sources(in: linked).count == 1, "Repeated links in one information block share one favicon")
+
         let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 640, height: 440),
                               styleMask: [.titled], backing: .buffered, defer: false)
         window.title = "Asky Source Preview"
@@ -27,7 +37,23 @@ enum AgentReplyRegression {
             [打开官网](https://devin.ai/) 查看详细信息。
             """).padding(28).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .background(scheme == .dark ? Color(white: 0.15) : .white).environment(\.colorScheme, scheme))
-            window.contentView = view
+            if scheme == .dark {
+                // Exercise a real clip-view offset and a source close to the viewport bottom.
+                let document = NSHostingView(rootView: VStack(spacing: 0) {
+                    Color.clear.frame(height: 500)
+                    ChatMarkdownView(text: "[Wikipedia：Moonshot AI](https://devin.ai/)：Kimi 通过网页、API 和移动端提供服务，并支持图像和视频等多模态输入。")
+                        .padding(28)
+                    Color.clear.frame(height: 300)
+                }.frame(width: 640, alignment: .topLeading).background(Color(white: 0.15)).environment(\.colorScheme, .dark))
+                document.frame = NSRect(x: 0, y: 0, width: 640, height: 950)
+                let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 640, height: 440))
+                scroll.hasVerticalScroller = true
+                scroll.documentView = document
+                window.contentView = scroll
+                document.layoutSubtreeIfNeeded()
+                scroll.contentView.scroll(to: NSPoint(x: 0, y: 200))
+                scroll.reflectScrolledClipView(scroll.contentView)
+            } else { window.contentView = view }
             window.makeKeyAndOrderFront(nil)
             try await Task.sleep(for: .milliseconds(500))
             view.layoutSubtreeIfNeeded()
@@ -36,18 +62,25 @@ enum AgentReplyRegression {
             func inspect(_ node: NSView) {
                 if let text = node as? ChatSourceTextView, let storage = text.textStorage {
                     if sourceText == nil { sourceText = text }
+                    var firstSource: Int?
                     storage.enumerateAttribute(.attachment, in: NSRange(location: 0, length: storage.length)) { value, range, _ in
                         guard value is NSTextAttachment else { return }
                         badges += 1
+                        if firstSource == nil { firstSource = range.location }
                         precondition(storage.attribute(.link, at: range.location, effectiveRange: nil) as? URL != nil)
+                    }
+                    if let firstSource {
+                        let suffix = (storage.string as NSString).substring(from: firstSource)
+                        precondition(suffix.allSatisfy { $0 == "\u{fffc}" || $0.isWhitespace }, "Source icons belong after all information text")
                     }
                 }
                 node.subviews.forEach(inspect)
             }
-            inspect(view)
-            precondition(badges == 3, "Source badges must work in paragraphs and lists")
-            guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { fatalError("capture") }
-            view.cacheDisplay(in: view.bounds, to: bitmap)
+            inspect(window.contentView!)
+            precondition(badges == (scheme == .dark ? 1 : 4), "All paragraph sources must end in favicon attachments")
+            let surface = window.contentView!
+            guard let bitmap = surface.bitmapImageRepForCachingDisplay(in: surface.bounds) else { fatalError("capture") }
+            surface.cacheDisplay(in: surface.bounds, to: bitmap)
             try bitmap.representation(using: .png, properties: [:])!.write(to: URL(filePath: "build/sources-" + name + ".png"))
             if let text = sourceText, let storage = text.textStorage, let manager = text.layoutManager, let container = text.textContainer {
                 var linkRange = NSRange()
@@ -59,9 +92,15 @@ enum AgentReplyRegression {
                 let point = text.convert(local, to: nil)
                 let event = NSEvent.mouseEvent(with: .mouseMoved, location: point, modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 0, pressure: 0)!
                 text.mouseMoved(with: event)
-                try await Task.sleep(for: .milliseconds(700))
+                try await Task.sleep(for: .milliseconds(450))
                 precondition(text.preview?.isShown == true, "Hovering a source must open its card")
-                if let card = text.preview?.contentViewController?.view,
+                let anchor = text.sourceAnchor(at: linkRange.location)!
+                let cardFrame = text.preview!.panel.frame
+                if scheme == .dark { precondition(cardFrame.minY >= anchor.maxY + 7, "Scrolled low source must open upward") }
+                precondition(cardFrame.minY >= anchor.maxY + 7 || cardFrame.maxY <= anchor.minY - 7,
+                             "Source card must sit beside its attachment, never at the paragraph bottom")
+
+                if let card = text.preview?.contentView,
                    let bitmap = card.bitmapImageRepForCachingDisplay(in: card.bounds) {
                     card.cacheDisplay(in: card.bounds, to: bitmap)
                     try bitmap.representation(using: .png, properties: [:])!.write(to: URL(filePath: "build/source-card-" + name + ".png"))

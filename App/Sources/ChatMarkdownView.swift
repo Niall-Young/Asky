@@ -192,6 +192,7 @@ private struct ChatInlineText: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.chatInlineForeground) private var foreground
     @State private var images: [URL: Data] = [:]
+    @State private var favicons: [URL: Data] = [:]
 
     static func parsed(_ markdown: String) -> AttributedString {
         (try? AttributedString(markdown: markdown,
@@ -210,7 +211,7 @@ private struct ChatInlineText: View {
     }
 
     var body: some View {
-        ChatInlineNativeText(content: Self.parsed(markdown), images: images,
+        ChatInlineNativeText(content: Self.parsed(markdown), images: images, favicons: favicons,
             foreground: NSColor(foreground.color(for: colorScheme)),
             background: NSColor(ThemeColor("backgroundNeutral").color(for: colorScheme)),
             linkColor: NSColor(ThemeColor("textPrimary").color(for: colorScheme)))
@@ -223,6 +224,13 @@ private struct ChatInlineText: View {
                 }
                 guard !Task.isCancelled else { return }
                 images = loaded
+                for url in ChatSourceTextView.sources(in: Self.parsed(markdown)) {
+                    guard !Task.isCancelled else { return }
+                    if let data = await ChatLinkService.shared.favicon(for: url) {
+                        guard !Task.isCancelled else { return }
+                        favicons[url] = data
+                    }
+                }
             }
     }
 }
@@ -230,6 +238,7 @@ private struct ChatInlineText: View {
 private struct ChatInlineNativeText: NSViewRepresentable {
     let content: AttributedString
     let images: [URL: Data]
+    let favicons: [URL: Data]
     let foreground: NSColor
     let background: NSColor
     let linkColor: NSColor
@@ -266,23 +275,14 @@ private struct ChatInlineNativeText: NSViewRepresentable {
             var attributes: [NSAttributedString.Key: Any] = [
                 .font: font, .foregroundColor: foreground, .paragraphStyle: paragraph
             ]
-            if let link = run.link {
+            if let link = run.link, !ChatImageService.supports(link) {
                 attributes[.link] = link
                 attributes[.foregroundColor] = linkColor
                 attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue
             }
-            if let url = run.link, ChatImageService.supports(url) {
-                let label = String(content[run.range].characters)
-                if ChatSourceTextView.isCitation(label) {
-                    let attachment = NSTextAttachment()
-                    attachment.image = ChatSourceTextView.badge(label, foreground: foreground, background: background)
-                    attachment.bounds = NSRect(x: 0, y: -3, width: attachment.image!.size.width, height: 18)
-                    let fragment = NSMutableAttributedString(attachment: attachment)
-                    fragment.addAttributes([.link: url, .toolTip: url.host ?? label], range: NSRange(location: 0, length: fragment.length))
-                    result.append(fragment)
-                    continue
-                }
-            }
+            // Source labels remain plain text; the source action belongs at the end of this paragraph.
+            if let url = run.link, ChatImageService.supports(url), run.imageURL == nil,
+               ChatSourceTextView.isCitation(String(content[run.range].characters)) { continue }
             if intent.contains(.strikethrough) { attributes[.strikethroughStyle] = NSUnderlineStyle.single.rawValue }
             if let url = run.imageURL {
                 if let formula = ChatMath.formula(url) {
@@ -313,6 +313,15 @@ private struct ChatInlineNativeText: NSViewRepresentable {
                 }
                 result.append(NSAttributedString(string: text, attributes: attributes))
             }
+        }
+        for url in ChatSourceTextView.sources(in: content) {
+            result.append(NSAttributedString(string: " ", attributes: [.font: NSFont.systemFont(ofSize: 14)]))
+            let attachment = NSTextAttachment()
+            attachment.image = ChatSourceTextView.badge(icon: favicons[url].flatMap(NSImage.init(data:)), foreground: foreground, background: background)
+            attachment.bounds = NSRect(x: 0, y: -3, width: 18, height: 18)
+            let fragment = NSMutableAttributedString(attachment: attachment)
+            fragment.addAttributes([.link: url, .toolTip: url.host ?? url.absoluteString], range: NSRange(location: 0, length: fragment.length))
+            result.append(fragment)
         }
         view.linkTextAttributes = [.foregroundColor: linkColor, .underlineStyle: NSUnderlineStyle.single.rawValue]
         if view.textStorage?.isEqual(to: result) != true { view.textStorage?.setAttributedString(result) }

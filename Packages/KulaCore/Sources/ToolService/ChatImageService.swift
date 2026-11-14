@@ -92,12 +92,12 @@ public actor ChatImageService {
         throw CocoaError(.fileWriteFileExists)
     }
 
-    static func thumbnail(_ data: Data) throws -> Data {
+    static func thumbnail(_ data: Data, maxPixelSize: Int = 1600) throws -> Data {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil),
               let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
                 kCGImageSourceCreateThumbnailFromImageAlways: true,
                 kCGImageSourceCreateThumbnailWithTransform: true,
-                kCGImageSourceThumbnailMaxPixelSize: 1600,
+                kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
                 kCGImageSourceShouldCacheImmediately: true
               ] as CFDictionary) else { throw CocoaError(.fileReadCorruptFile) }
         let output = NSMutableData()

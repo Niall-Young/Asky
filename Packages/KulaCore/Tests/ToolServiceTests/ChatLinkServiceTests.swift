@@ -2,6 +2,17 @@ import XCTest
 @testable import ToolService
 
 final class ChatLinkServiceTests: XCTestCase {
+    func testDeclaredFaviconsResolveRelativeURLs() {
+        let html = """
+        <link rel="stylesheet" href="/style.css">
+        <link href="/touch.png" rel="apple-touch-icon">
+        <link href="../icon.png?v=1&amp;x=2" rel="shortcut icon">
+        <link rel="icon" href="javascript:alert(1)">
+        """
+        let urls = ChatLinkService.iconURLs(in: html, base: URL(string: "https://example.com/docs/page")!)
+        XCTAssertEqual(urls.map(\.absoluteString), ["https://example.com/icon.png?v=1&x=2", "https://example.com/touch.png"])
+    }
+
     func testMetadataAttributeOrderAndEntities() {
         let html = """
         <meta content="A &amp; B" property="og:title">
