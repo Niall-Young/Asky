@@ -153,6 +153,7 @@ open -n build/DerivedData/Build/Products/Debug/Asky.app --args --show-agent
 (cd Packages/KulaCore && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test)
 # 气泡对话与等待状态回归（先完成 Debug 构建）
 python3 App/Tests/run-agent-reply-regression.py --reply-activity-preview
+python3 App/Tests/run-agent-reply-regression.py --bubble-width-preview
 python3 App/Tests/run-agent-reply-regression.py --reading-scroll
 python3 App/Tests/run-agent-reply-regression.py --bottom-push
 python3 App/Tests/run-agent-reply-regression.py --restored-transcript
@@ -334,6 +335,7 @@ open -n build/DerivedData/Build/Products/Debug/Asky.app --args --show-agent
 (cd Packages/KulaCore && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test)
 # Bubble conversation and waiting-state regression (build Debug first)
 python3 App/Tests/run-agent-reply-regression.py --reply-activity-preview
+python3 App/Tests/run-agent-reply-regression.py --bubble-width-preview
 python3 App/Tests/run-agent-reply-regression.py --reading-scroll
 python3 App/Tests/run-agent-reply-regression.py --bottom-push
 python3 App/Tests/run-agent-reply-regression.py --restored-transcript

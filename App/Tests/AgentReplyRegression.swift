@@ -8,6 +8,58 @@ import ToolService
 @main
 @MainActor
 enum AgentReplyRegression {
+    static func bubbleWidthPreview(app: AppModel) async throws {
+        let sample = "给你这条消息贴了个 💬，表示要发短信这件事。"
+        let store = ConversationStore(app.store)
+        let cid = try store.create(title: "Bubble width")
+        try store.append(conversationID: cid, role: "user", text: "发短信")
+        try store.append(conversationID: cid, role: "assistant", text: sample)
+        let model = AgentModel(app: app)
+        model.open(cid)
+        let controller = AgentWindowController(model: model, presentation: WindowPresentation())
+        controller.show()
+        let window = NSApplication.shared.windows.first { $0.title == "Asky AI" }!
+        defer { window.orderOut(nil) }
+        func texts(_ node: NSView) -> [NSTextView] {
+            (node as? NSTextView).map { [$0] } ?? node.subviews.flatMap(texts)
+        }
+        try await Task.sleep(for: .milliseconds(600))
+        let reply = texts(window.contentView!).first { $0.string == sample }!
+        let question = texts(window.contentView!).first { $0.string == "发短信" }!
+        precondition(question.bounds.width < 60, "Short user messages must also hug their text in the trailing HStack")
+        precondition(reply.bounds.width < 380, "Short reply must not stretch to the available 460 pt")
+        precondition(reply.bounds.height < 40, "The supplied short reply must stay on one line")
+        let surface = window.contentView!
+        let bitmap = surface.bitmapImageRepForCachingDisplay(in: surface.bounds)!
+        surface.cacheDisplay(in: surface.bounds, to: bitmap)
+        try bitmap.representation(using: .png, properties: [:])!.write(to: URL(filePath: "build/bubble-width-chat.png"))
+
+        for width: CGFloat in [280, 460] {
+            for content in [sample, "**粗体**、`code` 和 💬", String(repeating: "长回复需要正常换行。", count: 12)] {
+                let hosted = NSHostingView(rootView: ChatReplyView(text: content)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading))
+                let fixture = NSWindow(contentRect: NSRect(x: 100, y: 100, width: width, height: 500),
+                    styleMask: [.borderless], backing: .buffered, defer: false)
+                fixture.contentView = hosted
+                fixture.orderFront(nil)
+                try await Task.sleep(for: .milliseconds(120))
+                hosted.layoutSubtreeIfNeeded()
+                let text = texts(hosted).first!
+                let used = text.layoutManager!.usedRect(for: text.textContainer!)
+                precondition(text.bounds.width <= width + 1, "Text must respect the offered maximum")
+                precondition(used.width <= text.bounds.width + 1 && used.height <= text.bounds.height,
+                    "Rich text and wrapped lines must not clip")
+                if content.count > 100 {
+                    precondition(text.bounds.height > 40, "Long replies must wrap")
+                } else if content.contains("粗体") {
+                    precondition(text.bounds.width < 200, "Styled short replies must also hug their content")
+                }
+                fixture.orderOut(nil)
+            }
+        }
+        print("Bubble widths passed: actual chat screenshot, short Chinese/emoji, styled text and long wrapping at 280/460 pt")
+    }
+
     static func sourcesPreview() async throws {
         precondition(ChatSourceTextView.badgeLabel(name: "Cognition", count: 2) == "Cognition +1")
         precondition(ChatSourceTextView.badgeLabel(name: "Kimi", count: 4) == "Kimi +3")
@@ -1328,6 +1380,10 @@ enum AgentReplyRegression {
         let root = FileManager.default.temporaryDirectory.appending(path: "Asky-reply-\(UUID())")
         defer { try? FileManager.default.removeItem(at: root) }
         let app = try AppModel(root: root)
+        if CommandLine.arguments.contains("--bubble-width-preview") {
+            try await bubbleWidthPreview(app: app)
+            return
+        }
         try await reactionRegression(app: app, capture: CommandLine.arguments.contains("--reactions-preview"))
         if CommandLine.arguments.contains("--reactions-preview") { return }
         if CommandLine.arguments.contains("--avatar-preview") {

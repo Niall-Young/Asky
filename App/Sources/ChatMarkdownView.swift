@@ -227,7 +227,7 @@ struct ChatInlineText: View {
     let markdown: String
     var literal = false
     var monospaced = false
-    var shrinkToFit = false
+    var shrinkToFit = true
     var weight: NSFont.Weight = .regular
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.chatInlineForeground) private var foreground
@@ -386,17 +386,23 @@ private struct ChatInlineNativeText: NSViewRepresentable {
         // SwiftUI probes minimum and maximum widths before choosing the actual paragraph width.
         // Falling back to NSTextView for the zero-width probe makes its current width a hard minimum.
         if proposal.width == 0 { return .zero }
-        if let width = proposal.width, !width.isFinite { return CGSize(width: 100_000, height: 0) }
+        if !shrinkToFit, let width = proposal.width, !width.isFinite {
+            return CGSize(width: 100_000, height: 0)
+        }
         let proposedWidth: CGFloat?
         if monospaced {
             proposedWidth = max(200, (view.string.components(separatedBy: "\n").map {
                 ($0 as NSString).size(withAttributes: [.font: NSFont.monospacedSystemFont(ofSize: 14, weight: .regular)]).width
             }.max() ?? 200) + 2)
-        } else if shrinkToFit, let width = proposal.width {
-            let natural = view.string.components(separatedBy: "\n").map {
-                ($0 as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 14, weight: weight)]).width
-            }.max() ?? width
-            proposedWidth = min(width, ceil(natural) + 2)
+        } else if shrinkToFit, let container = view.textContainer, let manager = view.layoutManager {
+            // Measure the actual glyphs, including bold text, emoji and attachments.
+            // The offered width is a ceiling, not a request to stretch a short reply.
+            let renderedSize = container.containerSize
+            container.containerSize = NSSize(width: 100_000, height: CGFloat.greatestFiniteMagnitude)
+            manager.ensureLayout(for: container)
+            let natural = ceil(manager.usedRect(for: container).width) + 2
+            container.containerSize = renderedSize
+            proposedWidth = min(proposal.width ?? natural, natural)
         } else { proposedWidth = proposal.width }
         guard let width = proposedWidth, width > 0, let container = view.textContainer,
               let manager = view.layoutManager else { return nil }
