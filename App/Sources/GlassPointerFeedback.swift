@@ -43,6 +43,38 @@ extension View {
     }
 }
 
+/// A continuous pool of light around the active icon, fading across one shared
+/// glass surface. Separate clipped halves create an artificial seam at the center.
+struct GlassCapsuleIllumination: View {
+    var pressedIndex: Int?
+    var hoveredIndex: Int?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                ForEach(0..<2) { index in
+                    Capsule()
+                        .fill(RadialGradient(stops: [
+                            .init(color: .white, location: 0),
+                            .init(color: .white.opacity(0.85), location: 0.28),
+                            .init(color: .white.opacity(0.30), location: 0.65),
+                            .init(color: .white.opacity(0), location: 1)
+                        ], center: UnitPoint(x: index == 0 ? 0.25 : 0.75, y: 0.5),
+                           startRadius: 0, endRadius: geometry.size.width * 0.70))
+                        .opacity(pressedIndex == index ? 0.20
+                            : pressedIndex == nil && hoveredIndex == index ? 0.065 : 0)
+                }
+            }
+        }
+        .blendMode(.plusLighter)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.10), value: pressedIndex)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: hoveredIndex)
+    }
+}
+
 /// Reports pointer tracking while leaving action dispatch, keyboard activation and
 /// drag-out cancellation with AppKit. The owner can illuminate each button separately.
 final class GlassPointerButton: NSButton {

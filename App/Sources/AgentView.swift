@@ -174,18 +174,7 @@ struct AgentView: View {
                 .fixedSize()
                 .nativeGlassBackground(in: Capsule(), clear: true, glassOpacity: 0.85)
                 .overlay {
-                    HStack(spacing: 0) {
-                        ForEach(0..<2) { index in
-                            Rectangle().fill(.white.opacity(toolbarPressed == index ? 0.16
-                                : toolbarPressed == nil && toolbarHovered == index ? 0.055 : 0))
-                        }
-                    }
-                    .clipShape(Capsule())
-                    .blendMode(.plusLighter)
-                    .allowsHitTesting(false)
-                    .accessibilityHidden(true)
-                    .animation(reduceMotion ? nil : .easeOut(duration: 0.10), value: toolbarPressed)
-                    .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: toolbarHovered)
+                    GlassCapsuleIllumination(pressedIndex: toolbarPressed, hoveredIndex: toolbarHovered)
                 }
                 .glassPointerFeedback(pressed: toolbarPressed != nil, in: Capsule(), illumination: false)
         }
