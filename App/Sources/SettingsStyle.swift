@@ -195,7 +195,6 @@ private struct SettingsInputChrome: ViewModifier {
 }
 
 struct SettingsBackdrop: View {
-    @Environment(\.controlActiveState) private var activeState
     @Environment(\.colorScheme) private var scheme
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
@@ -204,8 +203,8 @@ struct SettingsBackdrop: View {
         if opaque {
             Rectangle().fill(SettingsPalette.surface(scheme, opaque: true))
         } else if #available(macOS 26, *), !SurfaceCompatibility.useLegacyMaterial {
-            SettingsRegularGlass(scheme: scheme, inactive: activeState == .inactive)
-                .overlay(ThemeColor.kBackgroundNeutral.color(for: scheme).opacity(activeState == .inactive ? 0.5 : 1))
+            SettingsRegularGlass(scheme: scheme)
+                .overlay(ThemeColor.kBackgroundNeutral.color(for: scheme))
         } else {
             Color.clear.nativeGlassBackground(in: Rectangle())
         }
@@ -216,7 +215,6 @@ struct SettingsBackdrop: View {
 @available(macOS 26, *)
 private struct SettingsRegularGlass: NSViewRepresentable {
     let scheme: ColorScheme
-    let inactive: Bool
     func makeNSView(context: Context) -> NSGlassEffectView {
         let view = NSGlassEffectView()
         view.style = .regular
@@ -225,7 +223,7 @@ private struct SettingsRegularGlass: NSViewRepresentable {
         return view
     }
     func updateNSView(_ view: NSGlassEffectView, context: Context) {
-        view.tintColor = NSColor(SettingsPalette.surface(scheme, opaque: true)).withAlphaComponent(inactive ? 0.55 : 0.25)
+        view.tintColor = NSColor(SettingsPalette.surface(scheme, opaque: true)).withAlphaComponent(0.25)
     }
 }
 
@@ -309,6 +307,7 @@ struct SettingsButton: View {
     var body: some View {
         SettingsPushButton(title: title, role: role, systemImage: systemImage, assetImage: assetImage,
                            hidesTitle: isLoading || isComplete, isBordered: isBordered, action: action)
+            .controlSize(.large)
             .fixedSize()
             .overlay {
                 if isComplete { Image(mingCute: "checkmark").accessibilityHidden(true) }
@@ -355,7 +354,7 @@ private struct SettingsPushButton: NSViewRepresentable {
             .foregroundColor: hidesTitle ? NSColor.clear : role == .destructive ? NSColor.systemRed :
                 enabled ? NSColor.controlTextColor : NSColor.disabledControlTextColor
         ])
-        button.controlSize = controlSize == .large || controlSize == .extraLarge ? .large : .regular
+        button.controlSize = isBordered || controlSize == .large || controlSize == .extraLarge ? .large : .regular
         button.image = systemImage.map { MingCute.image($0, size: title.isEmpty ? 12 : 14) }
         if let assetImage, let image = NSImage(named: assetImage)?.copy() as? NSImage {
             image.size = NSSize(width: 14, height: 14)
@@ -369,7 +368,8 @@ private struct SettingsPushButton: NSViewRepresentable {
         context.coordinator.action = action
     }
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSButton, context: Context) -> CGSize? {
-        nsView.intrinsicContentSize
+        let ideal = nsView.intrinsicContentSize
+        return CGSize(width: ideal.width, height: isBordered ? 28 : ideal.height)
     }
     final class Coordinator: NSObject {
         var action: () -> Void
@@ -407,7 +407,20 @@ struct SettingsCheckbox: NSViewRepresentable {
 }
 
 /// Native capsule tabs with a neutral selection, shared by commands and plugins.
-struct SettingsSegmentedControl<Value: Hashable>: NSViewRepresentable {
+struct SettingsSegmentedControl<Value: Hashable>: View {
+    @Binding var selection: Value
+    let options: [(Value, String)]
+    var identifier: String = ""
+    var accessibilityLabel: String = ""
+
+    var body: some View {
+        SettingsNativeSegmentedControl(selection: $selection, options: options,
+                                       identifier: identifier, accessibilityLabel: accessibilityLabel)
+            .controlSize(.large)
+    }
+}
+
+private struct SettingsNativeSegmentedControl<Value: Hashable>: NSViewRepresentable {
     @Binding var selection: Value
     let options: [(Value, String)]
     var identifier: String = ""

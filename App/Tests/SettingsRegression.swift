@@ -129,6 +129,21 @@ enum SettingsRegression {
                     window.close()
                     exit(0)
                 }
+                if CommandLine.arguments.contains("--settings-chrome") {
+                    defer { try? FileManager.default.removeItem(at: root) }
+                    model.settingsTab = "keywords"
+                    let window = SettingsWindow.make(app: model)
+                    window.isReleasedWhenClosed = false
+                    for appearance in ["light", "dark"] {
+                        model.preferences.appearance = appearance
+                        NSApp.activate()
+                        window.makeKeyAndOrderFront(nil)
+                        try await Task.sleep(for: .milliseconds(400))
+                        try await assertSettingsChrome(window, appearance: appearance)
+                    }
+                    print("Settings chrome: native 28pt buttons, input alignment and key-window transitions passed")
+                    exit(0)
+                }
                 if CommandLine.arguments.contains("--command-layout") {
                     defer { try? FileManager.default.removeItem(at: root) }
                     model.settingsTab = "keywords"
@@ -974,6 +989,59 @@ enum SettingsRegression {
         precondition(keywords().contains("go") && !keywords().contains("ql"))
         precondition(fields().first(where: { $0.stringValue == "go" })?.currentEditor() != nil)
         print("Command tabs, ql label, global cross-tab search, empty results and edit focus passed")
+    }
+
+    private static func assertSettingsChrome(_ window: NSWindow, appearance: String) async throws {
+        func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
+        func check() {
+            window.contentView?.layoutSubtreeIfNeeded()
+            let views = descendants(window.contentView!)
+            let buttons = views.compactMap { $0 as? NSButton }.filter {
+                $0.title == NSLocalizedString("恢复默认", comment: "") && !$0.isHiddenOrHasHiddenAncestor
+            }
+            precondition(!buttons.isEmpty)
+            let tabs = views.compactMap { $0 as? NSSegmentedControl }.first!
+            precondition(tabs.controlSize == .large, "focus transitions must not reset segmented control size")
+            for button in buttons {
+                precondition(button.controlSize == .large, "focus transitions must not reset button size")
+                precondition(abs(button.bounds.height - 28) < 0.5, "native button must have the same 28pt surface height as inputs")
+                let center = button.convert(NSPoint(x: button.bounds.midX, y: button.bounds.midY), to: nil)
+                let fields = views.compactMap { $0 as? NSTextField }.filter { $0.isEditable }
+                precondition(fields.contains { field in
+                    let point = field.convert(NSPoint(x: field.bounds.midX, y: field.bounds.midY), to: nil)
+                    return abs(point.y - center.y) < 1
+                }, "input and reset button must stay vertically aligned")
+            }
+        }
+        func capture(_ state: String) throws {
+            let process = Process()
+            process.executableURL = URL(filePath: "/usr/sbin/screencapture")
+            process.arguments = ["-x", "-l", String(window.windowNumber), "build/settings-chrome-\(appearance)-\(state).png"]
+            try process.run()
+            process.waitUntilExit()
+            precondition(process.terminationStatus == 0)
+        }
+        // Other desktop apps can activate while this standalone harness runs.
+        window.makeKey()
+        precondition(window.isKeyWindow)
+        check()
+        try capture("active")
+        let other = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 120, height: 80),
+                             styleMask: [.titled], backing: .buffered, defer: false)
+        other.isReleasedWhenClosed = false
+        other.makeKeyAndOrderFront(nil)
+        try await Task.sleep(for: .milliseconds(250))
+        precondition(!window.isKeyWindow, "must exercise loss of key-window status")
+        check()
+        try capture("inactive")
+        other.close()
+        window.makeKeyAndOrderFront(nil)
+        try await Task.sleep(for: .milliseconds(250))
+        // Other desktop apps can activate while this standalone harness runs.
+        window.makeKey()
+        precondition(window.isKeyWindow)
+        check()
+        try capture("restored")
     }
 
     private static func assertSettingsClickOutsideEndsEditing(_ window: NSWindow) {
