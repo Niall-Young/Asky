@@ -167,7 +167,7 @@ struct AgentView: View {
                 pinned: pinned,
                 onPin: togglePin, onClose: close, onPressChanged: { toolbarPressed = $0 })
                 .fixedSize()
-                .nativeGlassBackground(in: Capsule(), clear: true, glassOpacity: 0.35)
+                .nativeGlassBackground(in: Capsule(), clear: true, glassOpacity: 0.60)
                 .glassPointerFeedback(pressed: toolbarPressed, in: Capsule())
         }
         .padding(.horizontal, 16)
@@ -901,7 +901,7 @@ private struct Composer: View {
         // Attachment cards reserve 6 pt above their visible edge for the delete button.
         // Keep the visible top inset aligned with the compact text editor.
         .padding(.top, model.attachments.isEmpty ? 10 : 4).padding(.bottom, 8)
-        .nativeGlassBackground(in: RoundedRectangle(cornerRadius: 16, style: .circular), clear: true, glassOpacity: 0.35)
+        .nativeGlassBackground(in: RoundedRectangle(cornerRadius: 16, style: .circular), clear: true, glassOpacity: 0.60)
         .fileImporter(isPresented: $importing, allowedContentTypes: [.data, .image, .text], allowsMultipleSelection: true) { r in
             switch r {
             case .success(let urls): urls.forEach { model.attach(fileURL: $0) }
