@@ -715,16 +715,18 @@ private struct ConversationHistorySettings: View {
     var body: some View {
         Section(NSLocalizedString("对话历史", comment: "")) {
             LabeledContent(NSLocalizedString("保留时间", comment: "")) {
-                SettingsChoice(selection: $app.settings.conversationRetention, options: [
-                    (.sevenDays, NSLocalizedString("7 天", comment: "")),
-                    (.thirtyDays, NSLocalizedString("30 天", comment: "")),
-                    (.ninetyDays, NSLocalizedString("90 天", comment: "")),
-                    (.forever, NSLocalizedString("永久", comment: ""))
-                ]).fixedSize()
+                HStack(spacing: 12) {
+                    SettingsChoice(selection: $app.settings.conversationRetention, options: [
+                        (.sevenDays, NSLocalizedString("7 天", comment: "")),
+                        (.thirtyDays, NSLocalizedString("30 天", comment: "")),
+                        (.ninetyDays, NSLocalizedString("90 天", comment: "")),
+                        (.forever, NSLocalizedString("永久", comment: ""))
+                    ]).fixedSize()
+                    SettingsButton(NSLocalizedString("清空对话历史", comment: ""), role: .destructive) {
+                        Task { await app.clearConversationHistory() }
+                    }.disabled(app.isCleaningConversationHistory || !app.activeConversationIDs.isEmpty)
+                }
             }
-            SettingsButton(NSLocalizedString("清空对话历史", comment: ""), role: .destructive) {
-                Task { await app.clearConversationHistory() }
-            }.disabled(app.isCleaningConversationHistory || !app.activeConversationIDs.isEmpty)
             if let error = app.conversationCleanupError {
                 Text(error).foregroundStyle(.red)
             }
