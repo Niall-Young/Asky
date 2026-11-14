@@ -3,8 +3,12 @@ import SwiftUI
 import ToolService
 import Theme
 
+extension NSAttributedString.Key {
+    static let chatSources = NSAttributedString.Key("AskySourceGroup")
+}
+
 /// Source attachments are the only hover targets, regardless of the original Markdown label.
-final class ChatSourceTextView: NSTextView {
+final class ChatSourceTextView: NSTextView, NSTextViewDelegate {
     private var hoverTask: Task<Void, Never>?
     private var sourceURL: URL?
     private var sourceTrackingArea: NSTrackingArea?
@@ -23,22 +27,51 @@ final class ChatSourceTextView: NSTextView {
         return result
     }
 
-    static func badge(icon: NSImage?, foreground: NSColor, background: NSColor) -> NSImage {
-        let image = icon ?? MingCute.image("globe")
-        return NSImage(size: NSSize(width: 18, height: 18), flipped: false) { rect in
+    static func domain(_ url: URL) -> String {
+        url.host?.replacingOccurrences(of: "www.", with: "") ?? url.absoluteString
+    }
+
+    static func badgeLabel(name: String, count: Int) -> String {
+        name + (count > 1 ? " +\(count - 1)" : "")
+    }
+
+    static func badge(name: String, count: Int, foreground: NSColor, background: NSColor) -> NSImage {
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 13), .foregroundColor: foreground.withAlphaComponent(0.75)
+        ]
+        var name = name
+        var shortened = false
+        while (name as NSString).size(withAttributes: attributes).width > 155, name.count > 1 {
+            name.removeLast()
+            shortened = true
+        }
+        if shortened { name += "…" }
+        let label = badgeLabel(name: name, count: count)
+        let size = (label as NSString).size(withAttributes: attributes)
+        return NSImage(size: NSSize(width: ceil(size.width) + 20, height: 24), flipped: false) { rect in
             background.setFill()
-            NSBezierPath(roundedRect: rect.insetBy(dx: 0.5, dy: 0.5), xRadius: 4, yRadius: 4).fill()
-            let target = NSRect(x: 3, y: 3, width: 12, height: 12)
-            if icon == nil {
-                let tinted = image.copy() as! NSImage
-                tinted.lockFocus()
-                foreground.setFill()
-                NSRect(origin: .zero, size: tinted.size).fill(using: .sourceAtop)
-                tinted.unlockFocus()
-                tinted.draw(in: target)
-            } else { image.draw(in: target) }
+            NSBezierPath(roundedRect: rect, xRadius: 12, yRadius: 12).fill()
+            (label as NSString).draw(at: NSPoint(x: 10, y: (24 - size.height) / 2), withAttributes: attributes)
             return true
         }
+    }
+
+    func textView(_ textView: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
+        guard let sources = textStorage?.attribute(.chatSources, at: charIndex, effectiveRange: nil) as? [URL],
+              !sources.isEmpty else { return false }
+        openSources(sources, at: charIndex)
+        return true
+    }
+
+    private func openSources(_ sources: [URL], at index: Int) {
+        guard sourceAnchor(at: index) != nil else { return }
+        hoverTask?.cancel()
+        hoverTask = nil
+        preview?.close()
+        sourceURL = sources.first
+        let preview = ChatSourcePopover(textView: self, index: index, sources: sources)
+        self.preview = preview
+        preview.show()
     }
 
     override func updateTrackingAreas() {
@@ -76,8 +109,8 @@ final class ChatSourceTextView: NSTextView {
         let index = manager.characterIndexForGlyph(at: glyph)
         guard index < storage.length,
               storage.attribute(.attachment, at: index, effectiveRange: nil) != nil,
-              let url = storage.attribute(.link, at: index, effectiveRange: nil) as? URL,
-              ChatImageService.supports(url) else { cancelPendingHover(); return }
+              let sources = storage.attribute(.chatSources, at: index, effectiveRange: nil) as? [URL],
+              let url = sources.first else { cancelPendingHover(); return }
         if sourceURL == url, hoverTask != nil || preview?.isShown == true { return }
         hoverTask?.cancel()
         preview?.close()
@@ -85,10 +118,7 @@ final class ChatSourceTextView: NSTextView {
         hoverTask = Task { @MainActor [weak self] in
             do { try await Task.sleep(for: .milliseconds(300)) } catch { return }
             guard let self, self.sourceAnchor(at: index) != nil else { return }
-            self.hoverTask = nil
-            let preview = ChatSourcePopover(textView: self, index: index, url: url)
-            self.preview = preview
-            preview.show()
+            self.openSources(sources, at: index)
         }
     }
 
@@ -116,16 +146,18 @@ final class ChatSourcePopover {
     let panel = SurfacePanel()
     private weak var textView: ChatSourceTextView?
     private let index: Int
-    private let url: URL
+    private let sources: [URL]
+    private var metadata: [URL: ChatLinkService.Preview] = [:]
+    private var host: FirstMouseHostingView<AnyView>?
     private var metadataTask: Task<Void, Never>?
     private var trackingTask: Task<Void, Never>?
     var isShown: Bool { panel.isVisible }
     var contentView: NSView? { panel.contentView }
 
-    init(textView: ChatSourceTextView, index: Int, url: URL) {
+    init(textView: ChatSourceTextView, index: Int, sources: [URL]) {
         self.textView = textView
         self.index = index
-        self.url = url
+        self.sources = sources
     }
 
     /// Prefer below the icon within the conversation; flip above before crossing its bottom edge.
@@ -144,14 +176,22 @@ final class ChatSourcePopover {
         Self.active?.close()
         Self.active = self
         panel.appearance = parent.effectiveAppearance
-        update(metadata: nil)
+        update()
         parent.addChildWindow(panel, ordered: .above)
         panel.matchesActiveAppearance = parent.isKeyWindow
         panel.orderFront(nil)
-        metadataTask = Task { @MainActor [weak self, url] in
-            let metadata = try? await ChatLinkService.shared.preview(for: url)
-            guard !Task.isCancelled else { return }
-            self?.update(metadata: metadata)
+        metadataTask = Task { @MainActor [weak self, sources] in
+            await withTaskGroup(of: (URL, ChatLinkService.Preview?).self) { group in
+                var pending = sources.makeIterator()
+                for _ in 0..<min(4, sources.count) {
+                    if let url = pending.next() { group.addTask { (url, try? await ChatLinkService.shared.preview(for: url)) } }
+                }
+                for await (url, metadata) in group {
+                    guard !Task.isCancelled else { group.cancelAll(); return }
+                    if let metadata { self?.metadata[url] = metadata; self?.update() }
+                    if let next = pending.next() { group.addTask { (next, try? await ChatLinkService.shared.preview(for: next)) } }
+                }
+            }
         }
         trackingTask = Task { @MainActor [weak self] in
             var outside = 0
@@ -168,10 +208,27 @@ final class ChatSourcePopover {
         }
     }
 
-    private func update(metadata: ChatLinkService.Preview?) {
-        let view = ChatSourcePreview(url: url, label: "", metadata: metadata)
-        let size = SurfacePanel.fittingSize(of: view, maxWidth: 300)
-        panel.setSurface(view, size: size, cornerRadius: 16)
+    private func update() {
+        let rows = ChatSourcePreview(sources: sources, metadata: metadata)
+        let measured = SurfacePanel.fittingSize(of: rows, maxWidth: 380)
+        let available = textView?.window?.screen?.visibleFrame.height ?? 700
+        let size = NSSize(width: 380, height: min(measured.height, min(460, available - 32)))
+        let view = ScrollView { rows }.frame(width: size.width, height: size.height)
+            .windowSurfaceBackground(in: RoundedRectangle(cornerRadius: 16))
+        if let host {
+            // Preserve ScrollView identity and its offset as individual source metadata arrives.
+            host.rootView = AnyView(view)
+            panel.setContentSize(size)
+            host.frame = NSRect(origin: .zero, size: size)
+        } else {
+            let host = FirstMouseHostingView(rootView: AnyView(view))
+            host.sizingOptions = []
+            host.frame = NSRect(origin: .zero, size: size)
+            panel.setContentSize(size)
+            panel.contentView = WindowSurface.glassContentView(host, cornerRadius: 16)
+            self.host = host
+        }
+        panel.invalidateShadow()
         _ = reposition()
     }
 
@@ -191,40 +248,43 @@ final class ChatSourcePopover {
         metadataTask?.cancel()
         trackingTask?.cancel()
         panel.remove()
+        host = nil
     }
 }
 struct ChatSourcePreview: View {
-    let url: URL
-    let label: String
-    var metadata: ChatLinkService.Preview? = nil
+    let sources: [URL]
+    var metadata: [URL: ChatLinkService.Preview] = [:]
 
-    private var domain: String { url.host?.replacingOccurrences(of: "www.", with: "") ?? url.absoluteString }
-    private var title: String {
-        metadata?.title.flatMap { $0.isEmpty ? nil : $0 }
-            ?? (label.isEmpty || ChatSourceTextView.isCitation(label) ? domain : label)
+    private static func date(_ source: String?) -> String? {
+        guard let source else { return nil }
+        let day = String(source.prefix(10))
+        let parser = DateFormatter()
+        parser.locale = Locale(identifier: "en_US_POSIX")
+        parser.dateFormat = "yyyy-MM-dd"
+        guard let date = parser.date(from: day) else { return nil }
+        return date.formatted(date: .abbreviated, time: .omitted)
     }
 
     var body: some View {
-        Link(destination: url) {
-            VStack(alignment: .leading, spacing: 0) {
-                if let data = metadata?.image, let image = NSImage(data: data) {
-                    Image(nsImage: image).resizable().scaledToFill()
-                        .frame(width: 300, height: 170).clipped()
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(sources.enumerated()), id: \.element) { index, url in
+                if index > 0 {
+                    Rectangle().fill(ThemeColor.kBorder).frame(height: 1).padding(.vertical, 16)
                 }
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(title)
-                        .font(.system(size: 16, weight: .medium)).lineLimit(3)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .multilineTextAlignment(.leading)
-                        .foregroundStyle(ThemeColor.kText)
-                    if title != domain {
-                        Text(domain).font(.system(size: 12))
-                            .foregroundStyle(ThemeColor.kTextSubtle).lineLimit(1)
-                    }
-                }.padding(18).frame(maxWidth: .infinity, alignment: .leading)
-            }.frame(width: 300)
-        }
-        .buttonStyle(.plain)
-        .windowSurfaceBackground(in: RoundedRectangle(cornerRadius: 16))
+                Link(destination: url) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(metadata[url]?.siteName ?? ChatSourceTextView.domain(url))
+                            .font(.system(size: 13)).foregroundStyle(ThemeColor.kTextSubtle)
+                        Text(metadata[url]?.title ?? url.absoluteString)
+                            .font(.system(size: 15)).foregroundStyle(ThemeColor.kText)
+                            .lineLimit(3).fixedSize(horizontal: false, vertical: true)
+                        if let date = Self.date(metadata[url]?.publishedAt) {
+                            Text(date).font(.system(size: 13)).foregroundStyle(ThemeColor.kTextSubtle)
+                        }
+                    }.multilineTextAlignment(.leading).frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(.rect)
+                }.buttonStyle(.plain)
+            }
+        }.padding(20).frame(width: 380, alignment: .leading)
     }
 }

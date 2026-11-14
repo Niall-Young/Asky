@@ -192,7 +192,7 @@ private struct ChatInlineText: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.chatInlineForeground) private var foreground
     @State private var images: [URL: Data] = [:]
-    @State private var favicons: [URL: Data] = [:]
+    @State private var sourceNames: [URL: String] = [:]
 
     static func parsed(_ markdown: String) -> AttributedString {
         (try? AttributedString(markdown: markdown,
@@ -211,7 +211,7 @@ private struct ChatInlineText: View {
     }
 
     var body: some View {
-        ChatInlineNativeText(content: Self.parsed(markdown), images: images, favicons: favicons,
+        ChatInlineNativeText(content: Self.parsed(markdown), images: images, sourceName: ChatSourceTextView.sources(in: Self.parsed(markdown)).first.flatMap { sourceNames[$0] },
             foreground: NSColor(foreground.color(for: colorScheme)),
             background: NSColor(ThemeColor("backgroundNeutral").color(for: colorScheme)),
             linkColor: NSColor(ThemeColor("textPrimary").color(for: colorScheme)))
@@ -224,12 +224,10 @@ private struct ChatInlineText: View {
                 }
                 guard !Task.isCancelled else { return }
                 images = loaded
-                for url in ChatSourceTextView.sources(in: Self.parsed(markdown)) {
+                if let first = ChatSourceTextView.sources(in: Self.parsed(markdown)).first {
+                    let metadata = try? await ChatLinkService.shared.preview(for: first)
                     guard !Task.isCancelled else { return }
-                    if let data = await ChatLinkService.shared.favicon(for: url) {
-                        guard !Task.isCancelled else { return }
-                        favicons[url] = data
-                    }
+                    sourceNames[first] = metadata?.siteName
                 }
             }
     }
@@ -238,7 +236,7 @@ private struct ChatInlineText: View {
 private struct ChatInlineNativeText: NSViewRepresentable {
     let content: AttributedString
     let images: [URL: Data]
-    let favicons: [URL: Data]
+    let sourceName: String?
     let foreground: NSColor
     let background: NSColor
     let linkColor: NSColor
@@ -253,6 +251,7 @@ private struct ChatInlineNativeText: NSViewRepresentable {
         storage.addLayoutManager(manager)
         manager.addTextContainer(container)
         let view = ChatSourceTextView(frame: .zero, textContainer: container)
+        view.delegate = view
         view.isEditable = false
         view.isSelectable = true
         view.drawsBackground = false
@@ -314,13 +313,16 @@ private struct ChatInlineNativeText: NSViewRepresentable {
                 result.append(NSAttributedString(string: text, attributes: attributes))
             }
         }
-        for url in ChatSourceTextView.sources(in: content) {
+        let sources = ChatSourceTextView.sources(in: content)
+        if let first = sources.first {
             result.append(NSAttributedString(string: " ", attributes: [.font: NSFont.systemFont(ofSize: 14)]))
             let attachment = NSTextAttachment()
-            attachment.image = ChatSourceTextView.badge(icon: favicons[url].flatMap(NSImage.init(data:)), foreground: foreground, background: background)
-            attachment.bounds = NSRect(x: 0, y: -3, width: 18, height: 18)
+            let name = sourceName?.trimmingCharacters(in: .whitespacesAndNewlines)
+            attachment.image = ChatSourceTextView.badge(name: name.flatMap { $0.isEmpty ? nil : $0 } ?? ChatSourceTextView.domain(first),
+                count: sources.count, foreground: foreground, background: background)
+            attachment.bounds = NSRect(x: 0, y: -5, width: attachment.image!.size.width, height: 24)
             let fragment = NSMutableAttributedString(attachment: attachment)
-            fragment.addAttributes([.link: url, .toolTip: url.host ?? url.absoluteString], range: NSRange(location: 0, length: fragment.length))
+            fragment.addAttributes([.link: first, .chatSources: sources], range: NSRange(location: 0, length: fragment.length))
             result.append(fragment)
         }
         view.linkTextAttributes = [.foregroundColor: linkColor, .underlineStyle: NSUnderlineStyle.single.rawValue]

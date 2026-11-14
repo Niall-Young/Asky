@@ -9,6 +9,9 @@ import ToolService
 @MainActor
 enum AgentReplyRegression {
     static func sourcesPreview() async throws {
+        precondition(ChatSourceTextView.badgeLabel(name: "Cognition", count: 2) == "Cognition +1")
+        precondition(ChatSourceTextView.badgeLabel(name: "Kimi", count: 4) == "Kimi +3")
+        precondition(ChatSourceTextView.badgeLabel(name: "Kimi", count: 1) == "Kimi")
         precondition(ChatSourceTextView.isCitation("[12]"))
         precondition(ChatSourceTextView.isCitation("来源"))
         precondition(!ChatSourceTextView.isCitation("打开官网"))
@@ -29,7 +32,7 @@ enum AgentReplyRegression {
             window.appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
             let view = NSHostingView(rootView: ChatMarkdownView(text: """
             ## 联网搜索结果
-            安全仪表盘可以查看扫描结果、风险和修复进度。[1](https://devin.ai/)
+            安全仪表盘可以查看扫描结果、风险和修复进度。[1](https://devin.ai/) [2](https://example.com/security) [3](https://devin.ai/docs) [4](https://example.com/news)
 
             - **扫描**：核对权限边界，找出潜在漏洞。[来源](https://devin.ai/)
             - **修复**：使用 `Fix with Devin` 创建修复任务。[2](https://devin.ai/)
@@ -68,6 +71,8 @@ enum AgentReplyRegression {
                         badges += 1
                         if firstSource == nil { firstSource = range.location }
                         precondition(storage.attribute(.link, at: range.location, effectiveRange: nil) as? URL != nil)
+                        let sources = storage.attribute(.chatSources, at: range.location, effectiveRange: nil) as! [URL]
+                        if sources.count > 1 { precondition(sources.count == 4, "One tag must retain all four sources") }
                     }
                     if let firstSource {
                         let suffix = (storage.string as NSString).substring(from: firstSource)
@@ -106,11 +111,29 @@ enum AgentReplyRegression {
                     try bitmap.representation(using: .png, properties: [:])!.write(to: URL(filePath: "build/source-card-" + name + ".png"))
                 }
                 text.preview?.close()
+                precondition(text.textView(text, clickedOnLink: URL(string: "https://devin.ai/")!, at: linkRange.location),
+                             "Clicking a grouped source tag opens its list rather than navigating to the first URL")
+                precondition(text.preview?.isShown == true)
+                text.preview?.close()
             }
 
         }
+        let many = (0..<12).map { URL(string: "https://example.com/article/\($0)")! }
+        let list = NSHostingView(rootView: ScrollView { ChatSourcePreview(sources: many) }.frame(width: 380, height: 460))
+        window.contentView = list
+        try await Task.sleep(for: .milliseconds(250))
+        list.layoutSubtreeIfNeeded()
+        func findScroll(_ node: NSView) -> NSScrollView? {
+            if let scroll = node as? NSScrollView { return scroll }
+            return node.subviews.compactMap(findScroll).first
+        }
+        let scroll = findScroll(list)!
+        precondition(scroll.documentView!.bounds.height > scroll.contentView.bounds.height, "Long source lists must scroll inside the card")
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: 200))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        precondition(scroll.contentView.bounds.minY > 0, "Source list accepts a real native scroll offset")
         window.orderOut(nil)
-        print("Source badges, retained links, list layout and light/dark window captures passed")
+        print("Source tags, +N grouping, hover/click lists, long-list scrolling and light/dark positioning passed")
     }
 
     static func mathPreview() async throws {

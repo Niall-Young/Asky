@@ -2,25 +2,28 @@ import XCTest
 @testable import ToolService
 
 final class ChatLinkServiceTests: XCTestCase {
-    func testDeclaredFaviconsResolveRelativeURLs() {
+    func testSourceNameTitleAndDate() {
         let html = """
-        <link rel="stylesheet" href="/style.css">
-        <link href="/touch.png" rel="apple-touch-icon">
-        <link href="../icon.png?v=1&amp;x=2" rel="shortcut icon">
-        <link rel="icon" href="javascript:alert(1)">
+        <meta content="Cognition &amp; AI" property="og:site_name">
+        <meta property='og:title' content='Devin Security'>
+        <meta property="article:published_time" content="2026-10-26T09:00:00Z">
         """
-        let urls = ChatLinkService.iconURLs(in: html, base: URL(string: "https://example.com/docs/page")!)
-        XCTAssertEqual(urls.map(\.absoluteString), ["https://example.com/icon.png?v=1&x=2", "https://example.com/touch.png"])
+        let source = ChatLinkService.metadata(in: html)
+        XCTAssertEqual(source.siteName, "Cognition & AI")
+        XCTAssertEqual(source.title, "Devin Security")
+        XCTAssertEqual(source.publishedAt, "2026-10-26T09:00:00Z")
+        let fallback = ChatLinkService.metadata(in: "<title>Fallback</title>")
+        XCTAssertEqual(fallback.title, "Fallback")
+        XCTAssertNil(fallback.siteName)
+        XCTAssertNil(fallback.publishedAt)
     }
 
     func testMetadataAttributeOrderAndEntities() {
         let html = """
         <meta content="A &amp; B" property="og:title">
-        <meta property='og:image' content='/cover.png'>
         <meta name='description' content='Unrelated'>
         """
         XCTAssertEqual(ChatLinkService.meta("og:title", in: html).map(ChatLinkService.decode), "A & B")
-        XCTAssertEqual(ChatLinkService.meta("og:image", in: html), "/cover.png")
         XCTAssertEqual(ChatLinkService.meta("og:title", in: "<meta property=\"og:title\" content=\"Devin's Security\">"), "Devin's Security")
         XCTAssertNil(ChatLinkService.meta("missing", in: html))
         XCTAssertEqual(ChatLinkService.capture("<title[^>]*>([\\s\\S]*?)</title>", in: "<TITLE>Fallback</TITLE>"), "Fallback")

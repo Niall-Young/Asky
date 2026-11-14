@@ -1,27 +1,26 @@
-# 网页引用与来源卡片
+# 网页来源标签与列表
 
 ## 当前行为
 
-- 每段 / 每个列表项的网页来源统一显示在信息末尾，同一段相同 URL 去重。数字与“来源”类引用标签不占正文；描述性链接文字保留为正文，不再以下划线链接充当悬停入口。会话仍保存原始 Markdown。
-- 来源图标读取网站声明的 favicon / touch icon，失败再尝试该网站的 `/favicon.ico`；全部不可用时回退通用网页图标。只访问来源网站，不使用第三方 favicon 代理。按 origin 合并并缓存请求，最多保留 64 个站点，图标缩小至 32 px。
-- 悬停图标 300 ms 后显示独立、无箭头的 `SurfacePanel`，复用 `WindowSurface.glassContentView` 与系统窗口阴影。按附件 glyph 的实际屏幕坐标定位，空间不足时向上展开，约束在来源所在屏幕内；滚动 / 窗口移动时跟随，来源离开可视区域时关闭。同一时刻只展示一张来源卡片。
-- 封面、标题与域名由 ToolService 在悬停时获取。HTML 上限 512 KiB，最多缓存 8 份预览。读取失败时使用文字卡片，点击图标或卡片打开原文。
+- 每段 / 每个列表项的网页来源合并为一个 24 pt 高的文字胶囊标签。单来源显示来源名称，多来源显示“首个来源名称 +N”，N 为额外来源数量，例如四个 URL 显示 `Kimi +3`。相同 URL 去重，不按网站合并不同文章。
+- 数字与“来源”引用标签不占正文；描述性链接文字保留为正文。会话仍保存原始 Markdown，已有回复使用相同的新样式。
+- 悬停 300 ms 或点击标签展开文字来源列表，逐项展示网站名称、文章标题和可获取的发布日期。点击条目打开对应原文；缺少元数据时显示真实域名和 URL，不虚构来源名称或日期。
+- 移除 favicon 抓取、图标缓存和封面预览，不再显示并排小图标或大封面。元数据 HTML 上限 512 KiB，缓存最多 32 个 URL，并合并相同 URL 的在途请求。展开列表最多同时读取 4 个来源。
+- 卡片宽 380 pt，最高 460 pt（小屏进一步约束）；长列表在卡片内滚动。元数据更新时保留同一宿主视图与 ScrollView。卡片继续使用独立 SurfacePanel、原生玻璃和系统阴影，以标签位置为中心展开，保留滚动后定位、屏幕边界和底部向上展开。
 
-## 本次检查
+## 检查
 
 - `xcodegen generate`：通过。
-- README 中的 Debug `xcodebuild` 命令：通过，日志 `/tmp/asky-citations-favicon-final-build.log`。
-- `cd Packages/KulaCore && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test`：通过，日志 `/tmp/asky-citations-favicon-tests.log`。
-- `swift test --filter ChatLinkServiceTests`：新增 favicon 解析用例与原 metadata 用例共 2 项通过；覆盖相对图标地址、HTML 实体、shortcut icon / touch icon 优先顺序和非 HTTP 地址过滤。日志 `/tmp/asky-citations-favicon-parser.log`。
-- 原生 UI 回归：从 `AgentReplyRegression.sourcesPreview()` 提取本次窗口回归，编译实际 Markdown、来源卡片、SurfaceWindow 与玻璃呈现代码，使用 `build/citation-preview` 中冻结的 Debug 产物运行，通过。覆盖所有网页来源移到段末、去重、真实 favicon、负坐标屏幕边界、原生鼠标事件触发卡片、滚动 200 pt 后的附件坐标和底部来源向上展开。日志 `/tmp/asky-citations-favicon-scroll.log`。
-- 从 `https://devin.ai/` 获取 1269 字节 favicon；预加载真实封面后检查浅色正文、深色滚动后的段落及圆角卡片截图。截图 `build/sources-{light,dark}.png`、`build/source-card-{light,dark}.png`，复用已有 `build/` 忽略规则。
-- 已重启当前 `build/DerivedData/Build/Products/Debug/Asky.app`，确认实际进程来自该路径。
+- README 的 Debug `xcodebuild` 命令：通过，日志 `/tmp/asky-source-tag-build-final.log`。一次中间构建遇到另一个并行 Debug 构建的数据库锁，重试后通过。
+- `cd Packages/KulaCore && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test`：通过，日志 `/tmp/asky-source-tag-tests-final.log`。其中 2 项来源元数据测试覆盖网站名称、标题、发布日期、实体解码、属性顺序和缺失字段回退。
+- 从 `AgentReplyRegression.sourcesPreview()` 提取窗口回归，编译实际 Markdown、来源列表、SurfaceWindow 与玻璃代码，针对冻结的 Debug 产物运行：通过。覆盖单来源、四来源 `+3`、去重、hover / click 入口、12 条来源的真实原生列表滚动、段末标签、负坐标屏幕和真实 clip-view 滚动后的底部向上展开。日志 `/tmp/asky-source-tag-preview-final.log`。
+- 已检查实际浅色段落标签、深色滚动段落及两条来源列表截图。段落读取真实 Devin 网站名称；独立两条列表使用测试标题与日期验证参考图中的排版。截图 `build/sources-{light,dark}.png`、`build/source-tag-list.png`，复用已有 `build/` 忽略规则。
 
 ## 验证边界
 
-- 未通过真实模型重新发起联网搜索；窗口回归使用 Markdown 样例与真实网站图标 / 元数据。
-- 未安装或发布新版。来源不提供可解码图标或封面时使用上述回退。
+- 未调用真实模型重新生成联网搜索回复；原生窗口回归使用 Markdown 样例，网站名称读取和元数据解析分别验证。
+- 未发布或安装新版。没有网站名称时标签使用域名，没有发布日期时省略日期。
 
-## 修正背景
+## 历次调整
 
-初版仅把数字引用改成标记，描述性链接仍为正文链接；使用 NSPopover 时在用户真实滚动会话中出现远离来源的定位问题。本轮替换了该实现，并补充真实 clip-view 偏移和低位置来源的定位断言。初版构建与专项测试日志仍保留在 `/tmp/asky-citations-*`；以本页当前检查结果为准。
+初版数字标记和 NSPopover 定位已被替换；后续段末 favicon 方案在本轮按用户提供的新参考改为文字标签和多来源列表。此前截图与日志不代表当前样式。
