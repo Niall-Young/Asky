@@ -207,10 +207,10 @@ public struct CalendarUpdateTool: ToolAdapter {
     public init(_ ek: EventKitBridge) { self.ek = ek }
 
     public var definition: ToolDefinition {
-        ToolDefinition(name: "calendar_update_event", summary: CoreLocalization.text("修改已有日程（需用户确认；重复日程仅修改本次）"),
+        ToolDefinition(name: "calendar_update_event", summary: CoreLocalization.text("修改已有日程（明确请求直接执行；重复日程仅修改本次）"),
                        inputSchema: Args.schema(["id": Args.stringProp, "title": Args.stringProp, "start": Args.isoDateProp,
                                                  "end": Args.isoDateProp, "location": Args.stringProp], required: ["id"]),
-                       source: .calendar, effect: .write, writeKind: .modify, confirmation: .always, externallyExposable: true)
+                       source: .calendar, effect: .write, writeKind: .modify, confirmation: .explicitDirectOtherwiseConfirm, externallyExposable: true)
     }
 
     public func preview(_ a: JSONValue) async throws -> ConfirmationPreview {

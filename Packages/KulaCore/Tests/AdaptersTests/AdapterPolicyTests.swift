@@ -40,7 +40,7 @@ import Contracts
         #expect(Set(tools.map(\.name)).count == tools.count)
         for t in tools {
             if t.effect == .write { #expect(t.writeKind != nil && t.confirmation != .never, "\(t.name)") }
-            if t.name == "messages_prepare_draft" {
+            if ["messages_prepare_draft", "notes_append", "calendar_update_event"].contains(t.name) {
                 #expect(t.confirmation == .explicitDirectOtherwiseConfirm)
             } else if t.writeKind == .modify || t.writeKind == .delete || t.writeKind == .handoff {
                 #expect(t.confirmation == .always, "\(t.name)")

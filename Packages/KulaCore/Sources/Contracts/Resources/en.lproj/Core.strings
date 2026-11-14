@@ -53,7 +53,7 @@
 "信息数据库格式无法识别：%@" = "Unrecognized Messages database format: %@";
 "修改" = "Update ";
 "修改失败：%@" = "Update failed: %@";
-"修改已有日程（需用户确认；重复日程仅修改本次）" = "Update an existing event (requires confirmation; repeating events affect only this occurrence)";
+"修改已有日程（明确请求直接执行；重复日程仅修改本次）" = "Update an existing event (executes directly on explicit request; repeating events affect only this occurrence)";
 "允许「%@」执行操作？" = "Allow “%@” to perform this operation?";
 "内容" = "Content";
 "内容不能为空" = "Content cannot be empty";
@@ -77,7 +77,7 @@
 "发送" = "Send ";
 "可写日历：" = "Writable calendars: ";
 "名称" = "Name";
-"向已有备忘录末尾追加文本（需用户确认）" = "Append text to an existing note (requires confirmation)";
+"向已有备忘录末尾追加文本（明确请求直接执行）" = "Append text to an existing note (executes directly on explicit request)";
 "响应无效" = "Unexpected reply";
 "图片" = "Image";
 "在 Messages 中准备草稿（明确请求直接打开；由用户手动发送）" = "Prepare a draft in Messages (opens directly on explicit request; the user sends it manually)";

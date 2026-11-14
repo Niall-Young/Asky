@@ -62,6 +62,7 @@ Asky 是使用 SwiftUI 与 AppKit 构建的 macOS 原生效率入口。本地全
   - **日程与路线规划**：集成系统 MapKit 能力，对比驾车、公交与步行耗时，自动为日程计算含缓冲时间的建议出发时间。
 
 - 🧩 **系统生态与扩展**
+  - **日常操作审批**：自动审批模式下，明确要求新建或追加备忘录、新建或修改单个日程、新建提醒事项时，校验目标与参数后直接执行，不重复确认。删除日程、运行快捷指令仍需确认；完全访问模式跳过应用内 Agent 审批，外部 MCP 写入始终确认。
   - **macOS 系统集成**：按授权安全访问系统日历、提醒事项、备忘录与通讯录。
   - **短信草稿**：明确要求准备短信且收件人、正文完整时，直接交接到 Messages，不重复弹出执行确认；最终由用户检查并手动发送。外部 MCP 调用仍需原生确认。
   - **MCP 协议支持**：内置 MCP（Model Context Protocol）桥接，可无缝连接外部工具生态。
@@ -239,6 +240,7 @@ Asky is a native macOS efficiency launcher built with SwiftUI and AppKit. Local 
   - **Smart Travel & Calendar Planning**: Built-in MapKit support to compare driving, transit, and walking times, suggesting arrival-buffered departure times for your day.
 
 - 🧩 **System Integration & Extensibility**
+  - **Everyday Action Approval**: In Auto Review mode, explicit requests to create or append notes, create or update a single calendar event, or create reminders execute after target and argument validation without another confirmation. Event deletion and shortcut execution still require confirmation. Full Access skips approval for the in-app Agent; external MCP writes always require confirmation.
   - **macOS Native Access**: Authorized access to system Calendars, Reminders, Notes, and Contacts.
   - **Message Drafts**: Explicit requests with a valid recipient and body open a draft in Messages without a second execution confirmation. The user reviews and sends it manually; external MCP calls still require native confirmation.
   - **MCP Protocol**: Built-in Model Context Protocol bridge for broad compatibility with external tooling ecosystems.

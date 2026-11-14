@@ -241,9 +241,9 @@ public struct NotesAppendTool: ToolAdapter {
     let notes: NotesBridge
     public init(_ notes: NotesBridge) { self.notes = notes }
     public var definition: ToolDefinition {
-        ToolDefinition(name: "notes_append", summary: CoreLocalization.text("向已有备忘录末尾追加文本（需用户确认）"),
+        ToolDefinition(name: "notes_append", summary: CoreLocalization.text("向已有备忘录末尾追加文本（明确请求直接执行）"),
                        inputSchema: Args.schema(["id": Args.stringProp, "text": Args.stringProp], required: ["id", "text"]),
-                       source: .notes, effect: .write, writeKind: .modify, confirmation: .always, externallyExposable: true)
+                       source: .notes, effect: .write, writeKind: .modify, confirmation: .explicitDirectOtherwiseConfirm, externallyExposable: true)
     }
     public func preview(_ a: JSONValue) async throws -> ConfirmationPreview {
         let n = try await notes.read(try Args.requiredString(a, "id"))
