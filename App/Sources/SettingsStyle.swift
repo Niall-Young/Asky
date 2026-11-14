@@ -159,7 +159,7 @@ extension View {
             .alignmentGuide(.settingsInput) { $0[VerticalAlignment.center] }
     }
 
-    /// Low-contrast translucent field fill with a focus ring, shared by fields of any height.
+    /// Translucent field fill with a focus ring, shared by fields of any height.
     func settingsInputChrome(scheme: ColorScheme, focused: Bool, cornerRadius: CGFloat = 14) -> some View {
         modifier(SettingsInputChrome(scheme: scheme, focused: focused, cornerRadius: cornerRadius))
     }
@@ -181,14 +181,11 @@ private struct SettingsInputChrome: ViewModifier {
     let focused: Bool
     let cornerRadius: CGFloat
     @Environment(\.settingsInputFill) private var fill
-    @Environment(\.colorSchemeContrast) private var contrast
-
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius)
         let border = ThemeColor.kBorder.color(for: scheme)
-            .opacity(scheme == .light && contrast != .increased ? 0.25 : 1)
         content.background(fill ?? (scheme == .dark ? ThemeColor.kBackgroundNeutral.color(for: scheme)
-                            : SettingsPalette.surface(scheme, opaque: true).opacity(0.12)), in: shape)
+                            : SettingsPalette.surface(scheme, opaque: true).opacity(0.45)), in: shape)
             .overlay {
                 shape.strokeBorder(focused ? Color.accentColor : border,
                                    lineWidth: focused ? 2 : 1)
