@@ -106,7 +106,7 @@ struct ComposerTextEditor: NSViewRepresentable {
         editor.font = .systemFont(ofSize: 14)
         editor.textContainerInset = NSSize(width: 0, height: 4)
         editor.textContainer?.lineFragmentPadding = 0
-        editor.minSize = NSSize(width: 0, height: 44)
+        editor.minSize = NSSize(width: 0, height: 28)
         editor.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         editor.isVerticallyResizable = true
         editor.isHorizontallyResizable = false
@@ -131,7 +131,7 @@ struct ComposerTextEditor: NSViewRepresentable {
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         guard let editor = scroll.documentView as? ComposerTextView else { return }
         context.coordinator.parent = self
-        editor.setFrameSize(NSSize(width: scroll.contentSize.width, height: max(44, editor.frame.height)))
+        editor.setFrameSize(NSSize(width: scroll.contentSize.width, height: max(28, editor.frame.height)))
         editor.pasteAttachment = pasteAttachment
         editor.shortcuts = shortcuts
         editor.submit = submit
@@ -157,7 +157,7 @@ struct ComposerTextEditor: NSViewRepresentable {
         func updateHeight() {
             guard let editor, let container = editor.textContainer, let layout = editor.layoutManager else { return }
             layout.ensureLayout(for: container)
-            let height = min(160, max(44, layout.usedRect(for: container).height + 8))
+            let height = min(160, max(28, layout.usedRect(for: container).height + 8))
             if abs(parent.height - height) > 1 {
                 DispatchQueue.main.async { [weak self] in self?.parent.height = height }
             }

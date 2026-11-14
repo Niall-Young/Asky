@@ -37,7 +37,7 @@ final class AgentWindowController {
             w.level = .normal
             w.collectionBehavior = [.moveToActiveSpace, .primary]
             w.minSize = NSSize(width: WindowMetrics.agentMinSize.width, height: WindowMetrics.agentMinSize.height)
-            w.maxSize = NSSize(width: WindowMetrics.launcherWidth, height: .greatestFiniteMagnitude)
+            w.maxSize = NSSize(width: WindowMetrics.agentWidth, height: .greatestFiniteMagnitude)
             w.isReleasedWhenClosed = false
             let host = NSHostingView(rootView: AgentView(model: model, close: { [weak w] in w?.close() },
                 setPinned: { [weak w] pinned in w?.level = pinned ? .floating : .normal }))
@@ -796,11 +796,11 @@ private struct ChatBubble: View {
 private struct Composer: View {
     @Bindable var model: AgentModel
     @State private var importing = false
-    @State private var editorHeight: CGFloat = 44
+    @State private var editorHeight: CGFloat = 28
     @State private var editorFocused = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 8) {
             if !model.attachments.isEmpty {
                 ScrollView(.horizontal) {
                     HStack(spacing: 8) {
@@ -813,7 +813,7 @@ private struct Composer: View {
                     }
                     // Keep the last delete button inside the scroll content without widening each gap.
                     .padding(.trailing, 8)
-                    .padding(.horizontal, 20)
+                    .padding(.horizontal, 12)
                 }
                 .scrollIndicators(.hidden).frame(height: 58)
             }
@@ -821,28 +821,28 @@ private struct Composer: View {
                 isFocused: $editorFocused,
                 pasteAttachment: { model.pasteAttachments() }, submit: { model.send() }, shortcuts: model.shortcutPreferences)
                 .frame(height: editorHeight)
-            .padding(.horizontal, 20)
+            .padding(.horizontal, 12)
             HStack {
                 Button { importing = true } label: {
-                    Image(mingCute: "paperclip", size: 14).frame(width: 32, height: 32)
+                    Image(mingCute: "plus", size: 14).frame(width: 28, height: 28)
                 }
-                .buttonStyle(AgentIconButtonStyle(cornerRadius: 16))
+                .buttonStyle(AgentIconButtonStyle(cornerRadius: 14))
                 .accessibilityLabel(NSLocalizedString("选择文件或图片", comment: ""))
                 Spacer()
                 ApprovalModePicker(model: model)
                 Button { if model.isRunning { model.stop() } else { model.send() } } label: {
-                    Image(mingCute: model.isRunning ? "stop.fill" : "arrow.up", size: 14).frame(width: 32, height: 32)
+                    Image(mingCute: model.isRunning ? "stop.fill" : "arrow.up", size: 14).frame(width: 28, height: 28)
                 }
                 .buttonStyle(ComposerSubmitButtonStyle())
                 .disabled(!model.isRunning && !model.canSend)
                 .accessibilityLabel(model.isRunning ? NSLocalizedString("停止生成", comment: "") : NSLocalizedString("发送消息", comment: ""))
             }
-            .padding(.horizontal, 12)
+            .padding(.horizontal, 8)
         }
         // Attachment cards reserve 6 pt above their visible edge for the delete button.
-        // Include that reserve in Figma's 16 pt top inset rather than adding it again.
-        .padding(.top, model.attachments.isEmpty ? 16 : 10).padding(.bottom, 12)
-        .background(ThemeColor.kInput, in: .rect(cornerRadius: 24))
+        // Keep the visible top inset aligned with the compact text editor.
+        .padding(.top, model.attachments.isEmpty ? 10 : 4).padding(.bottom, 8)
+        .nativeGlassBackground(in: RoundedRectangle(cornerRadius: 16, style: .circular), clear: true, glassOpacity: 0.35)
         .fileImporter(isPresented: $importing, allowedContentTypes: [.data, .image, .text], allowsMultipleSelection: true) { r in
             switch r {
             case .success(let urls): urls.forEach { model.attach(fileURL: $0) }
@@ -871,7 +871,7 @@ private struct ApprovalModePicker: View {
                 Text(Self.shortTitle(mode)).font(.system(size: 13))
             }
             .foregroundStyle(mode == .fullAccess ? AnyShapeStyle(ThemeColor.kTextNegative) : AnyShapeStyle(ThemeColor.kTextSubtle))
-            .padding(.horizontal, 10).frame(height: 32)
+            .padding(.horizontal, 10).frame(height: 28)
         }
         .buttonStyle(AgentIconButtonStyle(cornerRadius: 16))
         .accessibilityLabel(NSLocalizedString("审批模式", comment: ""))

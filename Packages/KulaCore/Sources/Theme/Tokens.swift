@@ -173,6 +173,7 @@ public struct TextStyle: Sendable, Hashable {
 public enum WindowMetrics {
     public static let launcherWidth: Double = 640
     public static let launcherMaxHeight: Double = 640
-    public static let agentInitialSize = (width: launcherWidth, height: 560.0)
-    public static let agentMinSize = (width: launcherWidth, height: 480.0)
+    public static let agentWidth: Double = 560
+    public static let agentInitialSize = (width: agentWidth, height: 560.0)
+    public static let agentMinSize = (width: agentWidth, height: 480.0)
 }

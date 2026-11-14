@@ -46,7 +46,7 @@ Asky 是使用 SwiftUI 与 AppKit 构建的 macOS 原生效率入口。本地全
   - **灵活历史管理**：支持自定义保留期限（8 小时 ~ 30 天）与自动清理，支持快捷键 `⌘⌫` 单条删除或 `⌘K` 菜单清空历史。
 
 - 🤖 **按需 AI 助手与本地记忆**
-  - **紧凑对话窗口**：与搜索、剪贴板同为 640 pt 宽、26 pt 普通圆角，默认高 560 pt，可纵向调整至最低 480 pt。
+  - **紧凑对话窗口**：固定 560 pt 宽、26 pt 普通圆角，默认高 560 pt，可纵向调整至最低 480 pt；紧凑玻璃输入框采用 16 pt 圆角，附件与发送按钮均为 28 pt。
   - **轻量按需启动**：无需常驻后台 AI 进程；兼容任意 OpenAI 协议模型服务商与自定义端点。
   - **原生交互表单**：支持 AI 在对话流中渲染原生单选按钮组、下拉单选、多选、文本输入、日期及按需显示时、分、秒的时间/时长控件，填写后直接提交至同一会话。控件复用设置页组件，日期选择复用创建日程弹窗的月历。
   - **本地记忆与上下文**：基于本地 Markdown 存储用户偏好与记忆，支持长上下文智能压缩与网络实时检索。
@@ -202,7 +202,7 @@ Asky is a native macOS efficiency launcher built with SwiftUI and AppKit. Local 
   - **Flexible Retention**: Configure history retention (8 hours to 30 days) with automatic cleanup. Delete single entries with `⌘⌫` or clear all via the More menu (`⌘K`).
 
 - 🤖 **On-Demand AI Assistant & Local Memory**
-  - **Compact Chat Window**: Matches search and clipboard with a fixed width of 640 pt and 26 pt circular corners, with a default height of 560 pt and a minimum adjustable height of 480 pt.
+  - **Compact Chat Window**: Fixed at 560 pt wide with 26 pt circular corners, a default height of 560 pt and a minimum adjustable height of 480 pt; the compact glass composer uses 16 pt corners and matching 28 pt attachment and send buttons.
   - **On-Demand Lifecycle**: Keeps background resource usage minimal; connects to any OpenAI-compatible provider and custom endpoints.
   - **Native Interactive Forms**: AI can stream structured form controls (text fields, native radio groups, dropdowns, checkboxes, date pickers and configurable hour/minute/second time or duration controls) directly in chat, which submit straight back into the conversation. Controls reuse the Settings components; date selection uses the calendar from the event creation dialog.
   - **Local Memory & Context**: Stores user preferences and context in local Markdown files with automatic context compaction and web search.

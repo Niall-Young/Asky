@@ -37,6 +37,8 @@ enum SurfaceCompatibility {
 private struct NativeGlassBackground<S: InsettableShape>: ViewModifier {
     let shape: S
     var interactive: Bool
+    var clear: Bool
+    var glassOpacity: Double
     var forceOpaque: Bool
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
@@ -47,11 +49,18 @@ private struct NativeGlassBackground<S: InsettableShape>: ViewModifier {
     @ViewBuilder
     func body(content: Content) -> some View {
         if #available(macOS 26, *), !SurfaceCompatibility.useLegacyMaterial {
+            let glass: Glass = clear ? .clear : .regular
             content
                 .background {
-                    if opaque { shape.fill(ThemeColor.kBackground.color(for: scheme, opaque: true)) }
+                    if opaque {
+                        shape.fill(ThemeColor.kBackground.color(for: scheme, opaque: true))
+                    } else if glassOpacity < 1 {
+                        shape.fill(.clear)
+                            .glassEffect(interactive ? glass.interactive() : glass, in: shape)
+                            .opacity(glassOpacity)
+                    }
                 }
-                .glassEffect(opaque ? .identity : interactive ? .regular.interactive() : .regular, in: shape)
+                .glassEffect(opaque || glassOpacity < 1 ? .identity : interactive ? glass.interactive() : glass, in: shape)
                 .overlay {
                     if opaque {
                         shape.strokeBorder(ThemeColor.kText.color(for: scheme).opacity(0.55), lineWidth: 1)
@@ -82,8 +91,8 @@ private struct NativeGlassBackground<S: InsettableShape>: ViewModifier {
 
 extension View {
     func nativeGlassBackground<S: InsettableShape>(in shape: S, interactive: Bool = false,
-                                                   forceOpaque: Bool = false) -> some View {
-        modifier(NativeGlassBackground(shape: shape, interactive: interactive, forceOpaque: forceOpaque))
+                                                   clear: Bool = false, glassOpacity: Double = 1, forceOpaque: Bool = false) -> some View {
+        modifier(NativeGlassBackground(shape: shape, interactive: interactive, clear: clear, glassOpacity: glassOpacity, forceOpaque: forceOpaque))
     }
 }
 
