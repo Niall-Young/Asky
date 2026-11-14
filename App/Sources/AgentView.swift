@@ -101,7 +101,8 @@ struct AgentView: View {
     var close: () -> Void = {}
     var setPinned: (Bool) -> Void = { _ in }
     @State private var pinned = false
-    @State private var toolbarPressed = false
+    @State private var toolbarPressed: Int?
+    @State private var toolbarHovered: Int?
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -167,10 +168,26 @@ struct AgentView: View {
             Spacer(minLength: 0)
             AgentToolbarControls(
                 pinned: pinned,
-                onPin: togglePin, onClose: close, onPressChanged: { toolbarPressed = $0 })
+                onPin: togglePin, onClose: close,
+                onPressChanged: { toolbarPressed = $0 },
+                onHoverChanged: { toolbarHovered = $0 })
                 .fixedSize()
                 .nativeGlassBackground(in: Capsule(), clear: true, glassOpacity: 0.85)
-                .glassPointerFeedback(pressed: toolbarPressed, in: Capsule())
+                .overlay {
+                    HStack(spacing: 0) {
+                        ForEach(0..<2) { index in
+                            Rectangle().fill(.white.opacity(toolbarPressed == index ? 0.16
+                                : toolbarPressed == nil && toolbarHovered == index ? 0.055 : 0))
+                        }
+                    }
+                    .clipShape(Capsule())
+                    .blendMode(.plusLighter)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+                    .animation(reduceMotion ? nil : .easeOut(duration: 0.10), value: toolbarPressed)
+                    .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: toolbarHovered)
+                }
+                .glassPointerFeedback(pressed: toolbarPressed != nil, in: Capsule(), illumination: false)
         }
         .padding(.horizontal, 16)
         .frame(height: AgentLayout.headerHeight)
@@ -223,7 +240,8 @@ private struct AgentToolbarControls: NSViewRepresentable {
     var pinned: Bool
     var onPin: () -> Void
     var onClose: () -> Void
-    var onPressChanged: (Bool) -> Void
+    var onPressChanged: (Int?) -> Void
+    var onHoverChanged: (Int?) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -243,7 +261,7 @@ private struct AgentToolbarControls: NSViewRepresentable {
             button.imageScaling = .scaleNone
             button.translatesAutoresizingMaskIntoConstraints = false
             NSLayoutConstraint.activate([
-                button.widthAnchor.constraint(equalToConstant: 36),
+                button.widthAnchor.constraint(equalToConstant: 48),
                 button.heightAnchor.constraint(equalToConstant: 36)
             ])
             stack.addArrangedSubview(button)
@@ -259,7 +277,8 @@ private struct AgentToolbarControls: NSViewRepresentable {
         for (index, view) in stack.arrangedSubviews.enumerated() {
             guard let button = view as? NSButton else { continue }
             let title = NSLocalizedString(titles[index], comment: "")
-            (button as? GlassPointerButton)?.onPressChanged = onPressChanged
+            (button as? GlassPointerButton)?.onPressChanged = { onPressChanged($0 ? index : nil) }
+            (button as? GlassPointerButton)?.onHoverChanged = { onHoverChanged($0 ? index : nil) }
             button.image = MingCute.image(symbols[index], size: 18)
             button.image?.accessibilityDescription = title
             button.toolTip = title

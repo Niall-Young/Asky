@@ -44,9 +44,25 @@ extension View {
 }
 
 /// Reports pointer tracking while leaving action dispatch, keyboard activation and
-/// drag-out cancellation with AppKit. The shared capsule receives a single state.
+/// drag-out cancellation with AppKit. The owner can illuminate each button separately.
 final class GlassPointerButton: NSButton {
     var onPressChanged: ((Bool) -> Void)?
+    var onHoverChanged: ((Bool) -> Void)?
+    private var hoverTrackingArea: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverTrackingArea { removeTrackingArea(hoverTrackingArea) }
+        let area = NSTrackingArea(rect: .zero,
+                                  options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect, .enabledDuringMouseDrag],
+                                  owner: self, userInfo: nil)
+        addTrackingArea(area)
+        hoverTrackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) { onHoverChanged?(true) }
+    override func mouseExited(with event: NSEvent) { onHoverChanged?(false) }
+
     override func mouseDown(with event: NSEvent) {
         guard isEnabled else { super.mouseDown(with: event); return }
         onPressChanged?(true)
