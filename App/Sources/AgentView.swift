@@ -206,6 +206,7 @@ struct AgentView: View {
         .frame(height: AgentLayout.headerHeight)
         .contentShape(Rectangle())
         .compatibleWindowDrag()
+        .background(alignment: .top) { AgentHeaderBackdrop().allowsHitTesting(false) }
         .background {
             Group {
                 Button("") { toggleHistory() }
@@ -348,6 +349,34 @@ private struct AgentToolbarControls: NSViewRepresentable {
             else if sender.tag == 0 { parent.onNew() }
             else if sender.tag == 1 { parent.onPin() }
             else if sender.tag == 2 { parent.onClose() }
+        }
+    }
+}
+
+/// A live material backdrop fades out over the scrolling transcript.
+/// Only the material is masked; toolbar controls remain fully opaque.
+private struct AgentHeaderBackdrop: View {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        if reduceTransparency || contrast == .increased {
+            ThemeColor.kBackground.color(for: colorScheme, opaque: true)
+                .frame(height: AgentLayout.headerHeight)
+        } else {
+            Rectangle()
+                .fill(.regularMaterial)
+                .frame(height: AgentLayout.headerHeight + 32)
+                .mask {
+                    LinearGradient(stops: [
+                        .init(color: .black, location: 0),
+                        .init(color: .black, location: 0.35),
+                        .init(color: .black.opacity(0.85), location: 0.55),
+                        .init(color: .black.opacity(0.35), location: 0.78),
+                        .init(color: .clear, location: 1)
+                    ], startPoint: .top, endPoint: .bottom)
+                }
         }
     }
 }
