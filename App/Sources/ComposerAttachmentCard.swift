@@ -13,6 +13,7 @@ struct ComposerAttachmentCard: View {
     @State private var hovering = false
     @FocusState private var deleteFocused: Bool
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     init(attachment: AttachmentRef, thumbnail: Data?, remove: (() -> Void)? = nil, imageSize: CGFloat = 52) {
         self.attachment = attachment
@@ -32,6 +33,11 @@ struct ComposerAttachmentCard: View {
         attachment.map { URL(filePath: $0.path).lastPathComponent } ?? NSLocalizedString("引用的文本", comment: "")
     }
     private var active: Bool { hovering || deleteFocused }
+    private var iconFill: Color {
+        reduceTransparency
+            ? ThemeColor.kBackground.color(for: colorScheme)
+            : ThemeColor.kBackgroundNeutral.color(for: colorScheme).opacity(0.5)
+    }
     var body: some View {
         Group {
             if attachment?.kind == .image {
@@ -45,12 +51,10 @@ struct ComposerAttachmentCard: View {
                 .frame(width: imageSize, height: imageSize).clipped()
             } else {
                 HStack(spacing: 12) {
-                    Image(mingCute: attachment == nil ? "textformat" : "text.document", size: 24)
+                    Image(mingCute: "text.document", size: 24)
                         .foregroundStyle(ThemeColor.kIconSubtle.color(for: colorScheme))
                         .frame(width: 44, height: 44)
-                        .background(ThemeColor.kBackground, in: .rect(cornerRadius: 8))
-                        .overlay(RoundedRectangle(cornerRadius: 8)
-                            .strokeBorder(ThemeColor.kBorder.color(for: colorScheme), lineWidth: 1))
+                        .background(iconFill, in: .rect(cornerRadius: 8))
                     VStack(alignment: .leading, spacing: 0) {
                         Text(name).textStyle(.button)
                             .foregroundStyle(ThemeColor.kText.color(for: colorScheme))
