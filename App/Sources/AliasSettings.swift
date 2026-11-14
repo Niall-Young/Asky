@@ -98,11 +98,12 @@ private struct AliasTargetIcon: View {
 
 private struct AliasChip: View {
     let text: String
+    @Environment(\.colorScheme) private var scheme
     var body: some View {
         Text(text)
             .font(.system(size: 12, design: .monospaced))
             .padding(.horizontal, 8).padding(.vertical, 3)
-            .background(.quaternary, in: RoundedRectangle(cornerRadius: 5))
+            .settingsInputChrome(scheme: scheme, focused: false, cornerRadius: 5)
             .help(label("别名"))
     }
 }
