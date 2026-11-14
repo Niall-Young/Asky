@@ -135,8 +135,23 @@ struct PluginSettings: View {
                 }
                 if busy || !status.isEmpty {
                     Section {
-                        if busy { ProgressView(label("正在处理插件…")) }
-                        Text(status).font(.system(size: 12)).textSelection(.enabled)
+                        HStack(spacing: 8) {
+                            if busy {
+                                ProgressView()
+                                    .controlSize(.small)
+                                    .frame(width: 16, height: 16)
+                                    .accessibilityHidden(true)
+                            }
+                            Text(status)
+                                .font(.system(size: 13))
+                                .foregroundStyle(ThemeColor.kTextSubtle)
+                                .textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Spacer(minLength: 0)
+                        }
+                        .frame(minHeight: 20)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityIdentifier("plugin-operation-status")
                     }
                 }
             }
