@@ -151,10 +151,13 @@ public struct MessagePresentation: Sendable, Hashable, Codable {
     public var needsPermissionSettings: Bool
     public var workSeconds: Int?
     public var completedAt: Date?
+    /// Non-nil (including an empty dictionary) permanently marks a submitted form.
+    public var submittedFormValues: [String: [String]]?
 
     public init(responseID: String? = nil, toolName: String? = nil, toolStatus: ExecutionStatus? = nil,
                 toolError: String? = nil, needsPermissionSettings: Bool = false,
-                workSeconds: Int? = nil, completedAt: Date? = nil) {
+                workSeconds: Int? = nil, completedAt: Date? = nil,
+                submittedFormValues: [String: [String]]? = nil) {
         self.responseID = responseID
         self.toolName = toolName
         self.toolStatus = toolStatus
@@ -162,6 +165,7 @@ public struct MessagePresentation: Sendable, Hashable, Codable {
         self.needsPermissionSettings = needsPermissionSettings
         self.workSeconds = workSeconds
         self.completedAt = completedAt
+        self.submittedFormValues = submittedFormValues
     }
 }
 
@@ -207,6 +211,26 @@ public struct ConversationStore: Sendable {
     public func message(_ id: String, conversationID: String) -> StoredMessage? {
         (try? db.query("SELECT * FROM messages WHERE id = ? AND conversation_id = ?", [id, conversationID]))?
             .first.map(Self.decode)
+    }
+
+    public enum FormReplyError: Error { case unavailable, alreadySubmitted }
+
+    /// Save the answer and consume its source form together, even across timeline segments.
+    /// A failed append leaves the form available; deleting the reply never unlocks the source.
+    public func appendFormReply(sourceID: String, sourceConversationID: String,
+                                conversationID: String, text: String,
+                                values: [String: [String]]) throws -> StoredMessage {
+        try db.transaction {
+            guard let source = message(sourceID, conversationID: sourceConversationID),
+                  source.role == "assistant" else { throw FormReplyError.unavailable }
+            var presentation = source.presentation ?? MessagePresentation()
+            guard presentation.submittedFormValues == nil else { throw FormReplyError.alreadySubmitted }
+            presentation.submittedFormValues = values
+            let reply = try append(conversationID: conversationID, role: "user", text: text)
+            try db.run("UPDATE messages SET presentation_json = ? WHERE id = ? AND conversation_id = ?",
+                       [JSONText.encode(presentation), sourceID, sourceConversationID])
+            return reply
+        }
     }
 
     /// Update a recorded step without changing its ordering or duplicating its search entry.

@@ -279,8 +279,12 @@ enum AgentReplyRegression {
         let later = try store.create(title: "后续问题")
         try store.append(conversationID: later, role: "user", text: "改用文字回答")
         model.resumeTimeline()
-        precondition(!model.formIsActive(messageID), "a later user message must retire an old form across storage segments")
+        precondition(model.formIsActive(messageID), "later messages must not expire an unsubmitted form")
+        try store.append(conversationID: later, role: "assistant", text: "后续回答")
+        model.resumeTimeline()
+        precondition(model.formIsActive(messageID), "later assistant replies must not expire an unsubmitted form")
         model.open(cid)
+        precondition(model.formIsActive(messageID), "reopening the source history must keep an unsubmitted form available")
         let deletedForm = await app.deleteConversationHistory(cid)
         precondition(deletedForm)
         precondition(!model.formIsActive(messageID) && !model.submitForm(messageID), "deleted forms must never submit")
@@ -539,7 +543,8 @@ enum AgentReplyRegression {
         }
         // Exercise the actual submit path with an intentionally absent test credential. No model
         // request can leave the machine; the normal user-message append happens before that failure.
-        let reply = ChatFormParser.form(in: prefix + rest)!.reply(model.formValues[messageID]!)
+        let submittedValues = model.formValues[messageID]!
+        let reply = ChatFormParser.form(in: prefix + rest)!.reply(submittedValues)
         app.preferences.automaticUpdates = false
         await app.start()
         precondition(app.agent != nil, "test bundle must locate the actual runtime")
@@ -554,10 +559,14 @@ enum AgentReplyRegression {
         precondition(model.items.last!.attachments.isEmpty, "form submission must not send composer attachments")
         precondition(model.draft == "保留输入框草稿" && model.attachments == [attachment])
         precondition(!model.submitForm(messageID), "double submission must be rejected")
+        precondition(model.formAnswers(messageID) == submittedValues, "submission must retain the exact selected answers")
+        model.setFormAnswers(["title": ["不能覆盖"]], for: messageID)
+        precondition(model.formAnswers(messageID) == submittedValues, "submitted answers must be immutable")
         for _ in 0..<100 where model.isRunning { try await Task.sleep(for: .milliseconds(20)) }
         precondition(!model.isRunning)
         model.resumeTimeline()
         precondition(!model.formIsActive(messageID) && !model.submitForm(messageID))
+        precondition(model.formAnswers(messageID) == submittedValues, "timeline restore must retain submitted answers")
         try await Task.sleep(for: .milliseconds(150))
         try capture("field-dark-disabled")
         // The intentionally missing credential appends an error after the submitted reply.
@@ -565,6 +574,48 @@ enum AgentReplyRegression {
         precondition(model.items.filter { $0.kind == .user && $0.text == reply }.count == 1,
                      "The form reply must survive history exactly once, including when the request fails")
         precondition(ChatFormParser.form(in: model.items.first { $0.id == messageID }!.text)?.fields.count == (testingTime || testingRadio ? 5 : 4))
+        let restored = AgentModel(app: app)
+        restored.open(cid)
+        precondition(!restored.formIsActive(messageID) && !restored.submitForm(messageID), "source-only history must never unlock a submitted form")
+        precondition(restored.formAnswers(messageID) == submittedValues)
+        try store.delete(submittedCID)
+        restored.resumeTimeline()
+        precondition(!restored.formIsActive(messageID) && restored.formAnswers(messageID) == submittedValues,
+                     "deleting the later reply must not unlock or erase the original submitted form")
+        let readonly = NSHostingView(rootView: ChatReplyView(text: prefix + rest,
+            values: Binding(get: { restored.formAnswers(messageID) }, set: { restored.setFormAnswers($0, for: messageID) }),
+            active: restored.formIsActive(messageID), submit: { restored.submitForm(messageID) }).padding(24)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .background(Color(nsColor: .windowBackgroundColor)).environment(\.colorScheme, .light))
+        let readonlyWindow = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 600, height: 760),
+                                      styleMask: [.titled], backing: .buffered, defer: false)
+        readonlyWindow.contentView = readonly
+        readonlyWindow.appearance = NSAppearance(named: .aqua)
+        readonlyWindow.makeKeyAndOrderFront(nil)
+        try await Task.sleep(for: .milliseconds(200))
+        readonly.layoutSubtreeIfNeeded()
+        var submitButtons = 0
+        var displayedAnswers: [String] = []
+        func checkReadOnly(_ view: NSView) {
+            if let button = view as? NSButton {
+                precondition(!button.isEnabled, "submitted form buttons and choices must be disabled")
+                if button.title == NSLocalizedString("提交回复", comment: "") { submitButtons += 1 }
+            }
+            if let field = view as? NSTextField {
+                precondition(!field.isEditable || !field.isEnabled)
+                displayedAnswers.append(field.stringValue)
+            }
+            view.subviews.forEach(checkReadOnly)
+        }
+        checkReadOnly(readonly)
+        precondition(submitButtons == 1, "keep the disabled submit button visible")
+        precondition(displayedAnswers.contains(submittedValues["title"]!.first!), "read-only text field must display its original answer")
+        let readonlyCapture = Process()
+        readonlyCapture.executableURL = URL(filePath: "/usr/sbin/screencapture")
+        readonlyCapture.arguments = ["-x", "-o", "-l", String(readonlyWindow.windowNumber), "build/form-submitted-readonly.png"]
+        try readonlyCapture.run(); readonlyCapture.waitUntilExit()
+        precondition(readonlyCapture.terminationStatus == 0)
+        readonlyWindow.orderOut(nil)
         // New session and opening history are native-only; no model calls are needed for rendering.
         await model.startNewConversation()
         precondition(model.formValues.isEmpty)

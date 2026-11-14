@@ -165,6 +165,41 @@ func tempRoot() -> URL {
         #expect(reopened.messages(conversationID: cid, limit: 40).isEmpty)
     }
 
+    @Test func formSubmissionIsAtomicAndSurvivesReopenAndReplyDeletion() throws {
+        let root = tempRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = ConversationStore(try LocalStore(root: root))
+        let cid = try store.create(title: "表单")
+        let source = try store.append(conversationID: cid, role: "assistant", text: "表单原文",
+                                      presentation: .init(responseID: "form-turn", workSeconds: 2))
+        let values = ["choice": ["自己填写的答案\n第二行"], "multi": ["A", "B"], "date": ["2026-11-14"]]
+        #expect(throws: (any Error).self) {
+            try store.appendFormReply(sourceID: source.id, sourceConversationID: cid,
+                                      conversationID: "missing", text: "回复", values: values)
+        }
+        #expect(store.message(source.id, conversationID: cid)?.presentation?.submittedFormValues == nil)
+        let replyCID = try store.create(title: "回复")
+        try store.appendFormReply(sourceID: source.id, sourceConversationID: cid,
+                                  conversationID: replyCID, text: "回复", values: values)
+        let reopened = ConversationStore(try LocalStore(root: root))
+        let restored = try #require(reopened.message(source.id, conversationID: cid))
+        #expect(restored.text == source.text && restored.presentation?.responseID == "form-turn")
+        #expect(restored.presentation?.submittedFormValues == values)
+        #expect(throws: ConversationStore.FormReplyError.alreadySubmitted) {
+            try reopened.appendFormReply(sourceID: source.id, sourceConversationID: cid,
+                                         conversationID: replyCID, text: "重复回复", values: [:])
+        }
+        #expect(reopened.messages(conversationID: replyCID, limit: 40).count == 1)
+        try reopened.delete(replyCID)
+        #expect(reopened.message(source.id, conversationID: cid)?.presentation?.submittedFormValues == values)
+        let empty = try store.append(conversationID: cid, role: "assistant", text: "可选表单")
+        try reopened.appendFormReply(sourceID: empty.id, sourceConversationID: cid,
+                                     conversationID: cid, text: "空答案", values: [:])
+        #expect(reopened.message(empty.id, conversationID: cid)?.presentation?.submittedFormValues == [:])
+        try reopened.delete(cid)
+        #expect(reopened.message(source.id, conversationID: cid) == nil)
+    }
+
     @Test func transcriptStepsSurviveDiskReopenPagingAndUpdates() throws {
         let root = tempRoot()
         defer { try? FileManager.default.removeItem(at: root) }

@@ -909,8 +909,8 @@ private struct ChatBubble: View {
         case .assistant:
             VStack(alignment: .leading, spacing: 6) {
                 ChatReplyView(text: item.text, isStreaming: item.id == "streaming",
-                    values: Binding(get: { model.formValues[item.id] ?? [:] },
-                                    set: { model.formValues[item.id] = $0 }),
+                    values: Binding(get: { model.formAnswers(item.id) },
+                                    set: { model.setFormAnswers($0, for: item.id) }),
                     active: model.formIsActive(item.id), submit: { model.submitForm(item.id) })
                     .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)

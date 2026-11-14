@@ -21,6 +21,7 @@ struct ChatItem: Identifiable, Hashable {
     var responseID: String? = nil
     var attachments: [AttachmentRef] = []
     var conversationID: String? = nil
+    var submittedFormValues: [String: [String]]? = nil
 
     var storedRole: String {
         switch kind {
@@ -38,7 +39,7 @@ struct ChatItem: Identifiable, Hashable {
         if case .tool(let value) = kind { status = value } else { status = nil }
         return MessagePresentation(responseID: responseID, toolName: toolName, toolStatus: status,
             toolError: toolError, needsPermissionSettings: needsPermissionSettings,
-            workSeconds: workSeconds, completedAt: completedAt)
+            workSeconds: workSeconds, completedAt: completedAt, submittedFormValues: submittedFormValues)
     }
 
     var toolSource: DataSourceID? {
@@ -245,7 +246,7 @@ final class AgentModel {
             toolName: p?.toolName, toolError: p?.toolError, workSeconds: p?.workSeconds,
             completedAt: p?.completedAt ?? (p == nil && m.role == "assistant" ? m.createdAt : nil),
             responseID: p?.responseID ?? (m.role == "assistant" ? m.id : nil), attachments: m.attachments,
-            conversationID: m.conversationID)
+            conversationID: m.conversationID, submittedFormValues: p?.submittedFormValues)
     }
 
     private func pruneFormValues() {
@@ -278,10 +279,20 @@ final class AgentModel {
     // MARK: Submit (explicit only)
 
     func formIsActive(_ messageID: String) -> Bool {
-        guard let index = items.firstIndex(where: { $0.id == messageID && $0.kind == .assistant }),
-              let cid = items[index].conversationID,
-              store.message(messageID, conversationID: cid) != nil else { return false }
-        return (!isRunning || items[index].responseID == taskID) && !items.dropFirst(index + 1).contains(where: { $0.kind == .user || $0.kind == .assistant })
+        guard !isRunning,
+              let item = items.first(where: { $0.id == messageID && $0.kind == .assistant }),
+              item.submittedFormValues == nil, let cid = item.conversationID,
+              let stored = store.message(messageID, conversationID: cid) else { return false }
+        return stored.presentation?.submittedFormValues == nil
+    }
+
+    func formAnswers(_ messageID: String) -> [String: [String]] {
+        items.first(where: { $0.id == messageID })?.submittedFormValues ?? formValues[messageID] ?? [:]
+    }
+
+    func setFormAnswers(_ values: [String: [String]], for messageID: String) {
+        guard formIsActive(messageID) else { return }
+        formValues[messageID] = values
     }
 
     /// Use the stored schema, never a caller-supplied action. A form answer is ordinary user input,
@@ -289,14 +300,18 @@ final class AgentModel {
     @discardableResult func submitForm(_ messageID: String) -> Bool {
         guard !isRunning, formIsActive(messageID),
               let item = items.first(where: { $0.id == messageID }),
-              let form = ChatFormParser.form(in: item.text),
+              let cid = item.conversationID,
+              let stored = store.message(messageID, conversationID: cid),
+              let form = ChatFormParser.form(in: stored.text),
               form.accepts(formValues[messageID] ?? [:]) else { return false }
-        return sendInput(form.reply(formValues[messageID] ?? [:]), fromComposer: false)
+        let values = formValues[messageID] ?? [:]
+        return sendInput(form.reply(values), fromComposer: false, formSubmission: (messageID, cid, values))
     }
 
     func send() { _ = sendInput(draft, fromComposer: true) }
 
-    @discardableResult private func sendInput(_ submittedText: String, fromComposer: Bool) -> Bool {
+    @discardableResult private func sendInput(_ submittedText: String, fromComposer: Bool,
+        formSubmission: (messageID: String, conversationID: String, values: [String: [String]])? = nil) -> Bool {
         let input = submittedText.trimmingCharacters(in: .whitespacesAndNewlines)
         let submittedAttachments = fromComposer ? attachments : []
         guard (!input.isEmpty || !submittedAttachments.isEmpty), !isRunning, !app.isCleaningConversationHistory else { return false }
@@ -318,7 +333,17 @@ final class AgentModel {
             conversationID = created
         }
         do {
-            let message = try store.append(conversationID: cid, role: "user", text: text, attachments: submittedAttachments)
+            let message: StoredMessage
+            if let submission = formSubmission {
+                message = try store.appendFormReply(sourceID: submission.messageID,
+                    sourceConversationID: submission.conversationID, conversationID: cid,
+                    text: text, values: submission.values)
+                if let index = items.firstIndex(where: { $0.id == submission.messageID }) {
+                    items[index].submittedFormValues = submission.values
+                }
+            } else {
+                message = try store.append(conversationID: cid, role: "user", text: text, attachments: submittedAttachments)
+            }
             appendTrimmed(Self.item(message))
         } catch {
             appendTrimmed(ChatItem(id: UUID().uuidString, kind: .error, text: String(format: NSLocalizedString("保存消息失败：%@", comment: ""), error.localizedDescription)))

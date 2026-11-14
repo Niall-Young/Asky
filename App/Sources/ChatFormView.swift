@@ -43,12 +43,9 @@ struct ChatFormView: View {
             if !form.isComplete {
                 Text(NSLocalizedString("表单未生成完整，请在输入框回复。", comment: ""))
                     .font(.system(size: 12)).foregroundStyle(ThemeColor.kTextSubtle)
-            } else if active {
-                SettingsButton(NSLocalizedString("提交回复", comment: ""), action: submit)
-                    .disabled(!form.accepts(values))
             } else {
-                Text(NSLocalizedString("此表单已结束，可在输入框继续对话。", comment: ""))
-                    .font(.system(size: 12)).foregroundStyle(ThemeColor.kTextSubtle)
+                SettingsButton(NSLocalizedString("提交回复", comment: ""), action: submit)
+                    .disabled(!active || !form.accepts(values))
             }
         }
         .font(.system(size: 14))
