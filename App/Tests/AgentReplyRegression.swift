@@ -209,6 +209,49 @@ enum AgentReplyRegression {
         print("Math parsing, native layout, invalid-source fallback and light/dark window captures passed")
     }
 
+    static func latexFormPreview(app: AppModel) async throws {
+        let source = #"""
+        ```asky-form
+        {"title":"LaTeX 公式"}
+        {"id":"goal","type":"radio","label":"你想要什么","options":["查看常用公式示例","输入具体数学式子"],"required":true,"allowCustom":true}
+        {"id":"detail","type":"text","label":"具体式子（可选）"}
+        {"id":"display","type":"radio","label":"输出形式","options":["行内 $...$","独立公式块 $$...$$ 或 \[...\]","两者都给"],"allowCustom":true}
+        ```
+        """#
+        let store = ConversationStore(app.store)
+        let cid = try store.create(title: "LaTeX 表单回归")
+        try store.append(conversationID: cid, role: "user", text: "看看公式")
+        try store.append(conversationID: cid, role: "assistant", text: source)
+        let model = AgentModel(app: app)
+        model.open(cid)
+        let item = model.items.last!
+        precondition(item.text == source, "History must retain the original model output")
+        let form = ChatFormParser.form(in: item.text)!
+        precondition(form.isComplete && form.fields.count == 3 && model.formIsActive(item.id))
+        model.formValues[item.id] = ["goal": ["查看常用公式示例"], "display": ["两者都给"]]
+        precondition(form.accepts(model.formValues[item.id]!))
+        let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 540, height: 680),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.title = "Asky LaTeX Form Regression"
+        defer { window.orderOut(nil) }
+        for (name, scheme) in [("light", ColorScheme.light), ("dark", .dark)] {
+            window.appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
+            let view = NSHostingView(rootView: ChatReplyView(text: item.text,
+                values: Binding(get: { model.formValues[item.id] ?? [:] }, set: { model.formValues[item.id] = $0 }),
+                active: model.formIsActive(item.id)).padding(24)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .background(scheme == .dark ? Color(white: 0.15) : .white).environment(\.colorScheme, scheme))
+            window.contentView = view
+            window.makeKeyAndOrderFront(nil)
+            try await Task.sleep(for: .milliseconds(500))
+            view.layoutSubtreeIfNeeded()
+            let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds)!
+            view.cacheDisplay(in: view.bounds, to: bitmap)
+            try bitmap.representation(using: .png, properties: [:])!.write(to: URL(filePath: "build/latex-form-" + name + ".png"))
+        }
+        print("LaTeX form passed: invalid escape recovery, unchanged history, active form, valid answers and light/dark captures")
+    }
+
     static func formLifecycleRegression(app: AppModel) async throws {
         let store = ConversationStore(app.store)
         let model = AgentModel(app: app)
@@ -848,6 +891,10 @@ enum AgentReplyRegression {
         let root = FileManager.default.temporaryDirectory.appending(path: "Asky-reply-\(UUID())")
         defer { try? FileManager.default.removeItem(at: root) }
         let app = try AppModel(root: root)
+        if CommandLine.arguments.contains("--latex-form-preview") {
+            try await latexFormPreview(app: app)
+            return
+        }
         try await formLifecycleRegression(app: app)
         let model = AgentModel(app: app)
         if CommandLine.arguments.contains("--bottom-push") {

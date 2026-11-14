@@ -17,6 +17,42 @@ enum ChatFormParserRegression {
         let complete = ChatFormParser.form(in: source)!
         precondition(complete.fields.count == 4 && complete.isComplete)
         precondition(!complete.accepts([:]))
+        // Regression: one unescaped LaTeX delimiter in an option used to turn the
+        // entire otherwise valid form into a code block (including reopened history).
+        let latexSource = #"""
+        ```asky-form
+        {"title":"LaTeX 公式"}
+        {"id":"goal","type":"radio","label":"你想要什么","options":["查看示例","输入具体式子"],"required":true,"allowCustom":true}
+        {"id":"detail","type":"text","label":"具体式子（可选）"}
+        {"id":"display","type":"radio","label":"输出形式","options":["行内 $...$","独立公式块 $$...$$ 或 \[...\]","两者都给"],"allowCustom":true}
+        ```
+        """#
+        let latexForm = ChatFormParser.form(in: latexSource)!
+        precondition(latexForm.isComplete && latexForm.fields.count == 3)
+        precondition(latexForm.fields[2].options?[1] == #"独立公式块 $$...$$ 或 \[...\]"#)
+        let latexAnswer = ["goal": ["查看示例"], "display": [#"独立公式块 $$...$$ 或 \[...\]"#]]
+        precondition(latexForm.accepts(latexAnswer))
+        precondition(latexForm.reply(latexAnswer).contains(#"\[...\]"#))
+        var latexPrefix = ""
+        for character in latexSource {
+            latexPrefix.append(character)
+            for part in ChatFormParser.parse(latexPrefix, streaming: true) {
+                if case .markdown(let text) = part.content {
+                    precondition(!text.contains("\"id\""), "LaTeX escapes must not expose form JSON while streaming")
+                }
+            }
+        }
+        let escapedLabel = #"\(x\), \"quoted\", \\frac{a}{b}, \\n, \u4E2D"#
+        let mixedEscapes = latexSource.replacingOccurrences(of: "具体式子（可选）", with: escapedLabel)
+        precondition(ChatFormParser.form(in: mixedEscapes)?.fields[1].label == #"\(x\), "quoted", \frac{a}{b}, \n, 中"#,
+                     "Repair must preserve valid quotes, backslashes and Unicode escapes")
+        let validJSON = latexSource.replacingOccurrences(of: #"\[...\]"#, with: #"\\[...\\]"#)
+        precondition(ChatFormParser.form(in: validJSON) == latexForm, "Valid JSON must decode unchanged")
+        for invalid in [latexSource.replacingOccurrences(of: "\"radio\"", with: "\"unknown\""),
+                        latexSource.replacingOccurrences(of: "\"allowCustom\":true", with: "\"allowCustom\" true"),
+                        latexSource.replacingOccurrences(of: "具体式子（可选）", with: #"\uZZZZ"#)] {
+            precondition(ChatFormParser.form(in: invalid) == nil, "Invalid structure/schema must still fall back")
+        }
         let timeForm = ChatFormParser.form(in: "```asky-form\n{\"title\":\"时间\"}\n{\"id\":\"start\",\"type\":\"time\",\"label\":\"开始时间\",\"required\":true}\n```")!
         precondition(!timeForm.accepts([:]))
         for value in ["00:00", "09:05", "14:30", "23:59"] {

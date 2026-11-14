@@ -118,6 +118,31 @@ struct ChatReplyPart: Equatable, Identifiable {
 enum ChatFormParser {
     private struct Header: Decodable { let title: String }
 
+    /// Some model replies put LaTeX delimiters such as \[ inside JSON strings without
+    /// escaping the backslash. Repair only invalid string escapes; retain valid JSON
+    /// escapes and leave structural/schema errors to the ordinary Markdown fallback.
+    private static func decode<T: Decodable>(_ type: T.Type, from line: String) -> T? {
+        let decoder = JSONDecoder()
+        if let value = try? decoder.decode(type, from: Data(line.utf8)) { return value }
+        var repaired = ""
+        var inString = false
+        var characters = line.makeIterator()
+        while let character = characters.next() {
+            if inString && character == "\\" {
+                repaired.append(character)
+                if let escaped = characters.next() {
+                    if !"\"\\/bfnrtu".contains(escaped) { repaired.append("\\") }
+                    repaired.append(escaped)
+                }
+            } else {
+                if character == "\"" { inString.toggle() }
+                repaired.append(character)
+            }
+        }
+        guard repaired != line else { return nil }
+        return try? decoder.decode(type, from: Data(repaired.utf8))
+    }
+
     /// Fields are published only after their newline arrives; unfinished JSON never reaches Markdown.
     /// At most one form per reply. Other fenced code (including examples) stays ordinary Markdown.
     static func parse(_ text: String, streaming: Bool) -> [ChatReplyPart] {
@@ -134,14 +159,14 @@ enum ChatFormParser {
         func renderBlock(_ raw: [String], closed: Bool) {
             let body = raw.dropFirst().filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
             guard raw.joined(separator: "\n").utf8.count <= 32_768,
-                  let first = body.first, let header = try? JSONDecoder().decode(Header.self, from: Data(first.utf8)),
+                  let first = body.first, let header = decode(Header.self, from: first),
                   !header.title.isEmpty, header.title.count <= 120, body.count <= 17 else {
                 if closed || !streaming { append(.markdown(raw.joined(separator: "\n") + (closed ? "\n```" : ""))) }
                 return
             }
             var fields: [ChatForm.Field] = []
             for line in body.dropFirst() {
-                guard let field = try? JSONDecoder().decode(ChatForm.Field.self, from: Data(line.utf8)),
+                guard let field = decode(ChatForm.Field.self, from: line),
                       field.isValid, !fields.contains(where: { $0.id == field.id }) else {
                     append(.markdown(raw.joined(separator: "\n") + (closed ? "\n```" : "")))
                     return
