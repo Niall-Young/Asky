@@ -25,8 +25,7 @@ enum AgentAvatarColor: String, CaseIterable {
         }
     }
 
-    /// A hint of the pet hue sits over the neutral user-message surface.
-    func userBubbleTint(for scheme: ColorScheme) -> Color {
+    var tint: Color {
         let rgb: UInt32 = switch self {
         case .blue: 0x73BFFF
         case .yellow: 0xF1CB62
@@ -36,7 +35,12 @@ enum AgentAvatarColor: String, CaseIterable {
         }
         return Color(.sRGB, red: Double((rgb >> 16) & 0xFF) / 255,
                      green: Double((rgb >> 8) & 0xFF) / 255,
-                     blue: Double(rgb & 0xFF) / 255, opacity: scheme == .dark ? 0.12 : 0.08)
+                     blue: Double(rgb & 0xFF) / 255, opacity: 1)
+    }
+
+    /// A hint of the pet hue sits over the neutral user-message surface.
+    func userBubbleTint(for scheme: ColorScheme) -> Color {
+        tint.opacity(scheme == .dark ? 0.12 : 0.08)
     }
 }
 

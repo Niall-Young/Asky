@@ -828,7 +828,7 @@ private struct Composer: View {
                 Button { if model.isRunning { model.stop() } else { model.send() } } label: {
                     Image(mingCute: model.isRunning ? "stop.fill" : "arrow.up", size: 14).frame(width: 28, height: 28)
                 }
-                .buttonStyle(ComposerSubmitButtonStyle())
+                .buttonStyle(ComposerSubmitButtonStyle(color: model.avatarColor.tint))
                 .disabled(!model.isRunning && !model.canSend)
                 .accessibilityLabel(model.isRunning ? NSLocalizedString("停止生成", comment: "") : NSLocalizedString("发送消息", comment: ""))
             }
@@ -1006,13 +1006,14 @@ private struct ViewReader: NSViewRepresentable {
 }
 
 private struct ComposerSubmitButtonStyle: ButtonStyle {
+    var color: Color
     @Environment(\.isEnabled) private var isEnabled
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .foregroundStyle(ThemeColor("iconInverted"))
+            .foregroundStyle(Color.black.opacity(0.8))
             // Fade only the fill so the arrow keeps its contrast when disabled.
-            .background(ThemeColor.kBackgroundPrimary.opacity(isEnabled ? 1 : 0.3), in: .circle)
+            .background(color.opacity(isEnabled ? 1 : 0.3), in: .circle)
             .glassPointerFeedback(pressed: configuration.isPressed, in: Circle())
     }
 }
