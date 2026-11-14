@@ -114,11 +114,11 @@ private actor NativeAgentEngine {
             var schema = definition.inputSchema.objectValue ?? [:]
             if definition.effect == .write {
                 var properties = schema["properties"]?.objectValue ?? [:]
-                properties["userRequested"] = ["type": "boolean", "description": "仅当用户在本轮明确要求执行此操作时为 true；推断的操作为 false"]
+                properties["userRequested"] = ["type": "boolean", "description": "仅当用户明确要求执行此操作，或当前补充信息是在继续同一已明确授权且未撤回的任务时为 true；额外推断的操作、仅咨询或预填建议为 false"]
                 schema["properties"] = .object(properties)
             }
             return ["type": "function", "function": ["name": .string(definition.name), "description": .string(definition.summary), "parameters": .object(schema)]]
-        } + [["type": "function", "function": ["name": "ask_user", "description": "向用户提出澄清问题，结束本轮等待回答。", "parameters": ["type": "object", "properties": ["question": ["type": "string", "minLength": 1, "maxLength": 500]], "required": ["question"], "additionalProperties": false]]]]
+        } + [["type": "function", "function": ["name": "ask_user", "description": "仅在先查上下文和可用工具后，仍缺少会实质影响结果的关键信息时提问；不询问可合理默认的细节。结束本轮等待回答。", "parameters": ["type": "object", "properties": ["question": ["type": "string", "minLength": 1, "maxLength": 500]], "required": ["question"], "additionalProperties": false]]]]
     }
 
     func run(_ request: AgentRequest, legacy: String?, config: RuntimeLaunchConfig, catalogue: [ToolDefinition], guidance: [String], limit: Int) async {

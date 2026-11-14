@@ -102,6 +102,49 @@ enum ChatFormParserRegression {
             let invalidType = "```asky-form\n{\"title\":\"测试\"}\n{\"id\":\"answer\",\"type\":\"multi\",\"label\":\"选择\",\"options\":[\"选项\"],\"allowCustom\":true}\n```"
             precondition(ChatFormParser.form(in: invalidType) == nil)
         }
+        let prefilledSource = """
+        ```asky-form
+        {"title":"会议安排"}
+        {"id":"title","type":"text","label":"名称","required":true,"defaultValue":"项目周会"}
+        {"id":"format","type":"radio","label":"形式","options":["线上","线下"],"defaultValue":"线上"}
+        {"id":"length","type":"select","label":"时长","options":["30 分钟","60 分钟"],"defaultValue":"30 分钟"}
+        {"id":"topics","type":"multi","label":"议题","options":["设计","开发"],"defaultValue":["设计","开发"]}
+        {"id":"day","type":"date","label":"日期","defaultValue":"2026-11-15"}
+        {"id":"time","type":"time","label":"开始","defaultValue":"15:00"}
+        {"id":"duration","type":"duration","label":"倒计时","components":["minute","second"],"defaultValue":"05:30"}
+        {"id":"custom","type":"radio","label":"地点","options":["会议室"],"allowCustom":true,"defaultValue":"视频通话"}
+        ```
+        """
+        let prefilled = ChatFormParser.form(in: prefilledSource)!
+        let defaults = prefilled.prefilling([:])
+        precondition(defaults.count == 8 && prefilled.accepts(defaults))
+        precondition(defaults["topics"] == ["设计", "开发"] && defaults["custom"] == ["视频通话"])
+        precondition(prefilled.reply(defaults).contains("倒计时：5 分钟 30 秒钟"))
+        let cleared = prefilled.prefilling(["title": [""], "topics": [], "format": []])
+        precondition(cleared["title"] == [""] && cleared["topics"] == [] && cleared["format"] == [])
+        precondition(!prefilled.accepts(cleared), "Clearing a required default must disable submission")
+        let edited = prefilled.prefilling(["title": ["新的标题"], "time": ["16:00"]])
+        precondition(edited["title"] == ["新的标题"] && edited["time"] == ["16:00"])
+        precondition(prefilled.prefilling(edited) == edited, "Repeated rendering must preserve edits")
+        var unfinished = prefilled; unfinished.isComplete = false
+        precondition(unfinished.prefilling([:]).isEmpty && !unfinished.accepts(defaults))
+        // Bad defaults are discarded independently; the field remains available to correct.
+        for (type, value, extra) in [
+            ("text", "42", ""), ("text", "true", ""), ("text", "{}", ""),
+            ("text", "null", ""), ("text", "[\"wrong shape\"]", ""),
+            ("text", "\"" + String(repeating: "字", count: 4001) + "\"", ""),
+            ("radio", "\"不存在\"", ",\"options\":[\"线上\",\"线下\"]"),
+            ("multi", "[\"设计\",\"设计\"]", ",\"options\":[\"设计\",\"开发\"]"),
+            ("multi", "[\"不存在\"]", ",\"options\":[\"设计\",\"开发\"]"),
+            ("multi", "\"设计\"", ",\"options\":[\"设计\",\"开发\"]"),
+            ("date", "\"2026-02-30\"", ""), ("time", "\"24:00\"", ""),
+            ("duration", "\"05:60\"", ""), ("duration", "\"05:00\"", ",\"components\":[\"second\"]")
+        ] {
+            let schema = "```asky-form\n{\"title\":\"测试\"}\n{\"id\":\"field\",\"type\":\"\(type)\",\"label\":\"值\",\"defaultValue\":\(value)\(extra)}\n```"
+            let form = ChatFormParser.form(in: schema)!
+            precondition(form.prefilling([:]).isEmpty, schema)
+        }
+
         let values = ["title": ["评审"], "duration": ["30 分钟"], "topics": ["设计"], "day": ["2026-10-22"]]
         precondition(complete.accepts(values))
         precondition(complete.reply(values).contains("时长：30 分钟"))

@@ -15,6 +15,16 @@ struct ChatForm: Equatable {
 
     struct Field: Decodable, Equatable, Identifiable {
         enum Kind: String, Decodable { case text, select, radio, multi, date, time, duration }
+        enum DefaultValue: Decodable, Equatable {
+            case scalar(String), multiple([String]), invalid
+
+            init(from decoder: Decoder) throws {
+                let value = try decoder.singleValueContainer()
+                if let text = try? value.decode(String.self) { self = .scalar(text) }
+                else if let choices = try? value.decode([String].self) { self = .multiple(choices) }
+                else { self = .invalid }
+            }
+        }
         let id: String
         let type: Kind
         let label: String
@@ -22,6 +32,7 @@ struct ChatForm: Equatable {
         let options: [String]?
         let allowCustom: Bool?
         let components: [TimeUnit]?
+        let defaultValue: DefaultValue?
 
         var allowsCustomAnswer: Bool { allowCustom == true && (type == .radio || type == .select) }
 
@@ -54,6 +65,31 @@ struct ChatForm: Equatable {
             return zip(numbers, timeUnits).map { "\($0.0) \(NSLocalizedString($0.1.label, comment: ""))" }.joined(separator: " ")
         }
 
+        func accepts(_ answer: [String]) -> Bool {
+            if required == true && answer.allSatisfy({ $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) { return false }
+            switch type {
+            case .text: return answer.count <= 1 && answer.allSatisfy { $0.count <= 4000 }
+            case .select, .radio:
+                return answer.count <= 1 && answer.allSatisfy {
+                    (options ?? []).contains($0) || (allowsCustomAnswer && $0.count <= 4000 && !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            case .multi: return Set(answer).count == answer.count && answer.allSatisfy { (options ?? []).contains($0) }
+            case .date: return answer.count <= 1 && answer.allSatisfy { ChatForm.date($0) != nil }
+            case .time, .duration: return answer.count <= 1 && answer.allSatisfy { temporalValues($0) != nil }
+            }
+        }
+
+        /// Invalid optional defaults must not destroy an otherwise usable form.
+        var initialAnswer: [String]? {
+            let answer: [String]
+            switch defaultValue {
+            case .scalar(let text) where type != .multi: answer = [text]
+            case .multiple(let choices) where type == .multi: answer = choices
+            default: return nil
+            }
+            return accepts(answer) ? answer : nil
+        }
+
         var isValid: Bool {
             guard !id.isEmpty, id.count <= 64, !label.isEmpty, label.count <= 200 else { return false }
             if allowCustom == true && !allowsCustomAnswer { return false }
@@ -71,20 +107,19 @@ struct ChatForm: Equatable {
     var fields: [Field]
     var isComplete: Bool
 
+    /// Only absent answers inherit defaults. An explicitly cleared answer stays cleared.
+    func prefilling(_ values: [String: [String]]) -> [String: [String]] {
+        guard isComplete else { return values }
+        var result = values
+        for field in fields where result[field.id] == nil {
+            if let initial = field.initialAnswer { result[field.id] = initial }
+        }
+        return result
+    }
+
     func accepts(_ values: [String: [String]]) -> Bool {
         isComplete && !fields.isEmpty && fields.allSatisfy { field in
-            let answer = values[field.id] ?? []
-            if field.required == true && answer.allSatisfy({ $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) { return false }
-            switch field.type {
-            case .text: return answer.count <= 1 && answer.allSatisfy { $0.count <= 4000 }
-            case .select, .radio:
-                return answer.count <= 1 && answer.allSatisfy {
-                    field.options!.contains($0) || (field.allowsCustomAnswer && $0.count <= 4000 && !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
-            case .multi: return Set(answer).count == answer.count && answer.allSatisfy { field.options!.contains($0) }
-            case .date: return answer.count <= 1 && answer.allSatisfy { Self.date($0) != nil }
-            case .time, .duration: return answer.count <= 1 && answer.allSatisfy { field.temporalValues($0) != nil }
-            }
+            field.accepts(values[field.id] ?? [])
         }
     }
 

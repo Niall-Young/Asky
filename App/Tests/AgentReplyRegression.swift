@@ -252,6 +252,86 @@ enum AgentReplyRegression {
         print("LaTeX form passed: invalid escape recovery, unchanged history, active form, valid answers and light/dark captures")
     }
 
+    static func formPrefillRegression(app: AppModel) async throws {
+        let source = """
+        ```asky-form
+        {"title":"会议安排"}
+        {"id":"title","type":"text","label":"会议名称","required":true,"defaultValue":"项目周会"}
+        {"id":"format","type":"radio","label":"会议形式","options":["线上","线下"],"defaultValue":"线上"}
+        {"id":"length","type":"select","label":"会议时长","options":["30 分钟","60 分钟"],"defaultValue":"30 分钟"}
+        {"id":"topics","type":"multi","label":"议题","options":["设计","开发"],"defaultValue":["设计"]}
+        {"id":"day","type":"date","label":"会议日期","required":true,"defaultValue":"2026-11-15"}
+        {"id":"time","type":"time","label":"开始时间","required":true,"defaultValue":"15:00"}
+        {"id":"duration","type":"duration","label":"讨论时长","components":["minute"],"defaultValue":"30"}
+        {"id":"place","type":"radio","label":"地点","options":["会议室"],"allowCustom":true,"defaultValue":"视频通话"}
+        ```
+        """
+        let store = ConversationStore(app.store)
+        let cid = try store.create(title: "表单预填回归")
+        let message = try store.append(conversationID: cid, role: "assistant", text: source)
+        let model = AgentModel(app: app)
+        model.open(cid)
+        let defaults = model.formAnswers(message.id)
+        precondition(defaults.count == 8 && defaults["time"] == ["15:00"] && defaults["place"] == ["视频通话"])
+        precondition(model.formValues[message.id] == nil, "Defaults must be usable without touching a control")
+        precondition(store.message(message.id, conversationID: cid)?.presentation?.submittedFormValues == nil,
+                     "Prefilling must never count as submission")
+        let form = ChatFormParser.form(in: source)!
+        model.setFormAnswers(["title": [""], "topics": []], for: message.id)
+        precondition(model.formAnswers(message.id)["title"] == [""] && model.formAnswers(message.id)["topics"] == [])
+        precondition(!form.accepts(model.formAnswers(message.id)) && !model.submitForm(message.id))
+        model.setFormAnswers(["title": ["设计评审"], "topics": []], for: message.id)
+        precondition(model.formAnswers(message.id)["title"] == ["设计评审"])
+        model.open(cid)
+        precondition(model.formAnswers(message.id) == defaults, "Reopening an unsubmitted form restores its schema defaults")
+
+        let window = NSWindow(contentRect: NSRect(x: 100, y: 60, width: 540, height: 1000),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.title = "Asky Prefilled Form Regression"
+        defer { window.orderOut(nil) }
+        for (name, scheme) in [("light", ColorScheme.light), ("dark", .dark)] {
+            window.appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
+            let view = NSHostingView(rootView: ChatReplyView(text: source,
+                values: Binding(get: { model.formAnswers(message.id) }, set: { model.setFormAnswers($0, for: message.id) }),
+                active: model.formIsActive(message.id)).padding(24)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .background(scheme == .dark ? Color(white: 0.15) : .white).environment(\.colorScheme, scheme))
+            window.contentView = view
+            window.makeKeyAndOrderFront(nil)
+            try await Task.sleep(for: .milliseconds(350))
+            view.layoutSubtreeIfNeeded()
+            precondition(model.formAnswers(message.id) == defaults, "Date/time controls must retain model defaults")
+            func descendants(_ node: NSView) -> [NSView] { [node] + node.subviews.flatMap(descendants) }
+            let inputs = descendants(view).compactMap { $0 as? NSTextField }.filter { $0.isEditable }
+            precondition(inputs.contains { $0.stringValue == "项目周会" }, "Text default must reach the actual input")
+            precondition(inputs.contains { $0.stringValue == "视频通话" }, "Custom default must open its editable input")
+            let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds)!
+            view.cacheDisplay(in: view.bounds, to: bitmap)
+            try bitmap.representation(using: .png, properties: [:])!.write(to: URL(filePath: "build/form-prefill-" + name + ".png"))
+        }
+        app.preferences.automaticUpdates = false
+        await app.start()
+        precondition(app.agent != nil)
+        app.modelConfiguration = ModelConfiguration(baseURL: URL(string: "http://127.0.0.1:1/v1")!,
+            modelName: "prefill-regression", credentialRef: "Asky-prefill-unset-" + UUID().uuidString)
+        precondition(model.submitForm(message.id), "Untouched valid defaults must submit through the normal path")
+        precondition(model.items.last!.text == form.reply(defaults))
+        precondition(!model.submitForm(message.id), "Defaults must not enable duplicate submission")
+        for _ in 0..<100 where model.isRunning { try await Task.sleep(for: .milliseconds(20)) }
+        precondition(!model.isRunning && model.state == .failed, "The intentionally missing credential prevents a real model call")
+        let reopened = AgentModel(app: app)
+        reopened.open(cid)
+        precondition(reopened.formAnswers(message.id) == defaults && !reopened.formIsActive(message.id))
+        reopened.setFormAnswers(["title": ["覆盖"]], for: message.id)
+        precondition(reopened.formAnswers(message.id) == defaults, "Submitted defaults must remain immutable")
+        // A legacy submitted form with an omitted answer must not acquire a new schema default.
+        let legacy = try store.append(conversationID: cid, role: "assistant", text: source,
+            presentation: MessagePresentation(submittedFormValues: ["title": ["旧答案"]]))
+        reopened.open(cid)
+        precondition(reopened.formAnswers(legacy.id) == ["title": ["旧答案"]])
+        print("Form prefill passed: native light/dark controls, untouched submission, edits/clearing, reopen, immutable snapshots and no automatic action")
+    }
+
     static func formLifecycleRegression(app: AppModel) async throws {
         let store = ConversationStore(app.store)
         let model = AgentModel(app: app)
@@ -1157,6 +1237,10 @@ enum AgentReplyRegression {
         }
         if CommandLine.arguments.contains("--latex-form-preview") {
             try await latexFormPreview(app: app)
+            return
+        }
+        if CommandLine.arguments.contains("--prefill-preview") {
+            try await formPrefillRegression(app: app)
             return
         }
         try await formLifecycleRegression(app: app)

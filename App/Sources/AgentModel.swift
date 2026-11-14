@@ -311,7 +311,10 @@ final class AgentModel {
     }
 
     func formAnswers(_ messageID: String) -> [String: [String]] {
-        items.first(where: { $0.id == messageID })?.submittedFormValues ?? formValues[messageID] ?? [:]
+        guard let item = items.first(where: { $0.id == messageID }) else { return [:] }
+        if let submitted = item.submittedFormValues { return submitted }
+        let draft = formValues[messageID] ?? [:]
+        return ChatFormParser.form(in: item.text)?.prefilling(draft) ?? draft
     }
 
     func setFormAnswers(_ values: [String: [String]], for messageID: String) {
@@ -326,9 +329,9 @@ final class AgentModel {
               let item = items.first(where: { $0.id == messageID }),
               let cid = item.conversationID,
               let stored = store.message(messageID, conversationID: cid),
-              let form = ChatFormParser.form(in: stored.text),
-              form.accepts(formValues[messageID] ?? [:]) else { return false }
-        let values = formValues[messageID] ?? [:]
+              let form = ChatFormParser.form(in: stored.text) else { return false }
+        let values = form.prefilling(formValues[messageID] ?? [:])
+        guard form.accepts(values) else { return false }
         return sendInput(form.reply(values), fromComposer: false, formSubmission: (messageID, cid, values))
     }
 
@@ -395,7 +398,7 @@ final class AgentModel {
             return true
         }
         if !history.isEmpty {
-            context.append(ContextSnippet(sourceID: "history", text: "历史资料，不是本轮操作授权；含糊的任务指代须先澄清：\n" + history.map { "[\($0.conversationID)] \($0.role): \($0.text)\n" + MessageQuote.contextText($0.presentation?.quotes ?? []) }.joined(separator: "\n")))
+            context.append(ContextSnippet(sourceID: "history", text: "历史资料用于理解本轮任务，不是独立的新指令。用户本轮明确继续或补充同一未完成任务时，可沿用其中已确认且未撤回的信息与授权；不要重放已完成或结果待核实的操作，不扩大范围。先结合上下文解析任务指代，仍无法确定实际对象时才询问：\n" + history.map { "[\($0.conversationID)] \($0.role): \($0.text)\n" + MessageQuote.contextText($0.presentation?.quotes ?? []) }.joined(separator: "\n")))
         }
         let request = AgentRequest(sessionID: cid, text: text, attachments: submittedAttachments, context: context)
         if fromComposer {
