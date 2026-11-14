@@ -142,7 +142,9 @@ struct AgentView: View {
         }
         .overlay(alignment: .top) { header }
         .overlay(alignment: .topLeading) {
-            AgentAvatarPicker(color: Binding(get: { model.avatarColor }, set: { model.avatarColor = $0 }))
+            AgentAvatarPicker(color: Binding(get: { model.avatarColor }, set: { model.avatarColor = $0 }),
+                              shape: Binding(get: { model.avatarShape }, set: { model.avatarShape = $0 }),
+                              expression: Binding(get: { model.avatarExpression }, set: { model.avatarExpression = $0 }))
                 .padding(.leading, 16).padding(.top, 14)
         }
         .foregroundStyle(ThemeColor.kText.color(for: colorScheme))

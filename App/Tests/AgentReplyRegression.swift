@@ -1121,6 +1121,32 @@ enum AgentReplyRegression {
         let root = FileManager.default.temporaryDirectory.appending(path: "Asky-reply-\(UUID())")
         defer { try? FileManager.default.removeItem(at: root) }
         let app = try AppModel(root: root)
+        if CommandLine.arguments.contains("--avatar-preview") {
+            let legacy = try JSONDecoder().decode(SettingsPreferences.self, from: Data(#"{"agentAvatarColor":"yellow","showDockIcon":true}"#.utf8))
+            precondition(legacy.agentAvatarShape == "monster" && legacy.agentAvatarExpression == "smile")
+            precondition(legacy.agentAvatarColor == "yellow" && legacy.showDockIcon)
+            let model = AgentModel(app: app)
+            app.preferences.agentAvatarColor = "pink"
+            precondition(model.avatarColor == .pink)
+            app.preferences.agentAvatarColor = "green"
+            precondition(model.avatarColor == .green)
+            model.avatarShape = .ghost
+            model.avatarExpression = .sunglasses
+            model.avatarColor = .yellow
+            let saved = app.store.codableSetting(SettingsPreferences.key, as: SettingsPreferences.self)!
+            precondition(saved.agentAvatarShape == "ghost" && saved.agentAvatarExpression == "sunglasses" && saved.agentAvatarColor == "yellow")
+            let reopened = try AppModel(root: root)
+            let restored = AgentModel(app: reopened)
+            precondition(restored.avatarShape == .ghost && restored.avatarExpression == .sunglasses && restored.avatarColor == .yellow)
+            model.avatarShape = .monster
+            model.avatarExpression = .smile
+            model.avatarColor = .blue
+            print("Avatar preferences passed: old settings, legacy colors, independent choices and disk reload")
+            let controller = AgentWindowController(model: model, presentation: WindowPresentation())
+            controller.show()
+            runPreview(controller, application: application)
+            return
+        }
         if CommandLine.arguments.contains("--selection-preview") {
             try await selectionPreview(app: app)
             return

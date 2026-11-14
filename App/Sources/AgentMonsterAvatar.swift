@@ -44,25 +44,152 @@ enum AgentAvatarColor: String, CaseIterable {
     }
 }
 
+enum AgentAvatarShape: String, CaseIterable {
+    case monster, round, square, triangle, ghost
+
+    var title: String {
+        switch self {
+        case .monster: "小怪物"
+        case .round: "正圆"
+        case .square: "方形"
+        case .triangle: "软糖"
+        case .ghost: "幽灵"
+        }
+    }
+
+    var bodyAsset: String {
+        switch self {
+        case .monster: "AgentAvatarBody"
+        case .round: "AgentAvatarRound"
+        case .square: "AgentAvatarSquare"
+        case .triangle: "AgentAvatarTriangle"
+        case .ghost: "AgentAvatarGhost"
+        }
+    }
+
+    /// Match visible body sizes, accounting for each sprite's transparent margins.
+    var bodyScale: CGFloat {
+        switch self {
+        case .monster: 1
+        case .round: 1.06
+        case .square: 1.12
+        case .triangle: 0.94
+        case .ghost: 1.06
+        }
+    }
+
+}
+
+enum AgentAvatarExpression: String, CaseIterable {
+    case smile, sunglasses, wink, sleepy
+
+    var title: String {
+        switch self {
+        case .smile: "微笑"
+        case .sunglasses: "墨镜"
+        case .wink: "眨眼"
+        case .sleepy: "困困"
+        }
+    }
+}
+
+/// Every silhouette shares the original soft material; expressions remain a separate overlay.
 struct AgentMonsterAvatar: View {
     var color: AgentAvatarColor = .blue
+    var shape: AgentAvatarShape = .monster
+    var expression: AgentAvatarExpression = .smile
 
     var body: some View {
-        Image("AgentAvatar")
-            .resizable()
-            .scaledToFit()
-            .hueRotation(.degrees(color.hue))
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
+        Group {
+            if shape == .monster {
+                if expression == .smile {
+                    Image("AgentAvatar").resizable().scaledToFit()
+                        .hueRotation(.degrees(color.hue))
+                } else {
+                    Image("AgentAvatarBody").resizable().scaledToFit()
+                        .mask { Image("AgentAvatar").resizable().scaledToFit() }
+                        .hueRotation(.degrees(color.hue))
+                        .overlay { AvatarFace(expression: expression, mouthY: 58) }
+                }
+            } else {
+                Image(shape.bodyAsset).resizable().scaledToFit()
+                    .scaleEffect(shape.bodyScale)
+                    .hueRotation(.degrees(color.hue))
+                    .overlay { AvatarFace(expression: expression, mouthY: 58) }
+
+            }
+        }
+        .aspectRatio(1, contentMode: .fit)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
+private struct AvatarFace: View {
+    let expression: AgentAvatarExpression
+    var mouthY: CGFloat = 64
+
+    var body: some View {
+        Canvas { context, size in
+            context.scaleBy(x: size.width / 100, y: size.height / 100)
+            let ink = Color(red: 0.08, green: 0.16, blue: 0.29)
+            func stroke(_ points: [CGPoint], width: CGFloat = 3.4) {
+                var path = Path()
+                path.addLines(points)
+                context.stroke(path, with: .color(ink), style: StrokeStyle(lineWidth: width, lineCap: .round, lineJoin: .round))
+            }
+            func eye(_ x: CGFloat) {
+                context.fill(Path(ellipseIn: CGRect(x: x - 4, y: 44, width: 8, height: 12)),
+                             with: .linearGradient(Gradient(colors: [Color(red: 0.15, green: 0.24, blue: 0.39), ink]),
+                                                   startPoint: CGPoint(x: x - 4, y: 44), endPoint: CGPoint(x: x + 4, y: 56)))
+            }
+            switch expression {
+            case .smile:
+                eye(35); eye(65)
+            case .wink:
+                eye(35)
+                stroke([CGPoint(x: 60, y: 47), CGPoint(x: 67, y: 51), CGPoint(x: 60, y: 54)])
+            case .sleepy:
+                for x: CGFloat in [35, 65] {
+                    var lid = Path()
+                    lid.move(to: CGPoint(x: x - 6, y: 48))
+                    lid.addQuadCurve(to: CGPoint(x: x + 6, y: 48), control: CGPoint(x: x, y: 55))
+                    context.stroke(lid, with: .color(ink), style: StrokeStyle(lineWidth: 3.4, lineCap: .round))
+                }
+            case .sunglasses:
+                for x: CGFloat in [22, 54] {
+                    context.fill(Path(roundedRect: CGRect(x: x, y: 40, width: 24, height: 20), cornerRadius: 7), with: .color(ink))
+                    var shine = Path()
+                    shine.move(to: CGPoint(x: x + 6, y: 44))
+                    shine.addLine(to: CGPoint(x: x + 15, y: 44))
+                    context.stroke(shine, with: .color(.white.opacity(0.45)), style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                }
+                stroke([CGPoint(x: 18, y: 42), CGPoint(x: 24, y: 44)])
+                stroke([CGPoint(x: 46, y: 46), CGPoint(x: 54, y: 46)])
+                stroke([CGPoint(x: 76, y: 44), CGPoint(x: 82, y: 42)])
+            }
+            if expression == .sleepy {
+                context.fill(Path(ellipseIn: CGRect(x: 47, y: mouthY, width: 6, height: 8)), with: .color(ink))
+            } else {
+                var smile = Path()
+                smile.move(to: CGPoint(x: 41, y: mouthY))
+                smile.addQuadCurve(to: CGPoint(x: 59, y: mouthY), control: CGPoint(x: 50, y: mouthY + 10))
+                context.stroke(smile, with: .color(ink), style: StrokeStyle(lineWidth: 3.4, lineCap: .round))
+            }
+        }
     }
 }
 
 /// The avatar and menu share one native glass container and identity.
 struct AgentAvatarPicker: View {
     @Binding var color: AgentAvatarColor
+    @Binding var shape: AgentAvatarShape
+    @Binding var expression: AgentAvatarExpression
     @State private var showing = false
     @State private var pressed = false
-    @State private var focused = AgentAvatarColor.blue
+    @State private var focusedRow = 0
+    @State private var focusedIndex = 0
+    @State private var keyboardFocus = false
     @State private var monitor: Any?
     @State private var globalMonitor: Any?
     @State private var menuAnchor = AvatarMenuAnchor()
@@ -78,7 +205,7 @@ struct AgentAvatarPicker: View {
                     // Keep the same glass surface alive as its frame contracts.
                     RoundedRectangle(cornerRadius: 18)
                         .fill(.clear)
-                        .frame(width: showing ? 184 : 36, height: showing ? 252 : 36)
+                        .frame(width: showing ? 260 : 36, height: showing ? 340 : 36)
                         .glassEffect(showing ? .regular.interactive() : .clear,
                                      in: RoundedRectangle(cornerRadius: 18))
                         .opacity(showing ? 1 : 0.85)
@@ -101,7 +228,7 @@ struct AgentAvatarPicker: View {
                 }
             }
         }
-        .frame(width: showing ? 184 : 36, height: showing ? 252 : 36, alignment: .topLeading)
+        .frame(width: showing ? 260 : 36, height: showing ? 340 : 36, alignment: .topLeading)
         .animation(reduceMotion ? nil : .spring(response: 0.28, dampingFraction: 0.58), value: showing)
         .onChange(of: showing) { _, value in value ? startMonitoring() : stopMonitoring() }
         .onDisappear { showing = false; stopMonitoring() }
@@ -109,24 +236,28 @@ struct AgentAvatarPicker: View {
 
     private var trigger: some View {
         Button {
-            focused = color
+            focusedRow = 0
+            focusedIndex = AgentAvatarShape.allCases.firstIndex(of: shape) ?? 0
+            keyboardFocus = false
             showing = true
         } label: {
-            AgentMonsterAvatar(color: color)
+            AgentMonsterAvatar(color: color, shape: shape, expression: expression)
                 .frame(width: 30, height: 30)
                 .frame(width: 36, height: 36)
                 .contentShape(Circle())
         }
         .buttonStyle(GlassPressObserverStyle(pressed: $pressed))
         .focusable(false)
-        .accessibilityLabel(NSLocalizedString("头像颜色", comment: ""))
-        .accessibilityValue(NSLocalizedString(color.title, comment: ""))
+        .accessibilityLabel(NSLocalizedString("自定义头像", comment: ""))
+        .accessibilityValue([shape.title, expression.title, color.title].map { NSLocalizedString($0, comment: "") }.joined(separator: "，"))
     }
 
     private var menu: some View {
-        AvatarColorMenu(selected: color, focused: focused) { selected in
-            color = selected
-            showing = false
+        AvatarCustomizationMenu(color: $color, shape: $shape, expression: $expression,
+                                focusedRow: focusedRow, focusedIndex: focusedIndex, keyboardFocus: keyboardFocus) { row, index in
+            focusedRow = row
+            focusedIndex = index
+            keyboardFocus = false
         }
         .background(AvatarMenuReader(anchor: menuAnchor).allowsHitTesting(false))
     }
@@ -136,15 +267,36 @@ struct AgentAvatarPicker: View {
         monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .keyDown]) { event in
             let consumed = MainActor.assumeIsolated {
                 if event.type == .keyDown {
+                    guard let view = menuAnchor.view, event.window === view.window else {
+                        showing = false
+                        return false
+                    }
+                    if event.modifierFlags.contains(.command) {
+                        showing = false
+                        return false
+                    }
                     switch event.keyCode {
                     case 53: showing = false; return true
-                    case 125, 126:
-                        let colors = AgentAvatarColor.allCases
-                        let index = colors.firstIndex(of: focused) ?? 0
-                        focused = colors[(index + (event.keyCode == 125 ? 1 : colors.count - 1)) % colors.count]
+                    case 125, 126, 48:
+                        let backwards = event.keyCode == 126 || (event.keyCode == 48 && event.modifierFlags.contains(.shift))
+                        focusedRow = (focusedRow + (backwards ? 2 : 1)) % 3
+                        focusedIndex = selectedIndex(in: focusedRow)
+                        keyboardFocus = true
                         return true
-                    case 36, 76: color = focused; showing = false; return true
-                    default: showing = false; return false
+                    case 123, 124:
+                        let count = focusedRow == 0 ? AgentAvatarShape.allCases.count
+                            : focusedRow == 1 ? AgentAvatarExpression.allCases.count : AgentAvatarColor.allCases.count
+                        focusedIndex = (focusedIndex + (event.keyCode == 124 ? 1 : count - 1)) % count
+                        keyboardFocus = true
+                        return true
+                    case 36, 76, 49:
+                        switch focusedRow {
+                        case 0: shape = AgentAvatarShape.allCases[focusedIndex]
+                        case 1: expression = AgentAvatarExpression.allCases[focusedIndex]
+                        default: color = AgentAvatarColor.allCases[focusedIndex]
+                        }
+                        return true
+                    default: return true
                     }
                 }
                 if let view = menuAnchor.view, event.window === view.window,
@@ -156,6 +308,14 @@ struct AgentAvatarPicker: View {
         }
         globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { _ in
             Task { @MainActor in showing = false }
+        }
+    }
+
+    private func selectedIndex(in row: Int) -> Int {
+        switch row {
+        case 0: AgentAvatarShape.allCases.firstIndex(of: shape) ?? 0
+        case 1: AgentAvatarExpression.allCases.firstIndex(of: expression) ?? 0
+        default: AgentAvatarColor.allCases.firstIndex(of: color) ?? 0
         }
     }
 
@@ -181,52 +341,93 @@ private struct AvatarMenuReader: NSViewRepresentable {
     func updateNSView(_ view: NSView, context: Context) { anchor.view = view }
 }
 
-private struct AvatarColorMenu: View {
-    let selected: AgentAvatarColor
-    let focused: AgentAvatarColor
-    let choose: (AgentAvatarColor) -> Void
-    @State private var hovered: AgentAvatarColor?
-
-    var body: some View {
-        VStack(spacing: 2) {
-            ForEach(AgentAvatarColor.allCases, id: \.self) { color in
-                AvatarColorRow(color: color, selected: color == selected, focused: color == (hovered ?? focused)) { choose(color) }
-                    .onHover { inside in hovered = inside ? color : nil }
-            }
-        }
-        .padding(8)
-        .frame(width: 184, height: 252)
-    }
-}
-
-private struct AvatarColorRow: View {
-    let color: AgentAvatarColor
-    let selected: Bool
-    let focused: Bool
-    let action: () -> Void
+private struct AvatarCustomizationMenu: View {
+    @Binding var color: AgentAvatarColor
+    @Binding var shape: AgentAvatarShape
+    @Binding var expression: AgentAvatarExpression
+    let focusedRow: Int
+    let focusedIndex: Int
+    let keyboardFocus: Bool
+    let didChoose: (Int, Int) -> Void
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
-                AgentMonsterAvatar(color: color).frame(width: 34, height: 34)
-                Text(NSLocalizedString(color.title, comment: "")).font(.system(size: 13, weight: .medium))
-                Spacer(minLength: 0)
-                if selected { Image(systemName: "checkmark").font(.system(size: 12, weight: .semibold)) }
-            }
-            .foregroundStyle(ThemeColor.kText.color(for: scheme))
-            .padding(.horizontal, 10)
-            .frame(height: 44)
-            .background {
-                if focused {
-                    RoundedRectangle(cornerRadius: 11).fill(ThemeColor.kInteractionHover.color(for: scheme))
+        VStack(spacing: 14) {
+            AgentMonsterAvatar(color: color, shape: shape, expression: expression)
+                .frame(width: 80, height: 80)
+                .frame(maxWidth: .infinity)
+                .padding(.top, 2)
+            section("造型") {
+                ForEach(Array(AgentAvatarShape.allCases.enumerated()), id: \.element) { index, item in
+                    option(title: item.title, selected: shape == item, row: 0, index: index) {
+                        shape = item
+                    } content: {
+                        AgentMonsterAvatar(color: color, shape: item, expression: expression).frame(width: 36, height: 36)
+                    }
                 }
             }
-            .contentShape(RoundedRectangle(cornerRadius: 11))
+            section("表情") {
+                ForEach(Array(AgentAvatarExpression.allCases.enumerated()), id: \.element) { index, item in
+                    option(title: item.title, selected: expression == item, row: 1, index: index) {
+                        expression = item
+                    } content: {
+                        AgentMonsterAvatar(color: color, shape: shape, expression: item)
+                            .frame(width: 36, height: 36)
+                    }
+                }
+            }
+            section("颜色") {
+                ForEach(Array(AgentAvatarColor.allCases.enumerated()), id: \.element) { index, item in
+                    option(title: item.title, selected: color == item, row: 2, index: index) {
+                        color = item
+                    } content: {
+                        Circle().fill(item.tint).frame(width: 24, height: 24)
+                            .overlay {
+                                if color == item {
+                                    Image(mingCute: "checkmark", size: 13).foregroundStyle(Color(white: 0.15))
+                                }
+                            }
+                    }
+                }
+            }
+        }
+        .padding(16)
+        .frame(width: 260, height: 340, alignment: .top)
+    }
+
+    private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(NSLocalizedString(title, comment: ""))
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(ThemeColor.kTextSubtle.color(for: scheme))
+            HStack(spacing: 6, content: content)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func option<Content: View>(title: String, selected: Bool, row: Int, index: Int,
+                                       action: @escaping () -> Void, @ViewBuilder content: () -> Content) -> some View {
+        Button {
+            action()
+            didChoose(row, index)
+        } label: {
+            content()
+                .frame(maxWidth: .infinity)
+                .frame(height: 42)
+                .background(RoundedRectangle(cornerRadius: 11).fill(selected ? ThemeColor.kInteractionHover.color(for: scheme) : .clear))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 11)
+                        .strokeBorder(ThemeColor.kText.color(for: scheme).opacity(selected ? 0.65 : 0), lineWidth: 1.5)
+                    if keyboardFocus && focusedRow == row && focusedIndex == index {
+                        RoundedRectangle(cornerRadius: 13).strokeBorder(color.tint, lineWidth: 2).padding(-3)
+                    }
+                }
+                .contentShape(RoundedRectangle(cornerRadius: 11))
         }
         .buttonStyle(.plain)
         .focusable(false)
-        .accessibilityLabel(NSLocalizedString(color.title, comment: ""))
+        .help(NSLocalizedString(title, comment: ""))
+        .accessibilityLabel(NSLocalizedString(title, comment: ""))
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }

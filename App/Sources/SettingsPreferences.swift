@@ -8,6 +8,8 @@ enum FolderBackspaceBehavior: String, Codable, Sendable { case parent, exitNavig
 struct SettingsPreferences: Codable, Equatable, Sendable {
     var folderBackspaceBehavior: FolderBackspaceBehavior = .parent
     var agentAvatarColor = "blue"
+    var agentAvatarShape = "monster"
+    var agentAvatarExpression = "smile"
     var appearance = "system"
     var showMenuBarIcon = true
     var showDockIcon = false
@@ -47,6 +49,8 @@ struct SettingsPreferences: Codable, Equatable, Sendable {
         let d = SettingsPreferences()
         folderBackspaceBehavior = try c.decodeIfPresent(FolderBackspaceBehavior.self, forKey: .folderBackspaceBehavior) ?? d.folderBackspaceBehavior
         agentAvatarColor = try c.decodeIfPresent(String.self, forKey: .agentAvatarColor) ?? d.agentAvatarColor
+        agentAvatarShape = try c.decodeIfPresent(String.self, forKey: .agentAvatarShape) ?? d.agentAvatarShape
+        agentAvatarExpression = try c.decodeIfPresent(String.self, forKey: .agentAvatarExpression) ?? d.agentAvatarExpression
         appearance = try c.decodeIfPresent(String.self, forKey: .appearance) ?? d.appearance
         showMenuBarIcon = try c.decodeIfPresent(Bool.self, forKey: .showMenuBarIcon) ?? d.showMenuBarIcon
         showDockIcon = try c.decodeIfPresent(Bool.self, forKey: .showDockIcon) ?? d.showDockIcon

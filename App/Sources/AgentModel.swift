@@ -83,6 +83,16 @@ final class AgentModel {
         set { app.preferences.agentAvatarColor = newValue.rawValue }
     }
 
+    var avatarShape: AgentAvatarShape {
+        get { AgentAvatarShape(rawValue: app.preferences.agentAvatarShape) ?? .monster }
+        set { app.preferences.agentAvatarShape = newValue.rawValue }
+    }
+
+    var avatarExpression: AgentAvatarExpression {
+        get { AgentAvatarExpression(rawValue: app.preferences.agentAvatarExpression) ?? .smile }
+        set { app.preferences.agentAvatarExpression = newValue.rawValue }
+    }
+
     var pluginManager: PluginManager { app.tools.plugins }
 
     /// Global setting shared by every conversation; ToolService reads it on each call.
