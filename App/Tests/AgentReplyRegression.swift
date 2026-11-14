@@ -1027,11 +1027,49 @@ enum AgentReplyRegression {
                 precondition(actual == NSColor(color.tint).withAlphaComponent(0.45), "Selection must follow the current Agent color")
                 text.showSelectionMenu()
                 try await Task.sleep(for: .milliseconds(150))
+                let cancelledMenu = window.childWindows!.first { $0 is SurfacePanel && $0.isVisible }!
+                // Clicking unused transcript space must clear the actual NSTextView range.
+                for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                    let event = NSEvent.mouseEvent(with: type, location: NSPoint(x: window.frame.width - 24, y: window.frame.height / 2),
+                        modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                        context: nil, eventNumber: 1, clickCount: 1, pressure: type == .leftMouseDown ? 1 : 0)!
+                    NSApplication.shared.sendEvent(event)
+                }
+                precondition(text.selectedRange().length == 0 && !cancelledMenu.isVisible,
+                             "Blank clicks must clear both selection and menu")
+                text.setSelectedRange(NSRange(location: 0, length: (text.string as NSString).length))
+                text.showSelectionMenu()
+                let escape = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
+                    timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
+                    characters: "\u{1b}", charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 53)!
+                NSApplication.shared.sendEvent(escape)
+                precondition(text.selectedRange().length == 0 && window.isVisible, "Escape cancels selection without closing chat")
+                text.setSelectedRange(NSRange(location: 0, length: (text.string as NSString).length))
+                text.showSelectionMenu()
+                try await Task.sleep(for: .milliseconds(150))
                 let menu = window.childWindows!.first { $0 is SurfacePanel && $0.isVisible }!
                 precondition(!menu.hasShadow, "Selection actions must not add the heavy window shadow")
                 precondition(menu.frame.height < 60 && menu.frame.width < 320, "Selection menu is one compact horizontal row")
                 precondition(window.screen!.visibleFrame.contains(menu.frame))
-                if color == .purple { try capture(name, window: window); try capture(name + "-menu", window: menu) }
+                if color == .purple {
+                    try capture(name, window: window); try capture(name + "-menu", window: menu)
+                    let down = NSEvent.mouseEvent(with: .leftMouseDown,
+                        location: NSPoint(x: menu.frame.width * 0.25, y: menu.frame.height / 2), modifierFlags: [],
+                        timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: menu.windowNumber,
+                        context: nil, eventNumber: 1, clickCount: 1, pressure: 1)!
+                    NSApplication.shared.sendEvent(down)
+                    try await Task.sleep(for: .milliseconds(140))
+                    try capture(name + "-left-light", window: menu)
+                    // Drag out to cancel Copy without modifying the user's clipboard.
+                    for type in [NSEvent.EventType.leftMouseDragged, .leftMouseUp] {
+                        let event = NSEvent.mouseEvent(with: type, location: NSPoint(x: -30, y: -30), modifierFlags: [],
+                            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: menu.windowNumber,
+                            context: nil, eventNumber: 1, clickCount: 1, pressure: type == .leftMouseDragged ? 1 : 0)!
+                        NSApplication.shared.sendEvent(event)
+                    }
+                    try await Task.sleep(for: .milliseconds(250))
+                    precondition(menu.isVisible && text.selectedRange().length > 0, "Dragging out cancels the action and preserves the selection")
+                }
                 try await click(menu, point: NSPoint(x: menu.frame.width * 0.72, y: menu.frame.height / 2))
                 try await Task.sleep(for: .milliseconds(250))
                 precondition(model.quotes.count == 1, "Add to Chat must add once and deduplicate repeated selections")

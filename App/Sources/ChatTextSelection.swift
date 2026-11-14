@@ -43,19 +43,20 @@ class ChatSelectableTextView: NSTextView {
     override func copy(_ sender: Any?) { _ = MessageClipboard.copy(selectedContent) }
 
     override func mouseDown(with event: NSEvent) {
-        selectionMenu?.close()
+        selectionMenu?.close(clearSelection: false)
         super.mouseDown(with: event)
         showSelectionMenu()
     }
 
     override func keyDown(with event: NSEvent) {
-        selectionMenu?.close()
+        selectionMenu?.close(clearSelection: event.keyCode == 53)
+        if event.keyCode == 53 { return }
         super.keyDown(with: event)
         if event.keyCode != 53 { showSelectionMenu() }
     }
 
     func showSelectionMenu() {
-        selectionMenu?.close()
+        selectionMenu?.close(clearSelection: false)
         guard quoteAction != nil, !selectedContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         let menu = ChatSelectionMenu(textView: self)
         selectionMenu = menu
@@ -80,6 +81,7 @@ final class ChatSelectionMenu {
     private var dismissalTask: Task<Void, Never>?
     private var activated = false
     private var reduceMotion = false
+    private var pressLeading = false
 
     init(textView: ChatSelectableTextView) { self.textView = textView }
 
@@ -104,8 +106,8 @@ final class ChatSelectionMenu {
             guard let self, !self.activated else { return }
             action?(selection)
             self.dismissAfterFeedback()
-        }, pressChanged: { [weak self] pressed, reduceMotion in
-            self?.setPressed(pressed, reduceMotion: reduceMotion)
+        }, pressChanged: { [weak self] pressed, reduceMotion, leading in
+            self?.setPressed(pressed, reduceMotion: reduceMotion, leading: leading)
         })
         let size = SurfacePanel.fittingSize(of: content, maxWidth: 320)
         let host = FirstMouseHostingView(rootView: content)
@@ -126,7 +128,9 @@ final class ChatSelectionMenu {
         pressSpring.onStep = { [weak self] progress in
             guard let self, let frame = self.restingFrame else { return }
             let growth = min(0.06, 3 / max(frame.width, frame.height, 1)) * progress
-            let expanded = frame.insetBy(dx: -frame.width * growth / 2, dy: -frame.height * growth / 2)
+            let expanded = NSRect(x: frame.minX - (self.pressLeading ? frame.width * growth : 0),
+                y: frame.minY - frame.height * growth / 2,
+                width: frame.width * (1 + growth), height: frame.height * (1 + growth))
             self.panel.setFrame(expanded, display: true)
         }
         parent.addChildWindow(panel, ordered: .above)
@@ -134,7 +138,16 @@ final class ChatSelectionMenu {
         panel.orderFront(nil)
         monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .scrollWheel, .keyDown]) { [weak self] event in
             guard let self else { return event }
-            if event.window !== self.panel { self.close() }
+            if event.type == .keyDown {
+                if event.keyCode == 53 { self.close(); return nil }
+                // Let the text responder process shortcuts/Shift-arrows before changing its range.
+                return event
+            }
+            if event.window !== self.panel {
+                let insideText = event.type != .scrollWheel && event.window === self.textView?.window
+                    && self.textView.map { $0.bounds.contains($0.convert(event.locationInWindow, from: nil)) } == true
+                self.close(clearSelection: !insideText)
+            }
             return event
         }
         resignObserver = NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification,
@@ -143,7 +156,8 @@ final class ChatSelectionMenu {
             }
     }
 
-    private func setPressed(_ pressed: Bool, reduceMotion: Bool) {
+    private func setPressed(_ pressed: Bool, reduceMotion: Bool, leading: Bool) {
+        if pressed { pressLeading = leading }
         self.reduceMotion = reduceMotion
         guard panel.isVisible else { return }
         if reduceMotion { pressSpring.set(0) }
@@ -161,7 +175,12 @@ final class ChatSelectionMenu {
         }
     }
 
-    func close() {
+    func close(clearSelection: Bool = true) {
+        if clearSelection, let textView {
+            let location = min(textView.selectedRange().location, (textView.string as NSString).length)
+            textView.setSelectedRange(NSRange(location: location, length: 0))
+            textView.needsDisplay = true
+        }
         dismissalTask?.cancel()
         dismissalTask = nil
         pressSpring.stop()
@@ -175,9 +194,16 @@ final class ChatSelectionMenu {
 private struct ChatSelectionActions: View {
     let copy: () -> Void
     let quote: () -> Void
-    let pressChanged: (Bool, Bool) -> Void
-    @State private var pressed = false
+    let pressChanged: (Bool, Bool, Bool) -> Void
+    @State private var copyPressed = false
+    @State private var quotePressed = false
+    @State private var copyHovered = false
+    @State private var quoteHovered = false
+    private var pressed: Bool { copyPressed || quotePressed }
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var leadingLight: Double { copyPressed ? 1 : pressed ? 0 : copyHovered ? 0.25 : 0 }
+    private var trailingLight: Double { quotePressed ? 1 : pressed ? 0 : quoteHovered ? 0.25 : 0 }
 
     var body: some View {
         HStack(spacing: 2) {
@@ -185,18 +211,48 @@ private struct ChatSelectionActions: View {
                 Label { Text("复制") } icon: { Image("ChatCopy").resizable().frame(width: 14, height: 14) }
                     .padding(.horizontal, 10).frame(height: 30).contentShape(.rect)
             }
+            .buttonStyle(ChatSelectionActionStyle(pressed: $copyPressed, hovered: $copyHovered))
             Button(action: quote) {
                 Label { Text("添加到对话") } icon: { Image(mingCute: "bubble.left", size: 14) }
                     .padding(.horizontal, 10).frame(height: 30).contentShape(.rect)
             }
+            .buttonStyle(ChatSelectionActionStyle(pressed: $quotePressed, hovered: $quoteHovered))
         }
         .font(.system(size: 13)).foregroundStyle(ThemeColor.kText)
-        .buttonStyle(GlassPressObserverStyle(pressed: $pressed))
         .padding(4)
         .windowSurfaceBackground(in: RoundedRectangle(cornerRadius: 16))
-        .glassPointerFeedback(pressed: pressed, in: RoundedRectangle(cornerRadius: 16))
-        .onAppear { pressChanged(false, reduceMotion) }
-        .onChange(of: pressed) { _, value in pressChanged(value, reduceMotion) }
-        .onChange(of: reduceMotion) { _, value in pressChanged(pressed, value) }
+        .background {
+            // A broad light wash across one continuous surface, matching the supplied recording.
+            // It fades through the middle instead of ending at either button's bounds.
+            RoundedRectangle(cornerRadius: 16)
+                .fill(LinearGradient(stops: [
+                    .init(color: .white.opacity(leadingLight * 0.16), location: 0),
+                    .init(color: .white.opacity(leadingLight * 0.07 + trailingLight * 0.01), location: 0.4),
+                    .init(color: .white.opacity(trailingLight * 0.07 + leadingLight * 0.01), location: 0.6),
+                    .init(color: .white.opacity(trailingLight * 0.16), location: 1)
+                ], startPoint: .leading, endPoint: .trailing))
+                .blendMode(.plusLighter)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        }
+        .glassPointerFeedback(pressed: pressed, in: RoundedRectangle(cornerRadius: 16), illumination: false)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: leadingLight)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: trailingLight)
+        .onAppear { pressChanged(false, reduceMotion, false) }
+        .onChange(of: pressed) { _, value in pressChanged(value, reduceMotion, copyPressed) }
+        .onChange(of: reduceMotion) { _, value in pressChanged(pressed, value, copyPressed) }
+    }
+}
+
+/// Track each action independently while the parent owns the continuous glass light.
+private struct ChatSelectionActionStyle: ButtonStyle {
+    @Binding var pressed: Bool
+    @Binding var hovered: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .onHover { hovered = $0 }
+            .onChange(of: configuration.isPressed) { _, value in pressed = value }
+            .onDisappear { pressed = false; hovered = false }
     }
 }
