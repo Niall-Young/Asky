@@ -89,7 +89,7 @@ private enum AgentLayout {
     // Figma UI page 22:293, new chat 43:1072, conversation 42:761 and history 38:654.
     static let radius: CGFloat = LauncherLayout.shellCornerRadius
     static let message = TextStyle(size: 14, weight: 400, mode: .default)
-    static let title = TextStyle(size: 13, weight: 500, mode: .default)
+    static let headerHeight: CGFloat = 64
 }
 
 struct AgentView: View {
@@ -114,7 +114,6 @@ struct AgentView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            header
             ZStack {
                 if showingHistory {
                     history.transition(historyTransition).zIndex(1)
@@ -123,6 +122,7 @@ struct AgentView: View {
                         ZStack {
                             if isEmptyConversation {
                                 AgentGreeting()
+                                    .padding(.top, AgentLayout.headerHeight)
                                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                                     .transition(conversationTransition).zIndex(1)
                             } else {
@@ -145,6 +145,7 @@ struct AgentView: View {
             .clipped()
             .animation(navigationAnimation, value: showingHistory)
         }
+        .overlay(alignment: .top) { header }
         .foregroundStyle(ThemeColor.kText.color(for: colorScheme))
         .windowSurfaceBackground(in: shape)
         .clipShape(shape)
@@ -164,11 +165,14 @@ struct AgentView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 12) {
+            AgentToolbarControls(history: true, showingHistory: showingHistory,
+                pinned: pinned, running: model.isRunning,
+                onHistory: toggleHistory, onNew: newConversation,
+                onPin: togglePin, onClose: close)
+                .fixedSize()
+                .nativeGlassBackground(in: Circle(), clear: true, glassOpacity: 0.35)
             if showingHistory {
-                Button { showingHistory = false } label: { headerIcon("chevron.left") }
-                    .accessibilityLabel(NSLocalizedString("返回对话", comment: ""))
-                    .help(NSLocalizedString("返回对话", comment: ""))
                 HStack(spacing: 8) {
                     Image(mingCute: "magnifyingglass", size: 14)
                         .foregroundStyle(ThemeColor.kIconSubtle.color(for: colorScheme))
@@ -179,67 +183,40 @@ struct AgentView: View {
                 }
                 .frame(maxWidth: .infinity)
             } else {
-                HStack(spacing: 6) {
-                    Text(model.conversations.first { $0.id == model.conversationID }?.title ?? NSLocalizedString("新对话", comment: ""))
-                        .textStyle(AgentLayout.title)
-                        .foregroundStyle(ThemeColor.kTextSubtle.color(for: colorScheme))
-                        .lineLimit(1).truncationMode(.tail)
-                    if pinned {
-                        Image(mingCute: "pin.fill", size: 12)
-                            .foregroundStyle(ThemeColor.kIconSubtle.color(for: colorScheme))
-                            .accessibilityLabel(NSLocalizedString("已置顶", comment: ""))
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.leading, 8)
+                Spacer(minLength: 0)
             }
-            Button { model.open(nil); showingHistory = false } label: { headerIcon("pencil") }
-                .disabled(model.isRunning)
-                .accessibilityLabel(NSLocalizedString("新对话", comment: ""))
-                .help(NSLocalizedString("新对话", comment: ""))
-                .keyboardShortcut(model.shortcutPreferences.shortcut(.newChat).keyEquivalent,
-                                  modifiers: model.shortcutPreferences.shortcut(.newChat).eventModifiers)
-            Menu {
-                Button {
-                    showingHistory.toggle()
-                    model.reloadConversations()
-                } label: {
-                    Label { Text(NSLocalizedString(showingHistory ? "返回对话" : "历史对话", comment: "")) }
-                        icon: { Image(mingCute: showingHistory ? "chevron.left" : "list.bullet") }
-                }
-                .keyboardShortcut(model.shortcutPreferences.shortcut(.history).keyEquivalent,
-                                  modifiers: model.shortcutPreferences.shortcut(.history).eventModifiers)
-                Toggle(isOn: Binding(get: { pinned }, set: { pinned = $0; setPinned($0) })) {
-                    Label { Text(NSLocalizedString("置顶窗口", comment: "")) } icon: { Image(mingCute: "pin") }
-                }
-                Divider()
-                Button { model.openSettings() } label: {
-                    Label { Text(NSLocalizedString("设置…", comment: "")) } icon: { Image(mingCute: "gearshape") }
-                }
-                Button(action: close) {
-                    Label { Text(NSLocalizedString("关闭对话窗口", comment: "")) } icon: { Image(mingCute: "xmark") }
-                }
-                .keyboardShortcut(model.shortcutPreferences.shortcut(.closeChat).keyEquivalent,
-                                  modifiers: model.shortcutPreferences.shortcut(.closeChat).eventModifiers)
-            } label: { headerIcon("ellipsis.vertical") }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .help(NSLocalizedString("更多操作", comment: ""))
-            .accessibilityLabel(NSLocalizedString("更多操作", comment: ""))
+            AgentToolbarControls(history: false, showingHistory: showingHistory,
+                pinned: pinned, running: model.isRunning,
+                onHistory: toggleHistory, onNew: newConversation,
+                onPin: togglePin, onClose: close)
+                .fixedSize()
+                .nativeGlassBackground(in: Capsule(), clear: true, glassOpacity: 0.35)
         }
-        .buttonStyle(AgentToolbarButtonStyle(colorScheme: colorScheme))
         .padding(.horizontal, 16)
-        .frame(height: 48)
+        .frame(height: AgentLayout.headerHeight)
         .contentShape(Rectangle())
         .compatibleWindowDrag()
+        .background(alignment: .top) { AgentHeaderBackdrop().allowsHitTesting(false) }
+        .background {
+            Group {
+                Button("") { toggleHistory() }
+                    .keyboardShortcut(model.shortcutPreferences.shortcut(.history).keyEquivalent,
+                                      modifiers: model.shortcutPreferences.shortcut(.history).eventModifiers)
+                Button("") { newConversation() }
+                    .disabled(model.isRunning)
+                    .keyboardShortcut(model.shortcutPreferences.shortcut(.newChat).keyEquivalent,
+                                      modifiers: model.shortcutPreferences.shortcut(.newChat).eventModifiers)
+                Button("", action: close)
+                    .keyboardShortcut(model.shortcutPreferences.shortcut(.closeChat).keyEquivalent,
+                                      modifiers: model.shortcutPreferences.shortcut(.closeChat).eventModifiers)
+            }
+            .hidden().accessibilityHidden(true)
+        }
     }
 
-    private func headerIcon(_ symbol: String) -> some View {
-        Image(mingCute: symbol, size: 16)
-            .frame(width: 28, height: 28)
-            .contentShape(.interaction, RoundedRectangle(cornerRadius: 7))
-    }
+    private func toggleHistory() { showingHistory.toggle(); model.reloadConversations() }
+    private func newConversation() { model.open(nil); showingHistory = false }
+    private func togglePin() { pinned.toggle(); setPinned(pinned) }
 
     private var history: some View {
         ScrollView {
@@ -261,6 +238,7 @@ struct AgentView: View {
                 }
             }
             .textStyle(AgentLayout.message).padding(.horizontal, 12).padding(.vertical, 12)
+            .padding(.top, AgentLayout.headerHeight)
         }
         .frame(maxHeight: .infinity)
     }
@@ -295,22 +273,99 @@ private struct AgentGreeting: View {
     }
 }
 
-private struct AgentToolbarButtonStyle: ButtonStyle {
-    let colorScheme: ColorScheme
-    @Environment(\.isEnabled) private var isEnabled
-    @State private var hovering = false
+/// Native image buttons share the composer's subdued glass surface.
+private struct AgentToolbarControls: NSViewRepresentable {
+    var history: Bool
+    var showingHistory: Bool
+    var pinned: Bool
+    var running: Bool
+    var onHistory: () -> Void
+    var onNew: () -> Void
+    var onPin: () -> Void
+    var onClose: () -> Void
 
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .foregroundStyle(ThemeColor.kTextSubtle.color(for: colorScheme))
-            .background {
-                if isEnabled && (hovering || configuration.isPressed) {
-                    RoundedRectangle(cornerRadius: 7)
-                        .fill(ThemeColor.kInteractionHover.color(for: colorScheme))
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeNSView(context: Context) -> NSStackView {
+        let stack = NSStackView()
+        stack.orientation = .horizontal
+        stack.spacing = 0
+        stack.alignment = .centerY
+        stack.detachesHiddenViews = false
+        for index in 0..<(history ? 1 : 3) {
+            let button = NSButton(title: "", target: context.coordinator, action: #selector(Coordinator.activate(_:)))
+            button.setButtonType(.momentaryPushIn)
+            button.bezelStyle = .accessoryBarAction
+            button.tag = index
+            button.isBordered = false
+            button.imagePosition = .imageOnly
+            button.imageScaling = .scaleNone
+            button.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                button.widthAnchor.constraint(equalToConstant: 36),
+                button.heightAnchor.constraint(equalToConstant: 36)
+            ])
+            stack.addArrangedSubview(button)
+        }
+        updateNSView(stack, context: context)
+        return stack
+    }
+
+    func updateNSView(_ stack: NSStackView, context: Context) {
+        context.coordinator.parent = self
+        let symbols = history ? [showingHistory ? "chevron.left" : "line.2.horizontal"]
+            : ["pencil", pinned ? "pin.fill" : "pin", "power"]
+        let titles = history ? [showingHistory ? "返回对话" : "历史对话"]
+            : ["新对话", pinned ? "取消置顶" : "置顶窗口", "关闭对话窗口"]
+        for (index, view) in stack.arrangedSubviews.enumerated() {
+            guard let button = view as? NSButton else { continue }
+            let title = NSLocalizedString(titles[index], comment: "")
+            button.image = MingCute.image(symbols[index], size: 18)
+            button.image?.accessibilityDescription = title
+            button.toolTip = title
+            button.setAccessibilityLabel(title)
+            button.isEnabled = history || index != 0 || !running
+        }
+
+    }
+
+    @MainActor final class Coordinator: NSObject {
+        var parent: AgentToolbarControls
+        init(_ parent: AgentToolbarControls) { self.parent = parent }
+        @objc func activate(_ sender: NSButton) {
+            if parent.history { parent.onHistory() }
+            else if sender.tag == 0 { parent.onNew() }
+            else if sender.tag == 1 { parent.onPin() }
+            else if sender.tag == 2 { parent.onClose() }
+        }
+    }
+}
+
+/// A live material backdrop fades out over the scrolling transcript.
+/// Only the material is masked; toolbar controls remain fully opaque.
+private struct AgentHeaderBackdrop: View {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        if reduceTransparency || contrast == .increased {
+            ThemeColor.kBackground.color(for: colorScheme, opaque: true)
+                .frame(height: AgentLayout.headerHeight)
+        } else {
+            Rectangle()
+                .fill(.regularMaterial)
+                .frame(height: AgentLayout.headerHeight + 32)
+                .mask {
+                    LinearGradient(stops: [
+                        .init(color: .black, location: 0),
+                        .init(color: .black, location: 0.35),
+                        .init(color: .black.opacity(0.85), location: 0.55),
+                        .init(color: .black.opacity(0.35), location: 0.78),
+                        .init(color: .clear, location: 1)
+                    ], startPoint: .top, endPoint: .bottom)
                 }
-            }
-            .opacity(isEnabled ? (configuration.isPressed ? 0.7 : 1) : 0.35)
-            .onHover { hovering = $0 }
+        }
     }
 }
 
@@ -401,6 +456,7 @@ private struct Transcript: View {
                 Color.clear.frame(height: 1).id("bottom")
             }
             .padding(.horizontal, 32).padding(.vertical, 12)
+            .padding(.top, AgentLayout.headerHeight)
         }
     }
 

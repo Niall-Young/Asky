@@ -29,6 +29,7 @@
     "arrow.left.arrow.right": "transfer",
     "line.3.horizontal.decrease": "filter_2",
     "list.bullet": "history",
+    "line.2.horizontal": "custom/menu-2-lines",
     "pencil": "edit",
     "paperclip": "attachment",
     "stop.fill": "filled/stop",
@@ -98,6 +99,7 @@
   },
   "customIcons": {
     "approval-hand": "App/Artwork/approval-hand.svg",
-    "copy": "App/Artwork/copy.svg"
+    "copy": "App/Artwork/copy.svg",
+    "menu-2-lines": "App/Artwork/menu-2-lines.svg"
   }
 }

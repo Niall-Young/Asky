@@ -169,6 +169,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             Task { @MainActor in self?.launcher.hide() }
         }
         #if DEBUG
+        if CommandLine.arguments.contains("--show-agent") { agentWindow.show() }
         if CommandLine.arguments.contains("--test-clipboard") {
             clipboardWindow.pinned = true
             clipboardWindow.show()

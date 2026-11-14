@@ -32,6 +32,7 @@ enum MingCute {
         "arrow.left.arrow.right": "MingCute-transfer",
         "line.3.horizontal.decrease": "MingCute-filter_2",
         "list.bullet": "MingCute-history",
+        "line.2.horizontal": "MingCute-custom-menu-2-lines",
         "pencil": "MingCute-edit",
         "paperclip": "MingCute-attachment",
         "stop.fill": "MingCute-filled-stop",
