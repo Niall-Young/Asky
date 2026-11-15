@@ -3,9 +3,11 @@ import SwiftUI
 
 /// A tint-free backdrop whose mask controls blur radius, not view opacity.
 struct ProgressiveHeaderBlur: NSViewRepresentable {
+    var reversed = false
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     func makeNSView(context: Context) -> ProgressiveHeaderBlurView { ProgressiveHeaderBlurView() }
     func updateNSView(_ view: ProgressiveHeaderBlurView, context: Context) {
+        view.reversed = reversed
         view.isHidden = reduceTransparency
     }
 }
@@ -13,6 +15,13 @@ struct ProgressiveHeaderBlur: NSViewRepresentable {
 final class ProgressiveHeaderBlurView: NSView {
     private var backdrop: CALayer?
     private var lastSize: CGSize = .zero
+    var reversed = false {
+        didSet {
+            guard reversed != oldValue else { return }
+            lastSize = .zero
+            needsLayout = true
+        }
+    }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -46,7 +55,8 @@ final class ProgressiveHeaderBlurView: NSView {
                                       bytesPerRow: 4, space: CGColorSpaceCreateDeviceRGB(),
                                       bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue),
               let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
-                                        colors: [NSColor.clear.cgColor, NSColor.black.cgColor] as CFArray,
+                                        colors: (reversed ? [NSColor.black.cgColor, NSColor.clear.cgColor]
+                                                          : [NSColor.clear.cgColor, NSColor.black.cgColor]) as CFArray,
                                         locations: [0, 1]) else { return }
         context.drawLinearGradient(gradient, start: CGPoint(x: 0, y: 0), end: CGPoint(x: 0, y: 256), options: [])
         guard let mask = context.makeImage() else { return }

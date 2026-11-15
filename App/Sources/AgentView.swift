@@ -100,6 +100,7 @@ struct AgentView: View {
     @Bindable var model: AgentModel
     var close: () -> Void = {}
     var setPinned: (Bool) -> Void = { _ in }
+    @State private var composerHeight: CGFloat = 94
     @State private var pinned = false
     @State private var toolbarPressed: Int?
     @State private var toolbarHovered: Int?
@@ -114,15 +115,16 @@ struct AgentView: View {
     private var isEmptyConversation: Bool { model.items.isEmpty && !model.isRunning }
 
     var body: some View {
-        VStack(spacing: 0) {
+        ZStack(alignment: .bottom) {
             ZStack {
                 if isEmptyConversation {
                     AgentGreeting()
                         .padding(.top, AgentLayout.headerHeight)
+                        .padding(.bottom, composerHeight)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .transition(conversationTransition).zIndex(1)
                 } else {
-                    Transcript(model: model)
+                    Transcript(model: model, bottomInset: composerHeight)
                         .id("continuous-transcript")
                         .transition(conversationTransition).zIndex(1)
                 }
@@ -131,8 +133,13 @@ struct AgentView: View {
             .clipped()
             .animation(navigationAnimation, value: model.conversationID)
             .animation(navigationAnimation, value: isEmptyConversation)
+            ProgressiveHeaderBlur(reversed: true)
+                .frame(height: composerHeight + 24)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
             Composer(model: model)
                 .padding(.horizontal, 12).padding(.bottom, 12)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { composerHeight = $0 }
         }
         .overlay(alignment: .top) {
             ProgressiveHeaderBlur()
@@ -319,6 +326,7 @@ struct AgentIconButtonStyle: ButtonStyle {
 
 private struct Transcript: View {
     let model: AgentModel
+    let bottomInset: CGFloat
     // Value snapshots let an outgoing transcript finish fading after model.open
     // clears/replaces the active conversation. The live model still owns actions.
     private let items: [ChatItem]
@@ -331,8 +339,9 @@ private struct Transcript: View {
 
     @State private var viewport = TranscriptViewport()
 
-    init(model: AgentModel) {
+    init(model: AgentModel, bottomInset: CGFloat) {
         self.model = model
+        self.bottomInset = bottomInset
         items = model.items
         streaming = model.streaming
         hasOlder = model.hasOlder
@@ -345,7 +354,7 @@ private struct Transcript: View {
     var body: some View {
         GeometryReader { geometry in
             let allGroups = groups
-            CompatibleTranscriptScroll(submittedMessageID: items.last(where: { $0.kind == .user })?.id, isWaiting: isRunning, completedReplyID: items.last(where: { $0.kind == .assistant })?.id, viewport: viewport, hasNewer: model.hasNewer, loadLatest: model.loadLatestMessages) {
+            CompatibleTranscriptScroll(submittedMessageID: items.last(where: { $0.kind == .user })?.id, isWaiting: isRunning, completedReplyID: items.last(where: { $0.kind == .assistant })?.id, viewport: viewport, bottomInset: bottomInset, hasNewer: model.hasNewer, loadLatest: model.loadLatestMessages) {
                 // The model already bounds this window to 120 records. Measure it eagerly:
                 // lazy height estimates changed during scrolling and moved native text offscreen.
                 VStack(alignment: .leading, spacing: 0) {
@@ -364,7 +373,8 @@ private struct Transcript: View {
                             viewport.preserveReadingPosition { model.loadNewer() }
                         }.buttonStyle(.link).frame(maxWidth: .infinity).padding(.top, 12).padding(.bottom, 40).disabled(isRunning)
                     }
-                    Color.clear.frame(height: 13).id("bottom")
+                    // Scroll content continues behind the floating composer; its tail remains readable.
+                    Color.clear.frame(height: bottomInset + 13).id("bottom")
                 }
                 .padding(.horizontal, 12).padding(.top, 12)
                 .padding(.top, AgentLayout.headerHeight)
@@ -414,15 +424,16 @@ private struct CompatibleTranscriptScroll<Content: View>: View {
     let isWaiting: Bool
     let completedReplyID: String?
     let viewport: TranscriptViewport
+    let bottomInset: CGFloat
     var hasNewer = false
     var loadLatest: () -> Void = {}
     @ViewBuilder var content: Content
 
     var body: some View {
         if #available(macOS 15, *), !SurfaceCompatibility.useMacOS14Compatibility {
-            ModernTranscriptScroll(submittedMessageID: submittedMessageID, isWaiting: isWaiting, completedReplyID: completedReplyID, viewport: viewport, hasNewer: hasNewer, loadLatest: loadLatest, content: content)
+            ModernTranscriptScroll(submittedMessageID: submittedMessageID, isWaiting: isWaiting, completedReplyID: completedReplyID, viewport: viewport, bottomInset: bottomInset, hasNewer: hasNewer, loadLatest: loadLatest, content: content)
         } else {
-            LegacyTranscriptScroll(submittedMessageID: submittedMessageID, isWaiting: isWaiting, completedReplyID: completedReplyID, viewport: viewport, hasNewer: hasNewer, loadLatest: loadLatest, content: content)
+            LegacyTranscriptScroll(submittedMessageID: submittedMessageID, isWaiting: isWaiting, completedReplyID: completedReplyID, viewport: viewport, bottomInset: bottomInset, hasNewer: hasNewer, loadLatest: loadLatest, content: content)
         }
     }
 }
@@ -603,6 +614,7 @@ private struct ModernTranscriptScroll<Content: View>: View {
     let isWaiting: Bool
     let completedReplyID: String?
     let viewport: TranscriptViewport
+    let bottomInset: CGFloat
     var hasNewer = false
     var loadLatest: () -> Void = {}
     var content: Content
@@ -670,7 +682,7 @@ private struct ModernTranscriptScroll<Content: View>: View {
                     .buttonStyle(AgentHeaderButtonStyle(colorScheme: colorScheme))
                     .accessibilityLabel(NSLocalizedString("回到底部", comment: ""))
                     .help(NSLocalizedString("回到底部", comment: ""))
-                    .padding(.bottom, 8)
+                    .padding(.bottom, bottomInset + 8)
                 }
             }
             .onChange(of: submittedMessageID) { oldID, newID in
@@ -750,6 +762,7 @@ private struct LegacyTranscriptScroll<Content: View>: View {
     let isWaiting: Bool
     let completedReplyID: String?
     let viewport: TranscriptViewport
+    let bottomInset: CGFloat
     var hasNewer = false
     var loadLatest: () -> Void = {}
     var content: Content
@@ -808,7 +821,7 @@ private struct LegacyTranscriptScroll<Content: View>: View {
                         .buttonStyle(AgentHeaderButtonStyle(colorScheme: colorScheme))
                         .accessibilityLabel(NSLocalizedString("回到底部", comment: ""))
                         .help(NSLocalizedString("回到底部", comment: ""))
-                        .padding(.bottom, 8)
+                        .padding(.bottom, bottomInset + 8)
                     }
                 }
                 .onChange(of: submittedMessageID) { oldID, newID in

@@ -1149,6 +1149,8 @@ enum AgentReplyRegression {
             try bitmap.representation(using: .png, properties: [:])!.write(to: URL(filePath: "build/bottom-push-" + name + ".png"))
         }
         try capture("before")
+        precondition(abs(scroll.contentSize.height - window.contentLayoutRect.height) <= 1,
+                     "The transcript must span the whole window behind the floating composer")
         precondition(scroll.documentView!.bounds.height >= scroll.contentSize.height - 1,
                      "The initial short conversation must occupy a top-aligned viewport")
         try store.append(conversationID: cid, role: "user", text: "晚上好")
@@ -1207,6 +1209,17 @@ enum AgentReplyRegression {
                      "Long answers stop at the beginning of the bubble, allowing the user question to move above it")
         print("Long reply visible height: \(visible)")
         try capture("completed")
+        for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+            window.appearance = NSAppearance(named: appearance)
+            try await Task.sleep(for: .milliseconds(350))
+            let capture = Process()
+            capture.executableURL = URL(filePath: "/usr/sbin/screencapture")
+            capture.arguments = ["-x", "-o", "-l", String(window.windowNumber),
+                                 "build/composer-overlay-\(appearance.rawValue).png"]
+            try capture.run(); capture.waitUntilExit()
+            precondition(capture.terminationStatus == 0)
+        }
+        window.appearance = NSAppearance(named: .aqua)
         try store.append(conversationID: cid, role: "user", text: "收到")
         model.open(cid)
         model.beginResponse(taskID: "short-reply")
@@ -1223,6 +1236,25 @@ enum AgentReplyRegression {
         precondition(shortRect.minY >= scroll.contentView.bounds.minY && shortRect.maxY <= scroll.contentView.bounds.maxY,
                      "Any reply fitting below the question must be fully visible")
         try capture("short")
+        func assertReplyAboveComposer() {
+            let editor = textViews(window.contentView!).first { $0.isEditable }!
+            let editorRect = scroll.contentView.convert(editor.bounds, from: editor)
+            let replyRect = scroll.contentView.convert(shortReply.bounds, from: shortReply)
+            precondition(replyRect.maxY <= editorRect.minY - 10,
+                         "The final reply must remain above the composer's top padding")
+        }
+        assertReplyAboveComposer()
+        let compactHeight = scroll.documentView!.bounds.height
+        model.draft = (1...6).map { "第 \($0) 行草稿" }.joined(separator: "\n")
+        try await Task.sleep(for: .milliseconds(600))
+        try capture("expanded-before-scroll")
+        precondition(scroll.documentView!.bounds.height > compactHeight + 40,
+                     "A taller composer must reserve more scrollable space: before=\(compactHeight), after=\(scroll.documentView!.bounds.height), editor=\(textViews(window.contentView!).first { $0.isEditable }!.frame)")
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: scroll.documentView!.bounds.maxY - scroll.contentSize.height))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        try await Task.sleep(for: .milliseconds(200))
+        assertReplyAboveComposer()
+        try capture("expanded-composer")
         print("Natural chat flow passed: short, overflowing and fitting replies, fixed window, waiting bubble")
     }
 
@@ -1283,8 +1315,15 @@ enum AgentReplyRegression {
             precondition(scroll.documentView!.bounds.maxY - scroll.documentVisibleRect.maxY > 100,
                          "The click must start well above the bottom")
             // Send a native click through the window to the visible bottom-center control.
-            let point = scroll.convert(NSPoint(x: scroll.bounds.midX,
-                y: scroll.isFlipped ? scroll.bounds.maxY - 24 : scroll.bounds.minY + 24), to: nil)
+            func composerEditor(_ view: NSView) -> NSTextView? {
+                if let editor = view as? NSTextView, editor.isEditable { return editor }
+                return view.subviews.compactMap(composerEditor).first
+            }
+            let editor = composerEditor(window.contentView!)!
+            let editorRect = scroll.contentView.convert(editor.bounds, from: editor)
+            // Composer top padding (10), button gap (8), and half its height (16).
+            let point = scroll.contentView.convert(NSPoint(x: scroll.contentView.bounds.midX,
+                                                           y: editorRect.minY - 34), to: nil)
             for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
                 let event = NSEvent.mouseEvent(with: type, location: point, modifierFlags: [],
                     timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
