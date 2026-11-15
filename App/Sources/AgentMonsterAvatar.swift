@@ -15,16 +15,6 @@ enum AgentAvatarColor: String, CaseIterable {
         }
     }
 
-    var hue: Double {
-        switch self {
-        case .blue: 0
-        case .yellow: -170
-        case .purple: 55
-        case .green: -100
-        case .pink: 115
-        }
-    }
-
     var tint: Color {
         let rgb: UInt32 = switch self {
         case .blue: 0x73BFFF
@@ -103,27 +93,45 @@ struct AgentMonsterAvatar: View {
 
     var body: some View {
         Group {
-            if shape == .monster {
-                if expression == .smile {
-                    Image("AgentAvatar").resizable().scaledToFit()
-                        .hueRotation(.degrees(color.hue))
-                } else {
-                    Image("AgentAvatarBody").resizable().scaledToFit()
-                        .mask { Image("AgentAvatar").resizable().scaledToFit() }
-                        .hueRotation(.degrees(color.hue))
-                        .overlay { AvatarFace(expression: expression, mouthY: 58) }
-                }
+            if shape == .monster && expression == .smile && color == .blue {
+                Image("AgentAvatar").resizable().scaledToFit()
             } else {
-                Image(shape.bodyAsset).resizable().scaledToFit()
+                materialBody
                     .scaleEffect(shape.bodyScale)
-                    .hueRotation(.degrees(color.hue))
                     .overlay { AvatarFace(expression: expression, mouthY: 58) }
-
             }
         }
         .aspectRatio(1, contentMode: .fit)
         .allowsHitTesting(false)
         .accessibilityHidden(true)
+    }
+
+    private var silhouette: some View {
+        Image(shape == .monster ? "AgentAvatar" : shape.bodyAsset)
+            .resizable().scaledToFit()
+    }
+
+    @ViewBuilder private var materialBody: some View {
+        if color == .blue {
+            if shape == .monster {
+                Image(shape.bodyAsset).resizable().scaledToFit()
+                    .mask { silhouette }
+            } else {
+                Image(shape.bodyAsset).resizable().scaledToFit()
+            }
+        } else {
+            // Overlay's neutral gray leaves the palette color unchanged. Use only
+            // the source material's relief, never its blue hue or saturation.
+            color.tint
+                .overlay {
+                    Image(shape.bodyAsset).resizable().scaledToFit()
+                        .saturation(0)
+                        .brightness(-0.25)
+                        .blendMode(.overlay)
+                }
+                .compositingGroup()
+                .mask { silhouette }
+        }
     }
 }
 
