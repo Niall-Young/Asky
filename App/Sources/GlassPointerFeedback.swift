@@ -39,6 +39,13 @@ private struct GlassPointerFeedback<S: Shape>: ViewModifier {
 }
 
 extension View {
+    /// Resolve action cursors without adding glass, illumination or press effects.
+    func actionArrowCursor(enabled: Bool = true) -> some View {
+        background {
+            if enabled { ActionArrowCursor() }
+        }
+    }
+
     func glassPointerFeedback<S: Shape>(pressed: Bool, in shape: S, illumination: Bool = true) -> some View {
         modifier(GlassPointerFeedback(pressed: pressed, shape: shape, illumination: illumination))
     }

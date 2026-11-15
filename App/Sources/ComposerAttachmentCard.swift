@@ -82,6 +82,7 @@ struct ComposerAttachmentCard: View {
                         .background(ThemeColor.kBackgroundPrimary, in: .circle)
                 }
                 .buttonStyle(.plain).focused($deleteFocused)
+                .actionArrowCursor(enabled: active)
                 .accessibilityLabel(attachment == nil ? NSLocalizedString("移除引用", comment: "") : String(format: NSLocalizedString("删除附件：%@", comment: ""), name))
                 .opacity(active ? 1 : 0)
                 .offset(x: attachment?.kind == .image ? 6 : 8, y: -6)
