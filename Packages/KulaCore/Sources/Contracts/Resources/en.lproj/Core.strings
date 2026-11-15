@@ -253,7 +253,7 @@
 "缺少状态" = "Missing state";
 "群聊" = "Group chat";
 "聊天内容" = "chat content";
-"联网搜索公开网页（Bing，无需 API Key），返回标题、来源链接和搜索摘要；摘要不等于已读取网页全文" = "Search public webpages using Bing without an API key. Returns titles, source URLs and snippets; snippets do not mean the full webpage was read";
+"联网核实公开信息（Bing，无需 API Key）。回答可能变化的信息、产品推荐与比较、软件/API 用法、拿不准的事实或用户要求查证时，必须先调用，不必等待用户说“联网”。返回标题、来源链接和摘要；摘要不等于网页全文" = "Verify public information with Bing, without an API key. Call before answering about changing information, product recommendations or comparisons, software/API usage, uncertain facts, or explicit verification requests; do not wait for the user to ask to browse. Returns titles, source URLs and snippets, not full webpages";
 "联网搜索服务暂不可用，请稍后重试" = "Web search is temporarily unavailable. Try again later";
 "脚本无法编译" = "The script could not be compiled";
 "自动化（Chrome、备忘录）" = "Automation (Chrome, Notes)";

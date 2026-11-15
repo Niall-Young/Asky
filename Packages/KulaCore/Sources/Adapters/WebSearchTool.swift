@@ -6,7 +6,7 @@ import ToolService
 public struct WebSearchTool: ToolAdapter {
     public init() {}
     public var definition: ToolDefinition {
-        ToolDefinition(name: "web_search", summary: CoreLocalization.text("联网搜索公开网页（Bing，无需 API Key），返回标题、来源链接和搜索摘要；摘要不等于已读取网页全文"),
+        ToolDefinition(name: "web_search", summary: CoreLocalization.text("联网核实公开信息（Bing，无需 API Key）。回答可能变化的信息、产品推荐与比较、软件/API 用法、拿不准的事实或用户要求查证时，必须先调用，不必等待用户说“联网”。返回标题、来源链接和摘要；摘要不等于网页全文"),
             inputSchema: Args.schema(["query": Args.stringProp,
                 "count": ["type": "integer", "minimum": 1, "maximum": 10]], required: ["query"]),
             source: .web, effect: .read, confirmation: .never, externallyExposable: false)

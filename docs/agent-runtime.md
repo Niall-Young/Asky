@@ -28,6 +28,12 @@ Asky 保留 AgentHost 的任务事件和 ToolService 的原生权限边界。Nat
 
 本轮工具调用最多 50 次，当前按顺序执行；ToolService 继续负责参数、权限、确认、去重、执行与回读。写工具的 userRequested 仅表示本轮明确意图，转发前剥离，不是用户批准。awaitingConfirmation、rejected、suggestion 和 pendingVerification 都不得当作成功。
 
+## 公开信息与联网核实
+
+`NativeAgentPrompt` 在系统提示词前部要求先核实可能变化的公开信息，不依赖用户是否说“最新”或“联网”。范围包括推荐与比较、软件/API 用法和不确定事实；稳定基础概念、翻译、润色和纯计算可直接回答，用户明确不联网时遵从。`web_search` 的中英文工具描述同步声明触发条件。结果必须匹配对象、版本与时间，并在相关陈述旁链接来源；搜索失败或摘要不足不能用训练知识冒充当前事实，也不能声称已读取网页全文。
+
+这些是模型指令，运行时仍使用 `tool_choice: auto`，没有基于关键词强制搜索；不保证所有模型都遵循。联网开关与 ToolService 权限保持不变。
+
 ## 会话、取消与恢复
 
 运行时快照为 runtime/native-sessions/<sessionID>.json；SQLite 保存分页 UI 与检索投影及工具执行记录。每次模型完整消息和工具结果后原子保存快照。图片以引用落盘，仅在网络边界展开为 Base64；单张读取上限 20 MiB，文本附件最多读取 64 KiB，每轮最多 16 个附件。附件缺失会提供不可读取信息，不伪造图片内容。
