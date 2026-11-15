@@ -19,16 +19,16 @@ public struct HistoryTool: ToolAdapter {
         let history = ConversationStore(store)
         let rows: [StoredMessage]
         if reading {
-            guard let id = arguments["conversationID"]?.stringValue else { throw ToolError(.invalidArguments, "缺少历史标识") }
+            guard let id = arguments["conversationID"]?.stringValue else { throw ToolError(.invalidArguments, CoreLocalization.text("缺少历史标识")) }
             let cursor = arguments["beforeSeq"]?.numberValue
             guard cursor == nil || (cursor!.isFinite && cursor! >= 1 && cursor! < Double(Int.max) && cursor!.rounded() == cursor!) else {
-                throw ToolError(.invalidArguments, "历史分页游标无效")
+                throw ToolError(.invalidArguments, CoreLocalization.text("历史分页游标无效"))
             }
             rows = history.messages(conversationID: id, limit: 20,
                 beforeSeq: cursor.map(Int.init), dialogueOnly: false)
         } else {
             guard let query = arguments["query"]?.stringValue, !query.isEmpty, query.count <= 500 else {
-                throw ToolError(.invalidArguments, "搜索词须为 1–500 字")
+                throw ToolError(.invalidArguments, CoreLocalization.text("搜索词须为 1–500 字"))
             }
             rows = history.search(query).filter { $0.role == "user" || $0.role == "assistant" }
         }

@@ -348,3 +348,8 @@
 "模型请求失败（HTTP %d）" = "Model request failed (HTTP %d)";
 "模型响应无效：%@" = "Invalid model response: %@";
 "模型响应超过大小上限" = "Model response exceeds the size limit";
+
+"缺少历史标识" = "Missing conversation identifier";
+"历史分页游标无效" = "Invalid conversation history cursor";
+"搜索词须为 1–500 字" = "Search query must contain 1–500 characters";
+"聊天历史仅向应用内 Agent 开放" = "Chat history is only available to the in-app Agent";

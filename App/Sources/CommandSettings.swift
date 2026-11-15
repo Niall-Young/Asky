@@ -172,6 +172,10 @@ private struct CommandKeywordEditor: View {
     }
 
     private func reset() {
+        if let problem = app.commandKeywordProblem(defaultValue, id: id) {
+            error = problem
+            return
+        }
         app.preferences.commandKeywords.removeValue(forKey: id)
         draft = defaultValue
         error = nil

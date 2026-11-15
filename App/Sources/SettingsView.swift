@@ -799,7 +799,7 @@ private struct MCPSettings: View {
                     HStack {
                         Text(inst.name).textStyle(.button)
                         Spacer()
-                        SettingsButton(NSLocalizedString("撤销", comment: ""), role: .destructive) {
+                        SettingsButton(NSLocalizedString("撤销 MCP 授权", comment: ""), role: .destructive) {
                             try? MCPInstanceStore(app.store).delete(inst.id)
                             reload()
                         }

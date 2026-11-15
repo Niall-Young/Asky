@@ -1067,8 +1067,9 @@ enum LauncherWindowRegression {
         try require(!model.isSearching, "search providers must finish within three seconds")
         try require(!model.results.contains { $0.target.kind == "keyword-match" },
                     "partial keywords must not count as exact aliases")
-        app.preferences.aliases = [LauncherAlias(alias: "sc", kind: "shortcut", target: "Daily")]
-        model.query = "SC"
+        // Use a valid custom alias; `sc` is reserved by the shortcuts search command.
+        app.preferences.aliases = [LauncherAlias(alias: "daily", kind: "shortcut", target: "Daily")]
+        model.query = "DAILY"
         try await Task.sleep(for: .milliseconds(500))
         try require(model.results.first?.target.kind == "launcher-alias" &&
                     model.results.first?.primaryAction == .runShortcut(name: "Daily"),

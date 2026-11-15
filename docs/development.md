@@ -47,6 +47,7 @@ python3 App/Tests/run-clipboard-regression.py --files
 python3 App/Tests/run-clipboard-regression.py --chat-images
 python3 App/Tests/run-clipboard-regression.py --drag-preview
 python3 App/Tests/run-settings-regression.py
+python3 App/Tests/run-settings-regression.py --command-reset
 python3 App/Tests/run-settings-regression.py --conversation-retention
 python3 App/Tests/run-settings-regression.py --permissions-only
 python3 App/Tests/run-settings-regression.py --preview-legacy-material
@@ -205,6 +206,7 @@ python3 App/Tests/run-clipboard-regression.py --files
 python3 App/Tests/run-clipboard-regression.py --chat-images
 python3 App/Tests/run-clipboard-regression.py --drag-preview
 python3 App/Tests/run-settings-regression.py
+python3 App/Tests/run-settings-regression.py --command-reset
 python3 App/Tests/run-settings-regression.py --conversation-retention
 python3 App/Tests/run-settings-regression.py --permissions-only
 python3 App/Tests/run-settings-regression.py --preview-legacy-material

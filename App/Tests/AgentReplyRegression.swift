@@ -1022,14 +1022,19 @@ enum AgentReplyRegression {
                          "The viewport must contain message text after every scroll")
         }
         let latestIDs = model.items.map(\.id)
-        func click(distanceFromTop: CGFloat) {
-            let point = scroll.convert(NSPoint(x: scroll.bounds.midX,
-                y: scroll.isFlipped ? scroll.bounds.minY + distanceFromTop : scroll.bounds.maxY - distanceFromTop), to: nil)
+        func click(_ point: NSPoint) {
             for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
                 window.sendEvent(NSEvent.mouseEvent(with: type, location: point, modifierFlags: [],
                     timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
                     context: nil, eventNumber: 1, clickCount: 1, pressure: type == .leftMouseDown ? 1 : 0)!)
             }
+        }
+        func clickAboveComposer(_ distance: CGFloat) {
+            let editor = texts(window.contentView!).first { $0.isEditable }!
+            let editorRect = scroll.contentView.convert(editor.bounds, from: editor)
+            let position = NSPoint(x: scroll.contentView.bounds.midX, y: editorRect.minY - distance)
+            precondition(scroll.contentView.bounds.contains(position), "History control must be inside the viewport")
+            click(scroll.contentView.convert(position, to: nil))
         }
         for page in 1...3 {
             NotificationCenter.default.post(name: NSScrollView.willStartLiveScrollNotification, object: scroll)
@@ -1039,7 +1044,8 @@ enum AgentReplyRegression {
             let previousFirst = model.items.first!.id
             let text = texts(scroll).first { $0.string.hasPrefix(model.items.first!.text.components(separatedBy: "\n\n")[0]) }!
             let before = scroll.contentView.convert(text.bounds, from: text).minY - scroll.contentView.bounds.minY
-            click(distanceFromTop: 82)
+            click(scroll.convert(NSPoint(x: scroll.bounds.midX,
+                y: scroll.isFlipped ? scroll.bounds.minY + 82 : scroll.bounds.maxY - 82), to: nil))
             try await Task.sleep(for: .milliseconds(600))
             precondition(model.items.first?.id != previousFirst, "The older-page button must load a page")
             precondition(model.items.count == min(40 + page * 40, 120))
@@ -1056,11 +1062,14 @@ enum AgentReplyRegression {
         let bitmap = surface.bitmapImageRepForCachingDisplay(in: surface.bounds)!
         surface.cacheDisplay(in: surface.bounds, to: bitmap)
         try bitmap.representation(using: .png, properties: [:])!.write(to: URL(filePath: "build/scroll-newer-button.png"))
-        click(distanceFromTop: scroll.bounds.height - 62)
+        // Follow the current composer position, including its variable height, instead of the window bottom.
+        // Editor top inset 10 + transcript tail 13 + page-button bottom padding 40 + half its label 9.
+        clickAboveComposer(72)
         try await Task.sleep(for: .milliseconds(600))
         precondition(model.items.last?.id != lastID, "The newer-page button must recover the adjacent page")
         // The floating button must return to the latest persisted messages, not the end of an old page.
-        click(distanceFromTop: scroll.bounds.height - 24)
+        // Editor top inset 10 + floating button gap 8 + half its height 16.
+        clickAboveComposer(34)
         try await Task.sleep(for: .milliseconds(800))
         precondition(model.items.map(\.id) == latestIDs && !model.hasNewer)
         precondition(abs(scroll.documentView!.bounds.maxY - scroll.documentVisibleRect.maxY) <= 1)

@@ -58,6 +58,10 @@ enum SettingsRegression {
                     ["keyword": "go", "name": "Custom", "urlTemplate": "https://example.com"],
                 ]])
                 let model = try AppModel(root: root)
+                if CommandLine.arguments.contains("--command-reset") {
+                    try await assertCommandReset(model, root: root)
+                    exit(0)
+                }
                 if CommandLine.arguments.contains("--conversation-retention") {
                     defer { try? FileManager.default.removeItem(at: root) }
                     precondition(model.settings.conversationRetention == .thirtyDays)
@@ -527,6 +531,7 @@ enum SettingsRegression {
                 precondition(launcher.isAIScope && launcher.results.count == 1)
                 launcher.query = ""
                 print("Custom search commands: migration, collision validation, persistence, AI/link routing, exit and brand identity passed")
+                try await assertCommandReset(model, root: root)
                 if CommandLine.arguments.contains("--website-commands") { exit(0) }
                 if CommandLine.arguments.contains("--search-commands") {
                     model.settingsTab = "keywords"
@@ -726,7 +731,7 @@ enum SettingsRegression {
                 }
                 model.openSettings(permissions: true)
                 try await Task.sleep(for: .milliseconds(250))
-                guard model.settingsTab == "permissions", window.title.hasPrefix("系统权限") else {
+                guard model.settingsTab == "permissions", window.title.hasPrefix(SettingsPage.permissions.title) else {
                     fatalError("permission recovery did not select its sidebar page")
                 }
                 window.setContentSize(SettingsWindow.minimumSize)
@@ -934,6 +939,74 @@ enum SettingsRegression {
         }
     }
 
+    private static func assertCommandReset(_ model: AppModel, root: URL) async throws {
+        let preferences = model.preferences
+        let settings = model.settings
+        let tab = model.settingsTab
+        defer { model.preferences = preferences; model.settings = settings; model.settingsTab = tab }
+        func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
+
+        for scenario in ["website", "category", "alias", "terminal", "search-command", "available"] {
+            model.preferences = preferences
+            model.settings = settings
+            model.preferences.disabledBuiltInCommands = []
+            let id = scenario == "search-command" ? "ai" : "go"
+            let custom = id == "ai" ? "ask" : "g2"
+            model.preferences.commandKeywords = [id: custom]
+            model.preferences.aliases = []
+            switch scenario {
+            case "website": model.preferences.commandKeywords["yt"] = "go"
+            case "category": model.preferences.commandKeywords["ai"] = "go"
+            case "alias": model.preferences.aliases = [LauncherAlias(alias: "GO", kind: "shortcut", target: "Daily")]
+            case "terminal": model.settings.terminalKeyword = "go"
+            case "search-command": model.preferences.commandKeywords["go"] = "ai"
+            default: break
+            }
+            let before = model.preferences.commandKeywords
+            model.settingsTab = "keywords"
+            let window = SettingsWindow.make(app: model)
+            window.makeKeyAndOrderFront(nil)
+            defer { window.orderOut(nil) }
+            try await Task.sleep(for: .milliseconds(250))
+            if id == "go" {
+                let tabs = descendants(window.contentView!).compactMap { $0 as? NSSegmentedControl }.first!
+                tabs.selectedSegment = 1
+                _ = tabs.sendAction(tabs.action, to: tabs.target)
+                try await Task.sleep(for: .milliseconds(150))
+            }
+            let views = descendants(window.contentView!)
+            guard let field = views.compactMap({ $0 as? NSTextField }).first(where: { $0.isEditable && $0.stringValue == custom }) else {
+                fatalError("Missing command editor for reset scenario: \(scenario)")
+            }
+            let fieldCenter = field.convert(NSPoint(x: field.bounds.midX, y: field.bounds.midY), to: nil)
+            guard let reset = views.compactMap({ $0 as? NSButton }).first(where: {
+                $0.title == NSLocalizedString("恢复默认", comment: "") &&
+                abs($0.convert(NSPoint(x: $0.bounds.midX, y: $0.bounds.midY), to: nil).y - fieldCenter.y) < 1
+            }) else { fatalError("Missing reset control for \(scenario)") }
+            reset.performClick(nil)
+            try await Task.sleep(for: .milliseconds(150))
+            let restored = try AppModel(root: root)
+            if scenario == "available" {
+                precondition(model.preferences.commandKeywords[id] == nil && restored.commandKeyword(id) == "go")
+                precondition(field.stringValue == "go", "Successful reset must update the editor")
+            } else {
+                precondition(model.preferences.commandKeywords == before && restored.preferences.commandKeywords == before,
+                             "Conflicting reset must preserve both persisted command assignments: \(scenario)")
+                precondition(field.stringValue == custom, "Rejected reset must preserve the editable trigger")
+                if scenario == "website" {
+                    precondition(model.keywords.match("go cats")?.0.url(for: "cats")?.host == "www.youtube.com")
+                    let view = window.contentView!
+                    let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds)!
+                    view.cacheDisplay(in: view.bounds, to: bitmap)
+                    try bitmap.representation(using: .png, properties: [:])!.write(to: URL(filePath: "build/command-reset-conflict-fixed.png"))
+                }
+            }
+        }
+        precondition(NSLocalizedString("撤销", comment: "") != NSLocalizedString("撤销 MCP 授权", comment: "") ||
+                     Bundle.main.preferredLocalizations.first != "en", "Revoke must not reuse the edit-menu Undo translation")
+        print("Command reset passed: website, category, alias, terminal and search-command conflicts, preserved routing/storage and successful reset")
+    }
+
     private static func assertCommandTabsAndGlobalSearch(_ window: NSWindow, model: AppModel) async throws {
         func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
         func fields() -> [NSTextField] {
@@ -1078,9 +1151,8 @@ enum SettingsRegression {
     }
 
     private static func assertMCPCheckboxLayout(in view: NSView) async throws {
-        // Native grouped forms create offscreen rows lazily on macOS 14.
-        if SurfaceCompatibility.useMacOS14Compatibility,
-           let scroll = findScrollView(in: view), let document = scroll.documentView {
+        // Both the modern LazyVGrid and legacy grouped form realize offscreen rows lazily.
+        if let scroll = findScrollView(in: view), let document = scroll.documentView {
             scroll.contentView.scroll(to: NSPoint(x: 0,
                 y: max(0, document.bounds.height - scroll.contentView.bounds.height)))
             scroll.reflectScrolledClipView(scroll.contentView)

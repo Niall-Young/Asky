@@ -94,6 +94,8 @@ Asky 是使用 SwiftUI 与 AppKit 构建的 macOS 原生效率入口。本地全
 | **项操作菜单** | `⌘K` | 打开当前项的更多操作菜单（如展示文件简介 `⌘I`、复制文件名 `⌘⇧.` 等） |
 | **打开设置** | `⌘,`（窗口获焦时） | 呼出 Asky 设置面板 |
 
+在“设置 › 指令”中可自定义触发词。恢复默认时若触发词已被其他指令或别名占用，会保留当前配置并提示冲突。
+
 *完整快捷键配置与高级技巧见[使用教程](https://asky.niallspace.workers.dev/docs)。*
 
 ---
@@ -152,6 +154,7 @@ open -n build/DerivedData/Build/Products/Debug/Asky.app --args --show-agent
 # 核心测试套件
 (cd MCPBridge && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift build)
 (cd Packages/KulaCore && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test)
+python3 App/Tests/run-settings-regression.py --command-reset
 # 气泡对话与等待状态回归（先完成 Debug 构建）
 python3 App/Tests/run-agent-reply-regression.py --reply-activity-preview
 python3 App/Tests/run-agent-reply-regression.py --bubble-width-preview
@@ -282,6 +285,8 @@ Asky is a native macOS efficiency launcher built with SwiftUI and AppKit. Local 
 | **Action Menu** | `⌘K` | Open context menu (Show Get Info `⌘I`, Copy filename `⌘⇧.`, etc.) |
 | **Settings** | `⌘,` (when window is focused) | Open Asky Settings |
 
+Customize trigger words in Settings › Commands. If a default trigger is already used by another command or alias, restoring it keeps the current configuration and displays a conflict message.
+
 *See the [User Guide](https://asky.niallspace.workers.dev/docs) for advanced configuration and full shortcut listings.*
 
 ---
@@ -340,6 +345,7 @@ open -n build/DerivedData/Build/Products/Debug/Asky.app --args --show-agent
 # Core test suites
 (cd MCPBridge && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift build)
 (cd Packages/KulaCore && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test)
+python3 App/Tests/run-settings-regression.py --command-reset
 # Bubble conversation and waiting-state regression (build Debug first)
 python3 App/Tests/run-agent-reply-regression.py --reply-activity-preview
 python3 App/Tests/run-agent-reply-regression.py --bubble-width-preview
