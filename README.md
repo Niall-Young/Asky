@@ -59,7 +59,7 @@ Asky 是使用 SwiftUI 与 AppKit 构建的 macOS 原生效率入口。本地全
   - **原生交互表单**：AI 回复完成后一次显示原生单选按钮组、下拉单选、多选、文本输入、日期及按需显示时、分、秒的时间/时长控件，AI 澄清需求或确认方案时可同时提供预设选项与「自己填写」，选择或自填后点击「提交回复」自动发送到同一会话并继续处理。所有字段支持预填已知信息或合理默认值，用户可直接修改后提交；无效预填会被忽略，手动清空不会被默认值覆盖，预填本身不提交或授权操作。重开未提交表单会恢复原始预填，尚未提交的编辑仅保留在当前打开的会话中。未提交的表单一直可填写，不因后续聊天或重开历史失效；提交后保存当时的答案并变为只读，提交按钮禁用，重新打开历史也不能重复提交。控件复用设置页组件，日期选择复用创建日程弹窗的月历。兼容表单字符串中的非法反斜杠转义（如 `\[...\]`），历史原文保持不变。
   - **主动联网核实**：提示词要求对可能变化的公开信息、产品推荐与比较、软件/API 用法和不确定事实先搜索，再引用来源回答；搜索失败时说明未能核实，遵循用户不联网的要求。搜索工具检测关键词覆盖不足后最多补搜两次，优先返回补齐关键内容的结果，标明未覆盖内容，并过滤明显跑题页面。
   - **本地记忆与上下文**：基于本地 Markdown 存储用户偏好与记忆，支持长上下文智能压缩与网络实时检索。
-  - **网页来源预览**：网页来源在对应段落末尾合并为“来源名称 +N”标签；悬停或点击展开来源列表，显示来源名称、标题和可获取的发布日期，点击条目打开原文。来源较多时可在卡片内滚动。
+  - **网页来源预览**：网页来源在对应段落末尾合并为“来源名称 +N”标签；悬停或点击展开来源列表，显示来源名称、标题和可获取的发布日期，点击条目打开原文。标签与卡片条目悬停时显示箭头光标；预览卡片宽 300 pt，左右留白 12 pt、上下留白 10 pt，来源较多时可在卡片内滚动。
   - **本地数学公式排版**：原生支持行内与独立 LaTeX 公式（`$…$`、`$$…$$`）排版。
   - **日程与路线规划**：集成系统 MapKit 能力，对比驾车、公交与步行耗时，自动为日程计算含缓冲时间的建议出发时间。
 
@@ -168,6 +168,7 @@ python3 App/Tests/run-agent-reply-regression.py --restored-transcript --restored
 python3 App/Tests/run-agent-reply-regression.py --forms-preview --custom-preview
 python3 App/Tests/run-agent-reply-regression.py --latex-form-preview
 python3 App/Tests/run-agent-reply-regression.py --prefill-preview
+python3 App/Tests/run-agent-reply-regression.py --sources-preview
 python3 App/Tests/run-agent-reply-regression.py --math-preview
 python3 App/Tests/run-agent-reply-regression.py --selection-preview
 # 光标回归会短暂移动鼠标，运行时请勿操作鼠标
@@ -250,7 +251,7 @@ Asky is a native macOS efficiency launcher built with SwiftUI and AppKit. Local 
   - **Native Interactive Forms**: Completed AI replies display structured form controls (text fields, native radio groups, dropdowns, checkboxes, date pickers and configurable hour/minute/second time or duration controls) directly in chat, which submit straight back into the conversation. Clarification and plan choices can offer both suggested answers and “Write my own”; Submit Reply sends the active answer as a message in the same conversation so the assistant can continue. All fields support editable defaults from known information or reasonable assumptions. Invalid defaults are ignored; cleared answers stay cleared, and prefilling never submits or authorizes an action. Reopening an unsubmitted form restores its original defaults; unsubmitted edits last only in the currently opened conversation. Unsubmitted forms remain available after later messages and reopening history. Submission saves the selected answers and makes the form read-only with a disabled submit button, including after history is reopened. Controls reuse the Settings components; date selection uses the calendar from the event creation dialog. Form strings tolerate invalid backslash escapes (such as `\[...\]`) while preserving the original history text.
   - **Proactive Web Verification**: Instructions require searching before answering about changing public information, product recommendations and comparisons, software/API usage, or uncertain facts, with source links. Failed searches must be disclosed, and requests not to browse are respected. The search tool retries up to twice when keyword coverage is incomplete, prioritizes results covering missing terms, reports remaining gaps, and filters clearly unrelated pages.
   - **Local Memory & Context**: Stores user preferences and context in local Markdown files with automatic context compaction and web search.
-  - **Web Source Previews**: Web sources are grouped into a source-name tag with a +N count at the end of each paragraph. Hover or click to expand a list of source names, titles, and available publication dates; click a row to open the original. Longer lists scroll within the card.
+  - **Web Source Previews**: Web sources are grouped into a source-name tag with a +N count at the end of each paragraph. Hover or click to expand a list of source names, titles, and available publication dates; click a row to open the original. Tags and card rows show an arrow cursor on hover. Cards are 300 pt wide with 12 pt horizontal and 10 pt vertical padding; longer lists scroll within the card.
   - **Native LaTeX Rendering**: Renders inline and block LaTeX formulas (`$…$`, `$$…$$`) locally.
   - **Smart Travel & Calendar Planning**: Built-in MapKit support to compare driving, transit, and walking times, suggesting arrival-buffered departure times for your day.
 
@@ -359,6 +360,7 @@ python3 App/Tests/run-agent-reply-regression.py --restored-transcript --restored
 python3 App/Tests/run-agent-reply-regression.py --forms-preview --custom-preview
 python3 App/Tests/run-agent-reply-regression.py --latex-form-preview
 python3 App/Tests/run-agent-reply-regression.py --prefill-preview
+python3 App/Tests/run-agent-reply-regression.py --sources-preview
 python3 App/Tests/run-agent-reply-regression.py --math-preview
 python3 App/Tests/run-agent-reply-regression.py --selection-preview
 # The cursor regression briefly moves the pointer; leave the mouse idle while it runs

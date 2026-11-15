@@ -89,7 +89,7 @@ final class ChatSourceTextView: ChatSelectableTextView, NSTextViewDelegate {
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         if let sourceTrackingArea { removeTrackingArea(sourceTrackingArea) }
-        let area = NSTrackingArea(rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self)
+        let area = NSTrackingArea(rect: .zero, options: [.cursorUpdate, .mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self)
         sourceTrackingArea = area
         addTrackingArea(area)
     }
@@ -107,22 +107,33 @@ final class ChatSourceTextView: ChatSelectableTextView, NSTextViewDelegate {
         return window.convertToScreen(convert(rect, to: nil))
     }
 
-    override func mouseMoved(with event: NSEvent) {
-        super.mouseMoved(with: event)
-        guard let manager = layoutManager, let container = textContainer, let storage = textStorage else { return }
-        var point = convert(event.locationInWindow, from: nil)
+    private func source(at location: NSPoint) -> (index: Int, sources: [URL])? {
+        guard let manager = layoutManager, let container = textContainer, let storage = textStorage else { return nil }
+        var point = convert(location, from: nil)
         point.x -= textContainerOrigin.x
         point.y -= textContainerOrigin.y
         let glyph = manager.glyphIndex(for: point, in: container)
         guard glyph < manager.numberOfGlyphs,
-              manager.boundingRect(forGlyphRange: NSRange(location: glyph, length: 1), in: container).insetBy(dx: -2, dy: -2).contains(point) else {
-            cancelPendingHover(); return
-        }
+              manager.boundingRect(forGlyphRange: NSRange(location: glyph, length: 1), in: container).contains(point) else { return nil }
         let index = manager.characterIndexForGlyph(at: glyph)
         guard index < storage.length,
               storage.attribute(.attachment, at: index, effectiveRange: nil) != nil,
               let sources = storage.attribute(.chatSources, at: index, effectiveRange: nil) as? [URL],
-              let url = sources.first else { cancelPendingHover(); return }
+              !sources.isEmpty else { return nil }
+        return (index, sources)
+    }
+
+    override func cursorUpdate(with event: NSEvent) {
+        if source(at: event.locationInWindow) != nil { NSCursor.arrow.set() }
+        else { super.cursorUpdate(with: event) }
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        super.mouseMoved(with: event)
+        cursorUpdate(with: event)
+        guard let (index, sources) = source(at: event.locationInWindow), let url = sources.first else {
+            cancelPendingHover(); return
+        }
         if sourceURL == url, hoverTask != nil || preview?.isShown == true { return }
         hoverTask?.cancel()
         preview?.close()
@@ -222,11 +233,11 @@ final class ChatSourcePopover {
 
     private func update() {
         let rows = ChatSourcePreview(sources: sources, metadata: metadata)
-        let measured = SurfacePanel.fittingSize(of: rows, maxWidth: 380)
+        let measured = SurfacePanel.fittingSize(of: rows, maxWidth: ChatSourcePreview.width)
         let available = textView?.window?.screen?.visibleFrame.height ?? 700
-        let size = NSSize(width: 380, height: min(measured.height, min(460, available - 32)))
+        let size = NSSize(width: ChatSourcePreview.width, height: min(measured.height, min(460, available - 32)))
         let view = ScrollView { rows }.frame(width: size.width, height: size.height)
-            .windowSurfaceBackground(in: RoundedRectangle(cornerRadius: 16))
+            .windowSurfaceBackground(in: RoundedRectangle(cornerRadius: 12))
         if let host {
             // Preserve ScrollView identity and its offset as individual source metadata arrives.
             host.rootView = AnyView(view)
@@ -237,7 +248,7 @@ final class ChatSourcePopover {
             host.sizingOptions = []
             host.frame = NSRect(origin: .zero, size: size)
             panel.setContentSize(size)
-            panel.contentView = WindowSurface.glassContentView(host, cornerRadius: 16)
+            panel.contentView = WindowSurface.glassContentView(host, cornerRadius: 12)
             self.host = host
         }
         panel.invalidateShadow()
@@ -264,6 +275,7 @@ final class ChatSourcePopover {
     }
 }
 struct ChatSourcePreview: View {
+    static let width: CGFloat = 300
     let sources: [URL]
     var metadata: [URL: ChatLinkService.Preview] = [:]
 
@@ -281,10 +293,10 @@ struct ChatSourcePreview: View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(sources.enumerated()), id: \.element) { index, url in
                 if index > 0 {
-                    Rectangle().fill(ThemeColor.kBorder).frame(height: 1).padding(.vertical, 16)
+                    Rectangle().fill(ThemeColor.kBorder).frame(height: 1).padding(.vertical, 10)
                 }
                 Link(destination: url) {
-                    VStack(alignment: .leading, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 4) {
                         Text(metadata[url]?.siteName ?? ChatSourceTextView.domain(url))
                             .font(.system(size: 13)).foregroundStyle(ThemeColor.kTextSubtle)
                         Text(metadata[url]?.title ?? url.absoluteString)
@@ -295,8 +307,9 @@ struct ChatSourcePreview: View {
                         }
                     }.multilineTextAlignment(.leading).frame(maxWidth: .infinity, alignment: .leading)
                         .contentShape(.rect)
-                }.buttonStyle(.plain)
+                }.buttonStyle(.plain).actionArrowCursor()
             }
-        }.padding(20).frame(width: 380, alignment: .leading)
+        }.padding(.horizontal, 12).padding(.vertical, 10)
+            .frame(width: Self.width, alignment: .leading)
     }
 }

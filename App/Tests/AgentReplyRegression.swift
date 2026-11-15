@@ -216,8 +216,29 @@ enum AgentReplyRegression {
             }
 
         }
+        let kimi = URL(string: "https://platform.kimi.com/")!
+        for (name, scheme) in [("light", ColorScheme.light), ("dark", .dark)] {
+            let rows = ChatSourcePreview(sources: [kimi], metadata: [kimi: .init(
+                title: "Kimi K3.1 Pro - Kimi API 开放平台", siteName: "Kimi API 开放平台")])
+                .environment(\.colorScheme, scheme)
+            let size = SurfacePanel.fittingSize(of: rows, maxWidth: ChatSourcePreview.width)
+            precondition(size.width == 300 && size.height < 76, "Single-source card should remain compact")
+            let host = NSHostingView(rootView: rows)
+            host.frame = NSRect(origin: .zero, size: size)
+            window.appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
+            window.contentView = WindowSurface.glassContentView(host, cornerRadius: 12)
+            window.setContentSize(size)
+            try await Task.sleep(for: .milliseconds(200))
+            let surface = window.contentView!
+            surface.layoutSubtreeIfNeeded()
+            let bitmap = surface.bitmapImageRepForCachingDisplay(in: surface.bounds)!
+            surface.cacheDisplay(in: surface.bounds, to: bitmap)
+            try bitmap.representation(using: .png, properties: [:])!.write(
+                to: URL(filePath: "build/source-card-kimi-" + name + ".png"))
+        }
+        window.setContentSize(NSSize(width: 640, height: 440))
         let many = (0..<12).map { URL(string: "https://example.com/article/\($0)")! }
-        let list = NSHostingView(rootView: ScrollView { ChatSourcePreview(sources: many) }.frame(width: 380, height: 460))
+        let list = NSHostingView(rootView: ScrollView { ChatSourcePreview(sources: many) }.frame(width: ChatSourcePreview.width, height: 460))
         window.contentView = list
         try await Task.sleep(for: .milliseconds(250))
         list.layoutSubtreeIfNeeded()
@@ -1650,7 +1671,38 @@ enum AgentReplyRegression {
         try await Task.sleep(for: .milliseconds(150))
         precondition(NSCursor.current == .iBeam, "Leaving the action must restore the body cursor")
         precondition(quotes == 0 && text.selectedRange().length == 12, "Hover must preserve selection without invoking actions")
-        print("Action cursor passed: body/overlay transitions, button click, both non-key selection actions and return to text")
+        menu.orderOut(nil)
+        window.contentView = NSHostingView(rootView: ChatMarkdownView(
+            text: "这是可选择的正文 [来源](https://example.com/kimi)")
+            .padding(24).frame(width: 600, height: 300, alignment: .topLeading))
+        try await Task.sleep(for: .milliseconds(400))
+        let sourceText = descendants(window.contentView!).compactMap { $0 as? ChatSourceTextView }.first!
+        var sourceIndex = 0
+        sourceText.textStorage!.enumerateAttribute(.chatSources,
+            in: NSRange(location: 0, length: sourceText.textStorage!.length)) { value, range, _ in
+            if value != nil { sourceIndex = range.location }
+        }
+        let anchor = sourceText.sourceAnchor(at: sourceIndex)!
+        let bodyPoint = window.convertPoint(toScreen: sourceText.convert(NSPoint(x: 8, y: 8), to: nil))
+        for _ in 0..<3 {
+            movePointer(bodyPoint)
+            try await Task.sleep(for: .milliseconds(150))
+            precondition(NSCursor.current == .iBeam, "Body beside source tag retains text cursor")
+            movePointer(NSPoint(x: anchor.midX, y: anchor.midY))
+            try await Task.sleep(for: .milliseconds(150))
+            precondition(NSCursor.current == .arrow, "Source tag must show arrow through native event dispatch")
+        }
+        try await Task.sleep(for: .milliseconds(350))
+        let card = sourceText.preview!.panel
+        precondition(card.isVisible && card.frame.width == 300, "Source hover opens compact card")
+        movePointer(card.convertPoint(toScreen: NSPoint(x: 24, y: card.frame.height / 2)))
+        try await Task.sleep(for: .milliseconds(150))
+        precondition(NSCursor.current == .arrow, "Source card row must retain the action cursor")
+        movePointer(bodyPoint)
+        try await Task.sleep(for: .milliseconds(150))
+        precondition(NSCursor.current == .iBeam, "Leaving source card restores text cursor")
+        sourceText.preview?.close()
+        print("Action cursor passed: overlays, selection actions, source tags/cards and return to text")
     }
 
     static func main() async throws {
