@@ -4,9 +4,13 @@ import ToolService
 
 /// Public search only. An ephemeral session never sends model keys or browser cookies.
 public struct WebSearchTool: ToolAdapter {
-    public init() {}
+    typealias Fetch = @Sendable (URL) async throws -> String
+    private let fetch: Fetch
+    public init() { fetch = Self.fetchHTML }
+    init(fetch: @escaping Fetch) { self.fetch = fetch }
+    public var executionTimeout: Duration? { .seconds(35) }
     public var definition: ToolDefinition {
-        ToolDefinition(name: "web_search", summary: CoreLocalization.text("联网核实公开信息（Bing，无需 API Key）。回答可能变化的信息、产品推荐与比较、软件/API 用法、拿不准的事实或用户要求查证时，必须先调用，不必等待用户说“联网”。返回标题、来源链接和摘要；摘要不等于网页全文"),
+        ToolDefinition(name: "web_search", summary: CoreLocalization.text("联网核实公开信息（Bing，无需 API Key）。回答可能变化的信息、产品推荐与比较、软件/API 用法、拿不准的事实或用户要求查证时，必须先调用，不必等待用户说“联网”。返回标题、来源链接和摘要；摘要不等于网页全文") + CoreLocalization.text("。工具会检查关键词覆盖并最多补搜两次；检查 quality、missingTerms 和 attempts，partial 或 no_relevant_results 不能作为否定事实的证据"),
             inputSchema: Args.schema(["query": Args.stringProp,
                 "count": ["type": "integer", "minimum": 1, "maximum": 10]], required: ["query"]),
             source: .web, effect: .read, confirmation: .never, externallyExposable: false)
@@ -22,12 +26,91 @@ public struct WebSearchTool: ToolAdapter {
             }
             count = Int(n)
         } else { count = 5 }
+        let quality = WebSearchQuality(query: query)
+        var pending = [query]
+        var results: [JSONValue] = []
+        var attempts: [JSONValue] = []
+        var seen = Set<String>()
+        var ignoredTerms: [String] = []
+        var lastFailure: Error?
+        while !pending.isEmpty && attempts.count < 3 {
+            try Task.checkCancellation()
+            let searchQuery = pending.removeFirst()
+            let url = Self.searchURL(searchQuery)
+            do {
+                let html = try await fetch(url)
+                try Task.checkCancellation()
+                // Inspect every available result before enforcing the caller's count.
+                let page = try Self.output(html: html, query: searchQuery, searchURL: url, count: 10)
+                let candidates = page["results"]?.arrayValue ?? []
+                let matched = quality.matchedTerms(in: candidates)
+                let missing = quality.terms.filter { !matched.contains($0) }
+                attempts.append(["query": .string(searchQuery), "searchURL": .string(url.absoluteString),
+                                 "resultCount": .number(Double(candidates.count)),
+                                 "missingTerms": .array(missing.map { .string($0) }), "status": "completed"])
+                if attempts.count == 1 {
+                    ignoredTerms = missing
+                    pending += quality.retryQueries(after: candidates)
+                }
+                for candidate in candidates where quality.relevant(candidate) {
+                    guard let link = candidate["url"]?.stringValue, seen.insert(link).inserted else { continue }
+                    results.append(candidate)
+                }
+                // Retry if the provider ignored query terms, even when some generic results look relevant.
+                if !results.isEmpty && missing.isEmpty { break }
+            } catch {
+                try Task.checkCancellation()
+                if error is CancellationError || (error as? URLError)?.code == .cancelled { throw error }
+                lastFailure = error
+                attempts.append(["query": .string(searchQuery), "searchURL": .string(url.absoluteString),
+                                 "status": "failed", "error": .string(error.localizedDescription)])
+            }
+        }
+        // Generic portal pages must not survive when the engine ignored a subject term.
+        let ignoredSubjects = quality.subjectTerms(ignoredTerms)
+        if !ignoredSubjects.isEmpty {
+            results.removeAll { candidate in
+                !quality.matchedTerms(in: [candidate]).contains(where: { ignoredSubjects.contains($0) })
+            }
+        }
+        // Prefer results covering the terms that the first response ignored.
+        results = results.enumerated().sorted { lhs, rhs in
+            let left = quality.matchedTerms(in: [lhs.element])
+            let right = quality.matchedTerms(in: [rhs.element])
+            let leftRecovered = left.filter { ignoredTerms.contains($0) }.count
+            let rightRecovered = right.filter { ignoredTerms.contains($0) }.count
+            if leftRecovered != rightRecovered { return leftRecovered > rightRecovered }
+            if left.count != right.count { return left.count > right.count }
+            return lhs.offset < rhs.offset
+        }.map(\.element)
+        let selected = Array(results.prefix(count))
+        let matched = quality.matchedTerms(in: selected)
+        let missing = quality.terms.filter { !matched.contains($0) }
+        if selected.isEmpty && attempts.allSatisfy({ $0["status"]?.stringValue == "failed" }), let lastFailure {
+            throw lastFailure
+        }
+        let status = selected.isEmpty ? "no_relevant_results" : (missing.isEmpty ? "matched" : "partial")
+        return AdapterOutput(output: ["provider": "Bing", "query": .string(query),
+            "searchURL": .string(Self.searchURL(query).absoluteString),
+            "retrievedAt": .string(ISO8601DateFormatter().string(from: Date())),
+            "contentType": "search_snippets", "quality": .string(status),
+            "missingTerms": .array(missing.map { .string($0) }), "attempts": .array(attempts),
+            "results": .array(selected),
+            "notice": .string(CoreLocalization.text("关键词匹配不等于事实核实；partial 表示仍缺查询内容，no_relevant_results 表示未找到足够相关的结果，均不能据此断言对象不存在。摘要不等于网页全文。"))])
+    }
+
+    static func searchURL(_ query: String) -> URL {
         var components = URLComponents(string: "https://www.bing.com/search")!
         components.queryItems = [URLQueryItem(name: "q", value: query)]
-        let url = components.url!
+        // Search endpoints decode form-style '+' as a space; preserve literal C++ and +term.
+        components.percentEncodedQuery = components.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
+        return components.url!
+    }
+
+    private static func fetchHTML(_ url: URL) async throws -> String {
         let config = URLSessionConfiguration.ephemeral
-        config.timeoutIntervalForRequest = 15
-        config.timeoutIntervalForResource = 15
+        config.timeoutIntervalForRequest = 10
+        config.timeoutIntervalForResource = 10
         config.httpCookieStorage = nil
         let session = URLSession(configuration: config)
         defer { session.invalidateAndCancel() }
@@ -46,7 +129,7 @@ public struct WebSearchTool: ToolAdapter {
         guard let html = String(data: data, encoding: .utf8) else {
             throw ToolError(.unavailable, CoreLocalization.text("搜索响应编码无法解析"))
         }
-        return AdapterOutput(output: try Self.output(html: html, query: query, searchURL: url, count: count))
+        return html
     }
 
     static func output(html: String, query: String, searchURL: URL, count: Int) throws -> JSONValue {

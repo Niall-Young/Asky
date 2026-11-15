@@ -353,3 +353,5 @@
 "历史分页游标无效" = "历史分页游标无效";
 "搜索词须为 1–500 字" = "搜索词须为 1–500 字";
 "聊天历史仅向应用内 Agent 开放" = "聊天历史仅向应用内 Agent 开放";
+"。工具会检查关键词覆盖并最多补搜两次；检查 quality、missingTerms 和 attempts，partial 或 no_relevant_results 不能作为否定事实的证据" = "。工具会检查关键词覆盖并最多补搜两次；检查 quality、missingTerms 和 attempts，partial 或 no_relevant_results 不能作为否定事实的证据";
+"关键词匹配不等于事实核实；partial 表示仍缺查询内容，no_relevant_results 表示未找到足够相关的结果，均不能据此断言对象不存在。摘要不等于网页全文。" = "关键词匹配不等于事实核实；partial 表示仍缺查询内容，no_relevant_results 表示未找到足够相关的结果，均不能据此断言对象不存在。摘要不等于网页全文。";

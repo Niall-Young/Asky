@@ -353,3 +353,5 @@
 "历史分页游标无效" = "Invalid conversation history cursor";
 "搜索词须为 1–500 字" = "Search query must contain 1–500 characters";
 "聊天历史仅向应用内 Agent 开放" = "Chat history is only available to the in-app Agent";
+"。工具会检查关键词覆盖并最多补搜两次；检查 quality、missingTerms 和 attempts，partial 或 no_relevant_results 不能作为否定事实的证据" = ". The tool checks keyword coverage and retries up to twice. Inspect quality, missingTerms and attempts; partial or no_relevant_results is not evidence that something does not exist";
+"关键词匹配不等于事实核实；partial 表示仍缺查询内容，no_relevant_results 表示未找到足够相关的结果，均不能据此断言对象不存在。摘要不等于网页全文。" = "Keyword coverage is not fact verification. partial means query content is still missing; no_relevant_results means no sufficiently related results were found. Neither proves that the subject does not exist. Snippets are not full webpages.";
