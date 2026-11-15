@@ -290,6 +290,36 @@ private struct ChatInlineNativeText: NSViewRepresentable {
     let background: NSColor
     let linkColor: NSColor
 
+    @MainActor
+    final class Measurement {
+        let storage = NSTextStorage()
+        let manager = NSLayoutManager()
+        let container = NSTextContainer(size: .zero)
+        private(set) var naturalWidth: CGFloat = 2
+
+        init() {
+            container.lineFragmentPadding = 0
+            storage.addLayoutManager(manager)
+            manager.addTextContainer(container)
+        }
+
+        func update(_ content: NSAttributedString) {
+            guard !storage.isEqual(to: content) else { return }
+            storage.setAttributedString(content)
+            container.containerSize = NSSize(width: 100_000, height: CGFloat.greatestFiniteMagnitude)
+            manager.ensureLayout(for: container)
+            naturalWidth = ceil(manager.usedRect(for: container).width) + 2
+        }
+
+        func height(for width: CGFloat) -> CGFloat {
+            container.containerSize = NSSize(width: width, height: .greatestFiniteMagnitude)
+            manager.ensureLayout(for: container)
+            return ceil(manager.usedRect(for: container).height) + 4
+        }
+    }
+
+    func makeCoordinator() -> Measurement { Measurement() }
+
     func makeNSView(context: Context) -> NSTextView {
         let storage = NSTextStorage()
         let manager = ChatInlineLayoutManager()
@@ -384,6 +414,7 @@ private struct ChatInlineNativeText: NSViewRepresentable {
             selectable.selectedTextAttributes = [.backgroundColor: NSColor(selectionColor).withAlphaComponent(0.45)]
         }
         view.linkTextAttributes = [.foregroundColor: linkColor, .underlineStyle: NSUnderlineStyle.single.rawValue]
+        context.coordinator.update(result)
         if view.textStorage?.isEqual(to: result) != true { view.textStorage?.setAttributedString(result) }
     }
 
@@ -399,27 +430,15 @@ private struct ChatInlineNativeText: NSViewRepresentable {
             proposedWidth = max(200, (view.string.components(separatedBy: "\n").map {
                 ($0 as NSString).size(withAttributes: [.font: NSFont.monospacedSystemFont(ofSize: 14, weight: .regular)]).width
             }.max() ?? 200) + 2)
-        } else if shrinkToFit, let container = view.textContainer, let manager = view.layoutManager {
-            // Measure the actual glyphs, including bold text, emoji and attachments.
-            // The offered width is a ceiling, not a request to stretch a short reply.
-            let renderedSize = container.containerSize
-            container.containerSize = NSSize(width: 100_000, height: CGFloat.greatestFiniteMagnitude)
-            manager.ensureLayout(for: container)
-            let natural = ceil(manager.usedRect(for: container).width) + 2
-            container.containerSize = renderedSize
+        } else if shrinkToFit {
+            // Never measure natural width with the live NSTextView's layout manager:
+            // AppKit can retain its rendered line width and add the 2 pt inset again
+            // on every hover update. Measure immutable content in an independent stack.
+            let natural = context.coordinator.naturalWidth
             proposedWidth = min(proposal.width ?? natural, natural)
         } else { proposedWidth = proposal.width }
-        guard let width = proposedWidth, width > 0, let container = view.textContainer,
-              let manager = view.layoutManager else { return nil }
-        // Measuring a proposed width must not change the rendered frame or leave the
-        // text container at a temporary HStack probe width. AppKit receives the final
-        // SwiftUI frame through ChatSelectableTextView.setFrameSize.
-        let renderedSize = container.containerSize
-        container.containerSize = NSSize(width: width, height: CGFloat.greatestFiniteMagnitude)
-        manager.ensureLayout(for: container)
-        let height = ceil(manager.usedRect(for: container).height) + 4
-        container.containerSize = renderedSize
-        return CGSize(width: width, height: height)
+        guard let width = proposedWidth, width > 0 else { return nil }
+        return CGSize(width: width, height: context.coordinator.height(for: width))
     }
 }
 

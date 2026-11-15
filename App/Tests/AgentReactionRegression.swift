@@ -80,3 +80,103 @@ extension AgentReplyRegression {
         print("Reaction regression passed: all three modes, completed-only presentation, history, cancellation and target isolation")
     }
 }
+
+
+extension AgentReplyRegression {
+    /// Run inside NSApplication.run: sendEvent alone does not exercise SwiftUI hover tracking.
+    static func userBubbleHoverRegression() async throws {
+        let originalPointer = NSEvent.mouseLocation
+        func movePointer(_ point: NSPoint) {
+            CGEvent(mouseEventSource: nil, mouseType: .mouseMoved,
+                mouseCursorPosition: CGPoint(x: point.x, y: NSScreen.screens[0].frame.maxY - point.y),
+                mouseButton: .left)?.post(tap: .cghidEventTap)
+        }
+        defer { movePointer(originalPointer) }
+        func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
+        let samples = ["Anthropic 呢?", "谢谢 🤖", String(repeating: "长消息达到最大宽度后正常换行。", count: 8)]
+        let reply = "短 AI 回复也应保持宽度。"
+        for (sampleIndex, sample) in samples.enumerated() {
+            for (name, appearance) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
+                let root = FileManager.default.temporaryDirectory.appending(path: "Asky-hover-\(UUID())")
+                defer { try? FileManager.default.removeItem(at: root) }
+                let app = try AppModel(root: root)
+                let store = ConversationStore(app.store)
+                let cid = try store.create(title: "User bubble hover")
+                try store.append(conversationID: cid, role: "user", text: sample)
+                let model = AgentModel(app: app)
+                model.open(cid)
+                model.avatarColor = .yellow
+                model.beginResponse(taskID: "hover-reaction")
+                model.handle(.message(taskID: "hover-reaction", "<asky-reaction>🤖</asky-reaction>\n" + reply), conversationID: cid)
+                model.handle(.taskState(taskID: "hover-reaction", .completed), conversationID: cid)
+                model.finishTask(conversationID: cid)
+                let controller = AgentWindowController(model: model, presentation: WindowPresentation())
+                controller.show()
+                let window = NSApp.windows.first { $0.title == "Asky AI" && $0.isVisible }!
+                defer { window.orderOut(nil) }
+                // Other native regression windows may be running in the workspace.
+                // Keep pointer events on this fixture rather than a normal-level window.
+                window.level = .floating
+                window.appearance = NSAppearance(named: appearance)
+                NSApp.activate(ignoringOtherApps: true)
+                movePointer(window.convertPoint(toScreen: NSPoint(x: 10, y: 10)))
+                try await Task.sleep(for: .milliseconds(700))
+                let surface = window.contentView!
+                let texts = descendants(surface).compactMap { $0 as? NSTextView }
+                let text = texts.first { $0.string == sample }!
+                let answer = texts.first { $0.string == reply }!
+                let initial = text.convert(text.bounds, to: surface)
+                let answerFrame = answer.convert(answer.bounds, to: surface)
+                let textFrame = text.convert(text.bounds, to: nil)
+                let copyPoint = NSPoint(x: textFrame.maxX + 4, y: textFrame.minY - 32)
+                let copyRect = surface.convert(NSRect(x: copyPoint.x - 14, y: copyPoint.y - 14, width: 28, height: 28), from: nil)
+                func snapshot() -> NSBitmapImageRep {
+                    let bitmap = surface.bitmapImageRepForCachingDisplay(in: surface.bounds)!
+                    surface.cacheDisplay(in: surface.bounds, to: bitmap)
+                    return bitmap
+                }
+                func pixels(_ bitmap: NSBitmapImageRep, in rect: NSRect) -> Data {
+                    let scale = CGFloat(bitmap.pixelsWide) / surface.bounds.width
+                    let crop = CGRect(x: rect.minX * scale,
+                        y: (surface.bounds.height - rect.maxY) * scale,
+                        width: rect.width * scale, height: rect.height * scale)
+                    return NSBitmapImageRep(cgImage: bitmap.cgImage!.cropping(to: crop)!)
+                        .representation(using: .png, properties: [:])!
+                }
+                let initialBitmap = snapshot()
+                let hiddenCopy = pixels(initialBitmap, in: copyRect)
+                let bubbleRect = initial.insetBy(dx: -18, dy: -14)
+                let beforeBubble = pixels(initialBitmap, in: bubbleRect)
+                print("Hover \(sampleIndex) \(name) initial: \(initial)")
+                for index in 0..<12 {
+                    let phase = index % 3
+                    let point = phase == 0 ? text.convert(NSPoint(x: 20, y: 10), to: nil)
+                        : phase == 1 ? copyPoint : NSPoint(x: 10, y: 10)
+                    window.makeKeyAndOrderFront(nil)
+                    NSApp.activate(ignoringOtherApps: true)
+                    movePointer(window.convertPoint(toScreen: point))
+                    try await Task.sleep(for: .milliseconds(180))
+                    surface.layoutSubtreeIfNeeded()
+                    let frame = text.convert(text.bounds, to: surface)
+                    let bitmap = snapshot()
+                    if index < 3 {
+                        try bitmap.representation(using: .png, properties: [:])!.write(to: URL(filePath: "build/user-bubble-hover-\(sampleIndex)-\(name)-\(phase).png"))
+                    }
+                    print("Hover \(sampleIndex) \(name) \(index): \(frame), target=\(point), pointer=\(window.mouseLocationOutsideOfEventStream), key=\(window.isKeyWindow)")
+                    precondition(abs(frame.width - initial.width) < 0.5 && abs(frame.height - initial.height) < 0.5
+                        && abs(frame.minX - initial.minX) < 0.5 && abs(frame.minY - initial.minY) < 0.5,
+                        "Hovering must not resize or move the user bubble")
+                    precondition(answer.convert(answer.bounds, to: surface) == answerFrame,
+                        "User hover must not move or resize the AI reply")
+                    precondition(pixels(bitmap, in: bubbleRect) == beforeBubble,
+                        "The rendered bubble must remain pixel-identical")
+                    precondition((pixels(bitmap, in: copyRect) == hiddenCopy) == (phase == 2),
+                        "Copy must appear on hover, stay visible over its button, then hide on exit")
+                }
+                if sampleIndex < 2 { precondition(initial.width < 130, "Short user text must hug content") }
+                else { precondition(initial.height > 40, "Long user text must wrap") }
+            }
+        }
+        print("User bubble hover passed: 72 native pointer transitions, copy visibility, stable user/AI frames and bubble pixels, reactions, short/emoji/long text, light/dark")
+    }
+}

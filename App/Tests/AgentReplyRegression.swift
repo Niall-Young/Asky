@@ -161,10 +161,10 @@ enum AgentReplyRegression {
             var sourceText: ChatSourceTextView?
             func inspect(_ node: NSView) {
                 if let text = node as? ChatSourceTextView, let storage = text.textStorage {
-                    if sourceText == nil { sourceText = text }
                     var firstSource: Int?
                     storage.enumerateAttribute(.attachment, in: NSRange(location: 0, length: storage.length)) { value, range, _ in
                         guard value is NSTextAttachment else { return }
+                        if sourceText == nil { sourceText = text }
                         badges += 1
                         if firstSource == nil { firstSource = range.location }
                         precondition(storage.attribute(.link, at: range.location, effectiveRange: nil) as? URL != nil)
@@ -186,7 +186,8 @@ enum AgentReplyRegression {
             try bitmap.representation(using: .png, properties: [:])!.write(to: URL(filePath: "build/sources-" + name + ".png"))
             if let text = sourceText, let storage = text.textStorage, let manager = text.layoutManager, let container = text.textContainer {
                 var linkRange = NSRange()
-                storage.enumerateAttribute(.link, in: NSRange(location: 0, length: storage.length)) { value, range, stop in
+                // Target the source attachment, not an earlier heading or ordinary inline link.
+                storage.enumerateAttribute(.chatSources, in: NSRange(location: 0, length: storage.length)) { value, range, stop in
                     if value != nil { linkRange = range; stop.pointee = true }
                 }
                 let rect = manager.boundingRect(forGlyphRange: manager.glyphRange(forCharacterRange: linkRange, actualCharacterRange: nil), in: container)
@@ -1535,6 +1536,22 @@ enum AgentReplyRegression {
     static func main() async throws {
         let application = NSApplication.shared
         application.setActivationPolicy(.accessory)
+        if CommandLine.arguments.contains("--user-bubble-hover") {
+            var completed = false
+            Task { @MainActor in
+                do {
+                    try await userBubbleHoverRegression()
+                } catch { preconditionFailure("User bubble hover failed: \(error)") }
+                completed = true
+                application.stop(nil)
+                application.postEvent(NSEvent.otherEvent(with: .applicationDefined, location: .zero,
+                    modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil,
+                    subtype: 0, data1: 0, data2: 0)!, atStart: true)
+            }
+            application.run()
+            precondition(completed)
+            return
+        }
         if CommandLine.arguments.contains("--continuous-selection-preview") {
             // Native mouse tracking changes run-loop modes; keep a real AppKit loop alive.
             var completed = false

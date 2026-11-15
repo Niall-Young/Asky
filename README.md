@@ -155,6 +155,7 @@ open -n build/DerivedData/Build/Products/Debug/Asky.app --args --show-agent
 # 气泡对话与等待状态回归（先完成 Debug 构建）
 python3 App/Tests/run-agent-reply-regression.py --reply-activity-preview
 python3 App/Tests/run-agent-reply-regression.py --bubble-width-preview
+python3 App/Tests/run-agent-reply-regression.py --user-bubble-hover
 python3 App/Tests/run-agent-reply-regression.py --reading-scroll
 python3 App/Tests/run-agent-reply-regression.py --scroll-stability
 python3 App/Tests/run-agent-reply-regression.py --paging
@@ -340,6 +341,7 @@ open -n build/DerivedData/Build/Products/Debug/Asky.app --args --show-agent
 # Bubble conversation and waiting-state regression (build Debug first)
 python3 App/Tests/run-agent-reply-regression.py --reply-activity-preview
 python3 App/Tests/run-agent-reply-regression.py --bubble-width-preview
+python3 App/Tests/run-agent-reply-regression.py --user-bubble-hover
 python3 App/Tests/run-agent-reply-regression.py --reading-scroll
 python3 App/Tests/run-agent-reply-regression.py --scroll-stability
 python3 App/Tests/run-agent-reply-regression.py --paging
