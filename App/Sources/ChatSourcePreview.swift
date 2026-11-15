@@ -293,7 +293,8 @@ struct ChatSourcePreview: View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(sources.enumerated()), id: \.element) { index, url in
                 if index > 0 {
-                    Rectangle().fill(ThemeColor.kBorder).frame(height: 1).padding(.vertical, 10)
+                    Rectangle().fill(ThemeColor.kBorder).frame(height: 1)
+                        .padding(.horizontal, 8).padding(.vertical, 4)
                 }
                 Link(destination: url) {
                     VStack(alignment: .leading, spacing: 4) {
@@ -306,10 +307,10 @@ struct ChatSourcePreview: View {
                             Text(date).font(.system(size: 13)).foregroundStyle(ThemeColor.kTextSubtle)
                         }
                     }.multilineTextAlignment(.leading).frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(.rect)
-                }.buttonStyle(.plain).actionArrowCursor()
+                        .padding(.horizontal, 8).padding(.vertical, 6)
+                }.buttonStyle(AgentIconButtonStyle(cornerRadius: 8))
             }
-        }.padding(.horizontal, 12).padding(.vertical, 10)
+        }.padding(4)
             .frame(width: Self.width, alignment: .leading)
     }
 }
