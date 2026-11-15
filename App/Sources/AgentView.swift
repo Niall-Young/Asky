@@ -990,8 +990,13 @@ private struct ChatBubble: View {
                                     .font(.system(size: 15))
                                     .padding(.horizontal, 7)
                                     .frame(height: 26)
-                                    .background(Capsule().fill(ThemeColor.kBackgroundNeutral))
-                                    .overlay(Capsule().strokeBorder(ThemeColor.kTextSubtlest.opacity(0.16), lineWidth: 0.5))
+                                    .background {
+                                        Capsule().fill(ThemeColor.kBackgroundNeutral)
+                                            .overlay {
+                                                Capsule().fill(model.avatarColor.userBubbleTint(for: scheme))
+                                            }
+                                    }
+                                    .overlay(Capsule().strokeBorder(.white, lineWidth: 1))
                                     // Cross the bubble's lower-left edge by half the badge height.
                                     // Its upper half stays within the 14 pt bottom text inset.
                                     .offset(x: -8, y: 13)
