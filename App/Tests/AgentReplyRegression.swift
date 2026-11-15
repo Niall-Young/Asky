@@ -1384,11 +1384,10 @@ enum AgentReplyRegression {
                 NSApplication.shared.sendEvent(event)
                 if type == .leftMouseDown {
                     try await Task.sleep(for: .milliseconds(140))
-                    precondition(window.frame.width > restingSize.width + 1, "The glass window itself must expand on press")
+                    precondition(window.frame.size == restingSize, "Selection actions must keep their size while pressed")
                     try capture("pressed-menu", window: window)
                 } else {
-                    try await Task.sleep(for: .milliseconds(50))
-                    precondition(window.isVisible, "Keep the release feedback visible before dismissing")
+                    precondition(!window.isVisible, "Selection actions must dismiss immediately on release")
                 }
             }
         }
