@@ -1412,6 +1412,32 @@ enum AgentReplyRegression {
                 }
             }
         }
+        // Exercise the actual message action, including draft preservation and focus.
+        try await Task.sleep(for: .milliseconds(400))
+        model.draft = "继续解释这条回答"
+        for _ in 0..<2 {
+            let text = descendants(window.contentView!).compactMap { $0 as? ChatSelectableTextView }.first { $0.string.contains("平方根") }!
+            let rect = text.convert(text.bounds, to: nil)
+            // The second 28 pt action follows Copy with a 16 pt gap below the bubble.
+            let point = NSPoint(x: rect.minX - 18 + 28 + 16 + 14,
+                                y: rect.minY - 14 - 6 - 14)
+            for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                let event = NSEvent.mouseEvent(with: type, location: point, modifierFlags: [],
+                    timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                    context: nil, eventNumber: 1, clickCount: 1, pressure: type == .leftMouseDown ? 1 : 0)!
+                window.sendEvent(event)
+            }
+            try await Task.sleep(for: .milliseconds(200))
+            precondition(model.quotes.count == 1 && model.quotes[0].text == source.text,
+                         "Reply must quote the complete answer exactly once")
+            precondition(model.quotes[0].sourceMessageID == source.id)
+            precondition(model.draft == "继续解释这条回答", "Reply must preserve the prepared question")
+            precondition(!model.isRunning, "Reply must not send automatically")
+            precondition((window.firstResponder as? NSTextView)?.isEditable == true, "Reply must focus the composer")
+        }
+        try capture("whole-reply", window: window)
+        model.quotes.removeAll()
+        model.draft = ""
         for (appearance, name) in [(NSAppearance.Name.aqua, "light"), (.darkAqua, "dark")] {
             window.appearance = NSAppearance(named: appearance)
             for color in AgentAvatarColor.allCases {
