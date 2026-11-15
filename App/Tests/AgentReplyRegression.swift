@@ -930,6 +930,142 @@ enum AgentReplyRegression {
         print("Bubble reply regression passed: hidden tools and partial text, typing placeholder, complete answer and history")
     }
 
+    static func pagingRegression(app: AppModel) throws {
+        let store = ConversationStore(app.store)
+        let cid = try store.create(title: "Bidirectional pages")
+        for index in 0..<205 {
+            try store.append(conversationID: cid, role: index.isMultiple(of: 2) ? "user" : "assistant", text: "Page message \(index)")
+        }
+        for timeline in [false, true] {
+            let model = AgentModel(app: app)
+            if timeline { model.resumeTimeline() } else { model.open(cid) }
+            let expected = timeline ? store.timeline(limit: 1000) : store.messages(conversationID: cid, limit: 1000)
+            let latest = model.items.map(\.id)
+            while model.hasOlder {
+                model.loadOlder()
+                precondition(model.items.count <= AgentModel.window)
+            }
+            precondition(model.items.first?.id == expected.first?.id)
+            precondition(model.hasNewer, "Evicting newer messages must leave a path back to them")
+            var visited = Set(model.items.map(\.id))
+            while model.hasNewer {
+                model.loadNewer()
+                visited.formUnion(model.items.map(\.id))
+                precondition(model.items.count <= AgentModel.window)
+                precondition(Set(model.items.map(\.id)).count == model.items.count)
+            }
+            precondition(visited == Set(expected.map(\.id)), "Paging back down must recover every record without gaps")
+            precondition(Array(model.items.suffix(latest.count)).map(\.id) == latest)
+            model.loadOlder()
+            precondition(model.hasNewer)
+            model.loadLatestMessages()
+            precondition(model.items.map(\.id) == latest && !model.hasNewer)
+            model.beginResponse(taskID: "paging-active")
+            let activeIDs = model.items.map(\.id)
+            model.loadOlder()
+            precondition(model.items.map(\.id) == activeIDs, "History paging must not evict an active response")
+            model.finishTask(conversationID: cid)
+        }
+        // Live trimming must advance the older-page cursor to the actual window edge.
+        let model = AgentModel(app: app)
+        model.open(cid)
+        model.beginResponse(taskID: "trim-cursor")
+        for index in 0..<130 {
+            model.handle(.error(taskID: "trim-cursor", "Error \(index)"), conversationID: cid)
+        }
+        model.finishTask(conversationID: cid)
+        let edge = model.items.first!.id
+        model.loadOlder()
+        precondition(model.items.contains { $0.id == edge })
+        precondition(Set(model.items.map(\.id)).count == model.items.count)
+        print("Paging passed: both directions, latest jump, 120-record bound, active response and live-trim cursor")
+    }
+
+    static func scrollStabilityRegression(app: AppModel) async throws {
+        let store = ConversationStore(app.store)
+        let cid = try store.create(title: "Scroll stability")
+        for index in 0..<160 {
+            let count = index.isMultiple(of: 2) ? 1 : 3 + index % 9
+            let text = (0..<count).map {
+                "消息 \(index) 段落 \($0)：滚动前后必须完整保留正文和布局位置。" + String(repeating: "长消息需要正确换行。", count: index % 5)
+            }.joined(separator: "\n\n")
+            try store.append(conversationID: cid, role: index.isMultiple(of: 2) ? "user" : "assistant", text: text)
+        }
+        let model = AgentModel(app: app)
+        let controller = AgentWindowController(model: model, presentation: WindowPresentation())
+        controller.show()
+        let window = NSApplication.shared.windows.first { $0.title == "Asky AI" }!
+        defer { window.orderOut(nil) }
+        func findScroll(_ view: NSView) -> NSScrollView? {
+            if let scroll = view as? NSScrollView, scroll.contentSize.height > 200 { return scroll }
+            return view.subviews.compactMap(findScroll).first
+        }
+        func texts(_ view: NSView) -> [NSTextView] {
+            (view as? NSTextView).map { [$0] } ?? view.subviews.flatMap(texts)
+        }
+        try await Task.sleep(for: .milliseconds(1200))
+        let scroll = findScroll(window.contentView!)!
+        NotificationCenter.default.post(name: NSScrollView.willStartLiveScrollNotification, object: scroll)
+        let height = scroll.documentView!.bounds.height
+        for fraction: CGFloat in [0, 0.25, 0.5, 0.75, 1, 0.5, 0, 1] {
+            let offset = (height - scroll.contentView.bounds.height) * fraction
+            scroll.contentView.scroll(to: NSPoint(x: 0, y: offset))
+            scroll.reflectScrolledClipView(scroll.contentView)
+            try await Task.sleep(for: .milliseconds(300))
+            let actualHeight = scroll.documentView!.bounds.height
+            print("Scroll fraction=\(fraction), height=\(actualHeight), initial=\(height), offset=\(scroll.contentView.bounds.minY)")
+            precondition(abs(actualHeight - height) <= 1, "Scrolling unchanged messages must not change the document height")
+            precondition(abs(scroll.contentView.bounds.minY - offset) <= 1, "Reading position must not jump while scrolling")
+            let visible = scroll.contentView.bounds.insetBy(dx: 0, dy: 80)
+            precondition(texts(scroll).contains { !$0.string.isEmpty && scroll.contentView.convert($0.bounds, from: $0).intersects(visible) },
+                         "The viewport must contain message text after every scroll")
+        }
+        let latestIDs = model.items.map(\.id)
+        func click(distanceFromTop: CGFloat) {
+            let point = scroll.convert(NSPoint(x: scroll.bounds.midX,
+                y: scroll.isFlipped ? scroll.bounds.minY + distanceFromTop : scroll.bounds.maxY - distanceFromTop), to: nil)
+            for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                window.sendEvent(NSEvent.mouseEvent(with: type, location: point, modifierFlags: [],
+                    timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                    context: nil, eventNumber: 1, clickCount: 1, pressure: type == .leftMouseDown ? 1 : 0)!)
+            }
+        }
+        for page in 1...3 {
+            NotificationCenter.default.post(name: NSScrollView.willStartLiveScrollNotification, object: scroll)
+            scroll.contentView.scroll(to: .zero)
+            scroll.reflectScrolledClipView(scroll.contentView)
+            try await Task.sleep(for: .milliseconds(150))
+            let previousFirst = model.items.first!.id
+            let text = texts(scroll).first { $0.string.hasPrefix(model.items.first!.text.components(separatedBy: "\n\n")[0]) }!
+            let before = scroll.contentView.convert(text.bounds, from: text).minY - scroll.contentView.bounds.minY
+            click(distanceFromTop: 82)
+            try await Task.sleep(for: .milliseconds(600))
+            precondition(model.items.first?.id != previousFirst, "The older-page button must load a page")
+            precondition(model.items.count == min(40 + page * 40, 120))
+            let after = scroll.contentView.convert(text.bounds, from: text).minY - scroll.contentView.bounds.minY
+            precondition(abs(before - after) <= 1, "Prepending history must retain the visible message offset: \(before) -> \(after)")
+        }
+        precondition(model.hasNewer, "Native paging must expose evicted newer messages")
+        NotificationCenter.default.post(name: NSScrollView.willStartLiveScrollNotification, object: scroll)
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: scroll.documentView!.bounds.height - scroll.contentView.bounds.height))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        try await Task.sleep(for: .milliseconds(150))
+        let lastID = model.items.last!.id
+        let surface = window.contentView!
+        let bitmap = surface.bitmapImageRepForCachingDisplay(in: surface.bounds)!
+        surface.cacheDisplay(in: surface.bounds, to: bitmap)
+        try bitmap.representation(using: .png, properties: [:])!.write(to: URL(filePath: "build/scroll-newer-button.png"))
+        click(distanceFromTop: scroll.bounds.height - 62)
+        try await Task.sleep(for: .milliseconds(600))
+        precondition(model.items.last?.id != lastID, "The newer-page button must recover the adjacent page")
+        // The floating button must return to the latest persisted messages, not the end of an old page.
+        click(distanceFromTop: scroll.bounds.height - 24)
+        try await Task.sleep(for: .milliseconds(800))
+        precondition(model.items.map(\.id) == latestIDs && !model.hasNewer)
+        precondition(abs(scroll.documentView!.bounds.maxY - scroll.documentVisibleRect.maxY) <= 1)
+        print("Scroll stability passed: repeated scrolling, visible text, native older/newer buttons, reading anchor and latest jump")
+    }
+
     static func restoredTranscriptRegression(app: AppModel) async throws {
         let store = ConversationStore(app.store)
         let cid = try store.create(title: "Restored transcript")
@@ -1460,6 +1596,14 @@ enum AgentReplyRegression {
         }
         if CommandLine.arguments.contains("--selection-preview") {
             try await selectionPreview(app: app)
+            return
+        }
+        if CommandLine.arguments.contains("--paging") {
+            try pagingRegression(app: app)
+            return
+        }
+        if CommandLine.arguments.contains("--scroll-stability") {
+            try await scrollStabilityRegression(app: app)
             return
         }
         if CommandLine.arguments.contains("--restored-transcript") {

@@ -116,6 +116,7 @@ final class AgentModel {
     private var responseStartIndex = 0
     private var reactionTargetID: String?
     private(set) var state: AgentTaskState?
+    private(set) var hasNewer = false
     private(set) var hasOlder = false
     private(set) var newConversationRevision = 0
     private var startingNewConversation = false
@@ -140,8 +141,6 @@ final class AgentModel {
 
     private let app: AppModel
     private var timelineMode = false
-    private var timelineCursor: StoredMessage?
-    private var oldestSeq: Int?
     private var streamTask: Task<Void, Never>?
 
     init(app: AppModel) {
@@ -176,9 +175,9 @@ final class AgentModel {
     func resumeTimeline() {
         guard !isRunning else { return }
         timelineMode = true
+        hasNewer = false
         let page = store.timeline(limit: Self.firstPage)
         items = page.map(Self.item)
-        timelineCursor = page.first
         hasOlder = page.count == Self.firstPage
         conversationID = nil
         formValues = [:]
@@ -190,12 +189,11 @@ final class AgentModel {
         conversationID = id
         items = []
         formValues = [:]
-        oldestSeq = nil
         hasOlder = false
+        hasNewer = false
         guard let id else { return }
         let page = store.messages(conversationID: id, limit: Self.firstPage)
         items = page.map(Self.item)
-        oldestSeq = page.first?.seq
         hasOlder = page.count == Self.firstPage
         if let ref = conversations.first(where: { $0.id == id })?.runtimeSessionRef, let agent = app.agent {
             Task { await agent.setSessionFile(ref, for: id) }
@@ -226,23 +224,45 @@ final class AgentModel {
         extractMemories()
     }
 
+    private func storedMessage(_ item: ChatItem) -> StoredMessage? {
+        guard let cid = item.conversationID else { return nil }
+        return store.message(item.id, conversationID: cid)
+    }
+
     func loadOlder() {
-        if !timelineMode {
-            guard let id = conversationID, let seq = oldestSeq else { return }
-            let page = store.messages(conversationID: id, limit: Self.firstPage, beforeSeq: seq)
-            items.insert(contentsOf: page.map(Self.item), at: 0)
-            oldestSeq = page.first?.seq ?? seq
-            hasOlder = page.count == Self.firstPage
-            if items.count > Self.window { items.removeLast(items.count - Self.window) }
-            pruneFormValues()
-            return
-        }
-        guard let cursor = timelineCursor else { return }
-        let page = store.timeline(limit: Self.firstPage, before: cursor)
+        // Keep the active response and its indices intact until it finishes.
+        guard !isRunning, hasOlder, let cursor = items.lazy.compactMap({ self.storedMessage($0) }).first else { return }
+        let page = timelineMode
+            ? store.timeline(limit: Self.firstPage, before: cursor)
+            : store.messages(conversationID: cursor.conversationID, limit: Self.firstPage, beforeSeq: cursor.seq)
         items.insert(contentsOf: page.map(Self.item), at: 0)
-        timelineCursor = page.first
         hasOlder = page.count == Self.firstPage
-        if items.count > Self.window { items.removeLast(items.count - Self.window) }
+        if items.count > Self.window {
+            items.removeLast(items.count - Self.window)
+            hasNewer = true
+        }
+        pruneFormValues()
+    }
+
+    func loadNewer() {
+        guard !isRunning, hasNewer, let cursor = items.reversed().lazy.compactMap({ self.storedMessage($0) }).first else { return }
+        let page = timelineMode
+            ? store.newerTimeline(after: cursor, limit: Self.firstPage)
+            : store.newerMessages(conversationID: cursor.conversationID, afterSeq: cursor.seq, limit: Self.firstPage)
+        items.append(contentsOf: page.map(Self.item))
+        hasNewer = page.count == Self.firstPage
+        if items.count > Self.window {
+            items.removeFirst(items.count - Self.window)
+            hasOlder = true
+        }
+        pruneFormValues()
+    }
+
+    func loadLatestMessages() {
+        guard !isRunning, hasNewer else { return }
+        let answers = formValues
+        if timelineMode { resumeTimeline() } else { open(conversationID) }
+        formValues = answers
         pruneFormValues()
     }
 
@@ -299,7 +319,6 @@ final class AgentModel {
             items.removeFirst(removed)
             responseStartIndex = max(0, responseStartIndex - removed)
             hasOlder = true
-            oldestSeq = conversationID.flatMap { cid in items.first.flatMap { store.message($0.id, conversationID: cid)?.seq } }
             pruneFormValues()
         }
     }

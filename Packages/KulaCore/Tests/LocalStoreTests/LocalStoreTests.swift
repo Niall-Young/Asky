@@ -130,6 +130,38 @@ func tempRoot() -> URL {
         #expect(cs.search("message").isEmpty)
     }
 
+    @Test func bidirectionalTranscriptPagingIncludesToolsAndTimestampTies() throws {
+        let s = try LocalStore(inMemoryWithRoot: tempRoot())
+        let store = ConversationStore(s)
+        let cid = try store.create(title: "Paging")
+        for index in 0..<165 {
+            try store.append(conversationID: cid, role: index.isMultiple(of: 3) ? "tool" : "assistant",
+                             text: "Message \(index)", id: String(format: "message-%03d", index))
+        }
+        // Force equal timestamps to exercise the stable ID tie-breaker in both directions.
+        try s.db.run("UPDATE messages SET created_at = ?", [Date(timeIntervalSince1970: 100)])
+        let expected = store.timeline(limit: 200)
+        var page = store.timeline(limit: 40)
+        let latest = page
+        while let first = page.first {
+            let older = store.timeline(limit: 40, before: first)
+            if older.isEmpty { break }
+            page = older
+        }
+        var recovered = page
+        while let last = recovered.last {
+            let newer = store.newerTimeline(after: last, limit: 40)
+            if newer.isEmpty { break }
+            recovered += newer
+        }
+        #expect(recovered.map(\.id) == expected.map(\.id))
+        #expect(Array(recovered.suffix(40)).map(\.id) == latest.map(\.id))
+        #expect(Set(recovered.map(\.id)).count == 165)
+        let newer = store.newerMessages(conversationID: cid, afterSeq: 40, limit: 40)
+        #expect(newer.map(\.seq) == Array(41...80))
+        #expect(newer.contains { $0.role == "tool" })
+    }
+
     @Test func oldMessagesMigrateWithoutAttachments() throws {
         let db = try Database(path: ":memory:")
         try db.execute(Schema.migrations[0])

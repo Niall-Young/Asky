@@ -312,6 +312,19 @@ public struct ConversationStore: Sendable {
         return rows.reversed().map(Self.decode)
     }
 
+    /// Adjacent newer page, including presentation-only records, in transcript order.
+    public func newerMessages(conversationID: String, afterSeq: Int, limit: Int) -> [StoredMessage] {
+        ((try? db.query("SELECT * FROM messages WHERE conversation_id = ? AND seq > ? ORDER BY seq ASC LIMIT ?",
+                       [conversationID, afterSeq, limit])) ?? []).map(Self.decode)
+    }
+
+    public func newerTimeline(after: StoredMessage, limit: Int = 40) -> [StoredMessage] {
+        ((try? db.query("""
+            SELECT * FROM messages WHERE created_at > ? OR
+              (created_at = ? AND id > ?) ORDER BY created_at ASC, id ASC LIMIT ?
+            """, [after.createdAt, after.createdAt, after.id, limit])) ?? []).map(Self.decode)
+    }
+
     public func after(conversationID: String, seq: Int, limit: Int) -> [StoredMessage] {
         ((try? db.query("SELECT * FROM messages WHERE conversation_id = ? AND seq > ? AND role IN ('user','assistant') ORDER BY seq LIMIT ?",
                        [conversationID, seq, limit])) ?? []).map(Self.decode)

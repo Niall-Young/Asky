@@ -53,7 +53,7 @@ Asky 是使用 SwiftUI 与 AppKit 构建的 macOS 原生效率入口。本地全
   - **紧凑对话窗口**：固定 560 × 680 pt、26 pt 普通圆角，不可拖拽缩放；紧凑玻璃输入框采用 16 pt 圆角，附件与发送按钮均为 28 pt。顶部不显示会话标题，顶部 64 pt 内的背景模糊半径由 6 pt 向下渐进到零，不叠加颜色；右侧为无分割线的连体胶囊按钮组，常驻置顶和电源符号关闭按钮，按钮组为 96 × 36 pt、图标中心距 48 pt，悬停和按下以对应图标为中心形成柔和高光，连续向另一侧衰减，不在中间硬切；头像、按钮组与输入框统一使用原生 Clear 玻璃，以 85% 整体透明度柔化高光并保留大部分折射，并提供悬停柔和提亮、按下整体膨胀和松手回弹；开启“减少动态效果”时不缩放。
   - **液态按钮交互**：聊天与启动器操作按钮采用参考 iOS 录屏定制的按压膨胀和松手回弹，保持原有静止外观；玻璃表面悬停时柔和提亮；启动器与剪贴板底部操作按钮使用原生 Clear 玻璃，以 85% 整体透明度柔化高光并保留大部分折射，文字与快捷键保持完整不透明度。该交互不是 macOS 系统自带动画。设置按钮采用 28 pt 原生胶囊样式，单行输入、密码、下拉与搜索框统一为 28 pt 高度和胶囊圆角，指令与插件分类使用中性选中态的原生分段控件；窗口失焦时保持控件尺寸，不再额外加深背景染色；减少动态效果时关闭定制缩放。
   - **Swift 原生 Agent**：模型请求、工具循环、会话恢复和上下文压缩均由 Swift 执行。对话采用左右气泡，仅在本轮结束后展示完整回答；等待期间显示三点加载气泡，隐藏工具调用与过程说明。消息按实际高度连续排列，不为当前轮预留整屏空白；新消息自然将旧消息往上推。短回答完整显示，长回答自动滚动最多到回答开头，后续内容由用户向下滚动阅读；用户问题可被推到可视区域上方。已手动翻阅时保持阅读位置，也可手动回到底部。回复保留原生表单、复制和完成时间，Markdown 标题使用普通正文样式；无需 Node / Pi 辅助进程，支持 OpenAI-compatible Chat Completions。
-  - **持续对话**：各入口和重启后接入同一时间线，旧消息在时间线中每批加载 40 条，内存窗口最多保留 120 条；不再提供单独的历史对话页面和快捷键，滚动条隐藏；新请求按需读取保留的历史，清空聊天后保留长期记忆。
+  - **持续对话**：各入口和重启后接入同一时间线，消息按前后两个方向每批加载 40 条，内存窗口最多保留 120 条，翻页保留阅读位置；回到底部可直接恢复最新消息；不再提供单独的历史对话页面和快捷键，滚动条隐藏；新请求按需读取保留的历史，清空聊天后保留长期记忆。
   - **对话历史**：新保存的会话保留工具调用状态、错误、回复分组与耗时，支持分页恢复；旧会话未保存的工具展示记录不会自动补回。在“设置 › 智能配置 › 对话历史”选择保留 7 天、30 天（默认）、90 天或永久；按用户提交轮次的时间清理，启动时、每天及修改期限后检查。到期或手动删除会清理会话、执行记录、索引及无引用的自有附件，已保存记忆独立保留，失败文件自动重试。
   - **主动协助**：Agent 提示词优先要求利用上下文、授权记忆和工具补全信息；可调整的低风险细节采用合理默认，只询问影响结果或操作对象的关键信息。回复使用自然、体贴的语言，避免客服套话和重复确认。
   - **原生交互表单**：AI 回复完成后一次显示原生单选按钮组、下拉单选、多选、文本输入、日期及按需显示时、分、秒的时间/时长控件，AI 澄清需求或确认方案时可同时提供预设选项与「自己填写」，选择或自填后点击「提交回复」自动发送到同一会话并继续处理。所有字段支持预填已知信息或合理默认值，用户可直接修改后提交；无效预填会被忽略，手动清空不会被默认值覆盖，预填本身不提交或授权操作。重开未提交表单会恢复原始预填，尚未提交的编辑仅保留在当前打开的会话中。未提交的表单一直可填写，不因后续聊天或重开历史失效；提交后保存当时的答案并变为只读，提交按钮禁用，重新打开历史也不能重复提交。控件复用设置页组件，日期选择复用创建日程弹窗的月历。兼容表单字符串中的非法反斜杠转义（如 `\[...\]`），历史原文保持不变。
@@ -156,6 +156,8 @@ open -n build/DerivedData/Build/Products/Debug/Asky.app --args --show-agent
 python3 App/Tests/run-agent-reply-regression.py --reply-activity-preview
 python3 App/Tests/run-agent-reply-regression.py --bubble-width-preview
 python3 App/Tests/run-agent-reply-regression.py --reading-scroll
+python3 App/Tests/run-agent-reply-regression.py --scroll-stability
+python3 App/Tests/run-agent-reply-regression.py --paging
 python3 App/Tests/run-agent-reply-regression.py --bottom-push
 python3 App/Tests/run-agent-reply-regression.py --restored-transcript
 python3 App/Tests/run-agent-reply-regression.py --restored-transcript --restored-long-reply
@@ -216,7 +218,7 @@ Asky is a native macOS efficiency launcher built with SwiftUI and AppKit. Local 
 ### ✨ Key Features
 
 - 🔍 **Global Fast Search**
-  - **Continuous conversation**: All entry points resume one timeline, including after restart. Older messages load in batches of 40, with at most 120 items in the in-memory window. The separate history browser and its shortcut are removed, and scrollbars are hidden. Each request uses retained history as needed; clearing chat history preserves long-term memory.
+  - **Continuous conversation**: All entry points resume one timeline, including after restart. Messages page in both directions in batches of 40, with at most 120 items in memory and the reading position preserved across page changes. Return to Bottom restores the latest messages directly. The separate history browser and its shortcut are removed, and scrollbars are hidden. Each request uses retained history as needed; clearing chat history preserves long-term memory.
   - **Comprehensive Retrieval**: Instantly search applications, local files, Chrome tabs and bookmarks, and active application windows (`sw`).
   - **Category Filtering & Deep Dive**: Use dedicated filters like `app `, `file `, `ql ` (quick links), and `sc ` (shortcuts). Press `Tab` on any folder to browse or search its subdirectories directly.
   - **Instant Calculations & Conversions**: Support for mathematical formulas, unit conversions, and live currency rates. Enter `calc` to view calculation history and restore expressions with one click.
@@ -339,6 +341,8 @@ open -n build/DerivedData/Build/Products/Debug/Asky.app --args --show-agent
 python3 App/Tests/run-agent-reply-regression.py --reply-activity-preview
 python3 App/Tests/run-agent-reply-regression.py --bubble-width-preview
 python3 App/Tests/run-agent-reply-regression.py --reading-scroll
+python3 App/Tests/run-agent-reply-regression.py --scroll-stability
+python3 App/Tests/run-agent-reply-regression.py --paging
 python3 App/Tests/run-agent-reply-regression.py --bottom-push
 python3 App/Tests/run-agent-reply-regression.py --restored-transcript
 python3 App/Tests/run-agent-reply-regression.py --restored-transcript --restored-long-reply

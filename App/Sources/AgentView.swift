@@ -345,27 +345,25 @@ private struct Transcript: View {
     var body: some View {
         GeometryReader { geometry in
             let allGroups = groups
-            let currentTurn = allGroups.lastIndex { $0.items.first?.kind == .user } ?? max(0, allGroups.count - 1)
-            CompatibleTranscriptScroll(submittedMessageID: items.last(where: { $0.kind == .user })?.id, isWaiting: isRunning, completedReplyID: items.last(where: { $0.kind == .assistant })?.id, viewport: viewport) {
-                VStack(spacing: 0) {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        if hasOlder {
-                            Button(NSLocalizedString("加载更早的消息", comment: "")) { model.loadOlder() }.buttonStyle(.link).frame(maxWidth: .infinity)
-                        }
-                        ForEach(Array(allGroups.prefix(currentTurn).enumerated()), id: \.element.id) { index, group in
-                            ResponseGroupView(group: group, model: model)
-                                .padding(.top, index == 0 ? 0 : (group.items.first?.kind == .user ? 20 : 12))
-                        }
+            CompatibleTranscriptScroll(submittedMessageID: items.last(where: { $0.kind == .user })?.id, isWaiting: isRunning, completedReplyID: items.last(where: { $0.kind == .assistant })?.id, viewport: viewport, hasNewer: model.hasNewer, loadLatest: model.loadLatestMessages) {
+                // The model already bounds this window to 120 records. Measure it eagerly:
+                // lazy height estimates changed during scrolling and moved native text offscreen.
+                VStack(alignment: .leading, spacing: 0) {
+                    if hasOlder {
+                        Button(NSLocalizedString("加载更早的消息", comment: "")) {
+                            viewport.preserveReadingPosition { model.loadOlder() }
+                        }.buttonStyle(.link).frame(maxWidth: .infinity).disabled(isRunning)
                     }
-                    // Keep the current turn measured even when its full reply exceeds the viewport.
-                    VStack(alignment: .leading, spacing: 0) {
-                        ForEach(Array(allGroups.suffix(from: currentTurn).enumerated()), id: \.element.id) { index, group in
-                            ResponseGroupView(group: group, model: model)
-                                .padding(.top, index == 0 ? 0 : 12)
-                        }
+                    ForEach(Array(allGroups.enumerated()), id: \.element.id) { index, group in
+                        ResponseGroupView(group: group, model: model)
+                            .background { TranscriptGroupPosition(id: group.id) }
+                            .padding(.top, index == 0 ? 0 : (group.items.first?.kind == .user ? 20 : 12))
                     }
-                    .padding(.top, currentTurn == 0 ? 0 : 20)
-                    // Keep the destination outside lazy row height estimation.
+                    if model.hasNewer {
+                        Button(NSLocalizedString("加载更新的消息", comment: "")) {
+                            viewport.preserveReadingPosition { model.loadNewer() }
+                        }.buttonStyle(.link).frame(maxWidth: .infinity).padding(.top, 12).padding(.bottom, 40).disabled(isRunning)
+                    }
                     Color.clear.frame(height: 13).id("bottom")
                 }
                 .padding(.horizontal, 12).padding(.top, 12)
@@ -416,18 +414,20 @@ private struct CompatibleTranscriptScroll<Content: View>: View {
     let isWaiting: Bool
     let completedReplyID: String?
     let viewport: TranscriptViewport
+    var hasNewer = false
+    var loadLatest: () -> Void = {}
     @ViewBuilder var content: Content
 
     var body: some View {
         if #available(macOS 15, *), !SurfaceCompatibility.useMacOS14Compatibility {
-            ModernTranscriptScroll(submittedMessageID: submittedMessageID, isWaiting: isWaiting, completedReplyID: completedReplyID, viewport: viewport, content: content)
+            ModernTranscriptScroll(submittedMessageID: submittedMessageID, isWaiting: isWaiting, completedReplyID: completedReplyID, viewport: viewport, hasNewer: hasNewer, loadLatest: loadLatest, content: content)
         } else {
-            LegacyTranscriptScroll(submittedMessageID: submittedMessageID, isWaiting: isWaiting, completedReplyID: completedReplyID, viewport: viewport, content: content)
+            LegacyTranscriptScroll(submittedMessageID: submittedMessageID, isWaiting: isWaiting, completedReplyID: completedReplyID, viewport: viewport, hasNewer: hasNewer, loadLatest: loadLatest, content: content)
         }
     }
 }
 
-/// Lazy rows can refine their heights over several layout passes after a jump.
+/// Native rich text can finish layout over several passes after a page change.
 /// Only the explicit return-to-bottom button uses this destination.
 @MainActor
 private func alignTranscriptBottom(_ proxy: ScrollViewProxy, viewport: TranscriptViewport,
@@ -459,6 +459,57 @@ private final class TranscriptViewport {
     var followsLatestContent = false
 
     var replyID: String?
+
+    private var readingAnchor: (id: NSUserInterfaceItemIdentifier, offset: CGFloat)?
+    private var anchorTask: Task<Void, Never>?
+
+    func preserveReadingPosition(_ update: () -> Void) {
+        guard let scroll, let document = scroll.documentView else { update(); return }
+        followsLatestContent = false
+        readerMoved = true
+        anchorTask?.cancel()
+        readingAnchor = nil
+        func markers(_ view: NSView) -> [NSView] {
+            if view.identifier?.rawValue.hasPrefix("transcript-group-") == true { return [view] }
+            return view.subviews.flatMap(markers)
+        }
+        let visible = scroll.contentView.bounds.insetBy(dx: 0, dy: AgentLayout.headerHeight + 12)
+        if let marker = markers(document).first(where: {
+            scroll.contentView.convert($0.bounds, from: $0).intersects(visible)
+        }), let id = marker.identifier {
+            readingAnchor = (id, scroll.contentView.convert(marker.bounds, from: marker).minY - scroll.contentView.bounds.minY)
+        }
+        update()
+        anchorTask = Task { @MainActor [weak self] in
+            for _ in 0..<10 {
+                do { try await Task.sleep(for: .milliseconds(30)) } catch { return }
+                self?.restoreReadingPosition()
+            }
+            self?.readingAnchor = nil
+        }
+    }
+
+    func cancelReadingAnchor() {
+        anchorTask?.cancel()
+        readingAnchor = nil
+    }
+
+    func restoreReadingPosition() {
+        guard let readingAnchor, let scroll, let document = scroll.documentView else { return }
+        document.layoutSubtreeIfNeeded()
+        func find(_ view: NSView) -> NSView? {
+            if view.identifier == readingAnchor.id { return view }
+            return view.subviews.compactMap(find).first
+        }
+        guard let marker = find(document) else { return }
+        var bounds = scroll.contentView.bounds
+        bounds.origin.y = scroll.contentView.convert(marker.bounds, from: marker).minY - readingAnchor.offset
+        let origin = scroll.contentView.constrainBoundsRect(bounds).origin
+        if abs(scroll.contentView.bounds.minY - origin.y) > 0.5 {
+            scroll.contentView.scroll(to: origin)
+            scroll.reflectScrolledClipView(scroll.contentView)
+        }
+    }
 
     func alignLatestContent() -> Bool {
         guard let scroll, let document = scroll.documentView else { return false }
@@ -512,6 +563,14 @@ private final class TranscriptViewport {
     }
 }
 
+private struct TranscriptGroupPosition: NSViewRepresentable {
+    let id: String
+    func makeNSView(context: Context) -> NSView { NSView() }
+    func updateNSView(_ view: NSView, context: Context) {
+        view.identifier = NSUserInterfaceItemIdentifier("transcript-group-" + id)
+    }
+}
+
 private struct TranscriptReplyPosition: NSViewRepresentable {
     let id: String
     func makeNSView(context: Context) -> NSView {
@@ -529,7 +588,7 @@ private func alignTranscriptContent(viewport: TranscriptViewport, replyID: Strin
     viewport.replyID = replyID
     viewport.followsLatestContent = true
     return Task { @MainActor in
-        // Let native Markdown and lazy history settle before choosing bottom or reply start.
+        // Let native Markdown settle before choosing bottom or reply start.
         for _ in 0..<30 {
             guard !Task.isCancelled, !viewport.readerMoved else { return }
             _ = viewport.alignLatestContent()
@@ -544,6 +603,8 @@ private struct ModernTranscriptScroll<Content: View>: View {
     let isWaiting: Bool
     let completedReplyID: String?
     let viewport: TranscriptViewport
+    var hasNewer = false
+    var loadLatest: () -> Void = {}
     var content: Content
     @State private var isAtBottom = true
     @State private var bottomTask: Task<Void, Never>?
@@ -561,7 +622,7 @@ private struct ModernTranscriptScroll<Content: View>: View {
                 }
             }
             .scrollIndicators(.hidden)
-            .onDisappear { bottomTask?.cancel(); submissionTask?.cancel(); replyTask?.cancel(); viewport.followsLatestContent = false }
+            .onDisappear { bottomTask?.cancel(); submissionTask?.cancel(); replyTask?.cancel(); viewport.followsLatestContent = false; viewport.cancelReadingAnchor() }
             .onChange(of: isWaiting) { _, waiting in
                 if !waiting { submissionTask?.cancel() }
             }
@@ -592,12 +653,14 @@ private struct ModernTranscriptScroll<Content: View>: View {
                 bottomTask = alignTranscriptContent(viewport: viewport, replyID: isWaiting ? nil : completedReplyID)
             }
             .overlay(alignment: .bottom) {
-                if !isAtBottom {
+                if !isAtBottom || hasNewer {
                     Button {
                         bottomTask?.cancel()
                         submissionTask?.cancel()
                         viewport.readerMoved = true
                         viewport.followsLatestContent = false
+                        viewport.cancelReadingAnchor()
+                        loadLatest()
                         bottomTask = alignTranscriptBottom(proxy, viewport: viewport, reduceMotion: reduceMotion)
                     } label: {
                         Image(mingCute: "arrow.up", size: 20)
@@ -652,7 +715,7 @@ private struct TranscriptPosition: NSViewRepresentable {
         }
 
         @objc private func boundsChanged(_ notification: Notification) { scheduleUpdate() }
-        @objc private func userScrolled(_ notification: Notification) { onUserScroll?() }
+        @objc private func userScrolled(_ notification: Notification) { viewport?.cancelReadingAnchor(); onUserScroll?() }
 
         private func updatePosition() {
             guard let scroll = enclosingScrollView, let document = scroll.documentView else { return }
@@ -674,6 +737,7 @@ private struct TranscriptPosition: NSViewRepresentable {
             if let viewport, viewport.followsLatestContent, !viewport.readerMoved {
                 _ = viewport.alignLatestContent()
             }
+            viewport?.restoreReadingPosition()
             onChange?(viewport?.isAtBottom ?? false)
         }
 
@@ -686,6 +750,8 @@ private struct LegacyTranscriptScroll<Content: View>: View {
     let isWaiting: Bool
     let completedReplyID: String?
     let viewport: TranscriptViewport
+    var hasNewer = false
+    var loadLatest: () -> Void = {}
     var content: Content
     @State private var isAtBottom = true
     @State private var bottomTask: Task<Void, Never>?
@@ -704,7 +770,7 @@ private struct LegacyTranscriptScroll<Content: View>: View {
                     }
                 }
                 .scrollIndicators(.hidden)
-                .onDisappear { bottomTask?.cancel(); submissionTask?.cancel(); replyTask?.cancel(); viewport.followsLatestContent = false }
+                .onDisappear { bottomTask?.cancel(); submissionTask?.cancel(); replyTask?.cancel(); viewport.followsLatestContent = false; viewport.cancelReadingAnchor() }
                 .onChange(of: isWaiting) { _, waiting in
                     if !waiting { submissionTask?.cancel() }
                 }
@@ -725,12 +791,14 @@ private struct LegacyTranscriptScroll<Content: View>: View {
                     bottomTask = alignTranscriptContent(viewport: viewport, replyID: isWaiting ? nil : completedReplyID)
                 }
                 .overlay(alignment: .bottom) {
-                    if !isAtBottom {
+                    if !isAtBottom || hasNewer {
                         Button {
                             bottomTask?.cancel()
                             submissionTask?.cancel()
                             viewport.readerMoved = true
                             viewport.followsLatestContent = false
+                            viewport.cancelReadingAnchor()
+                            loadLatest()
                             bottomTask = alignTranscriptBottom(proxy, viewport: viewport, reduceMotion: reduceMotion)
                         } label: {
                             Image(mingCute: "arrow.up", size: 20)
