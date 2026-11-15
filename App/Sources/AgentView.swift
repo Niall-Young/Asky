@@ -1035,8 +1035,6 @@ private struct ChatBubble: View {
                 if showsReplyActions {
                     HStack(spacing: 16) {
                         copyButton
-                            // Align the glyph with the message text inset.
-                            .padding(.leading, 10)
                         if let completed = item.completedAt {
                             TimelineView(.periodic(from: .now, by: 1)) { context in
                                 Text(ChatCompletionTime.label(completed, now: context.date))
