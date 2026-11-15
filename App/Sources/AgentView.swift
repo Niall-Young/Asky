@@ -1077,8 +1077,10 @@ private struct ChatBubble: View {
                     }
                 if showsReplyActions {
                     HStack(spacing: 16) {
-                        copyButton
-                        replyButton
+                        HStack(spacing: 0) {
+                            copyButton
+                            replyButton
+                        }
                         if let completed = item.completedAt {
                             TimelineView(.periodic(from: .now, by: 1)) { context in
                                 Text(ChatCompletionTime.label(completed, now: context.date))
@@ -1120,7 +1122,7 @@ private struct ChatBubble: View {
         Button {
             model.addQuote(item.text, sourceMessageID: item.id)
         } label: {
-            Image(mingCute: "bubble.left", size: 14)
+            Image(mingCute: "arrow.turn.down.left", size: 14)
                 .frame(width: 16, height: 16).padding(6)
         }
         .buttonStyle(AgentIconButtonStyle())

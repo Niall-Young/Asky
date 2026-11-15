@@ -30,6 +30,7 @@ enum MingCute {
         "arrow.up.forward.app": "MingCute-external_link",
         "arrow.down.to.line": "MingCute-download",
         "arrow.left.arrow.right": "MingCute-transfer",
+        "arrow.turn.down.left": "MingCute-corner_down_left",
         "line.3.horizontal.decrease": "MingCute-filter_2",
         "list.bullet": "MingCute-history",
         "line.2.horizontal": "MingCute-custom-menu-2-lines",
