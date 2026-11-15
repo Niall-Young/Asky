@@ -57,7 +57,52 @@ enum AgentReplyRegression {
                 fixture.orderOut(nil)
             }
         }
-        print("Bubble widths passed: actual chat screenshot, short Chinese/emoji, styled text and long wrapping at 280/460 pt")
+        // A minimum-width marker must not claim half the width of a long list item.
+        let listSample = """
+        - 各家渠道对 Astra 的报价差异不小（有 $2/$10 的分档报价，也有 $10/$50 的官方价），我按 OpenAI 官方的挂牌价讲；第三方聚合平台的价格会随缓存、长上下文档位变化。
+        - 9 月之后又陆续出了 Sol、Luna、6.1 Sol、6.1 Terra 和 11 月初的网络安全专项 GPT-6 Cyber。11 月是否还有更新的通用旗舰，我这次没检索到可靠信息，不替你打包票。
+        """
+        for width: CGFloat in [280, 460] {
+            for (name, scheme) in [("light", ColorScheme.light), ("dark", .dark)] {
+                let content = listSample + "\n\n98. 编号正文需要使用标记之外的可用宽度。\n99. 第二项\n100. 三位编号\n     - 嵌套正文\n"
+                let hosted = NSHostingView(rootView: ChatMarkdownView(text: content)
+                    .padding(16)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .background(scheme == .dark ? Color(white: 0.15) : .white)
+                    .environment(\.colorScheme, scheme))
+                let fixture = NSWindow(contentRect: NSRect(x: 100, y: 100, width: width, height: 760),
+                    styleMask: [.borderless], backing: .buffered, defer: false)
+                fixture.contentView = hosted
+                fixture.orderFront(nil)
+                defer { fixture.orderOut(nil) }
+                try await Task.sleep(for: .milliseconds(180))
+                hosted.layoutSubtreeIfNeeded()
+                let views = texts(hosted)
+                let path = "build/list-width-\(Int(width))-\(name).png"
+                let bitmap = hosted.bitmapImageRepForCachingDisplay(in: hosted.bounds)!
+                hosted.cacheDisplay(in: hosted.bounds, to: bitmap)
+                try bitmap.representation(using: .png, properties: [:])!.write(to: URL(filePath: path))
+                let paragraph = views.first { $0.string.hasPrefix("各家渠道") }!
+                let frame = paragraph.convert(paragraph.bounds, to: hosted)
+                print("List width \(width) \(name): body x=\(frame.minX), width=\(frame.width)")
+                precondition(frame.minX <= 50, "Bullet must not consume half the paragraph width")
+                precondition(frame.width >= width - 70, "Long list prose must use the remaining width")
+                let nested = views.first { $0.string == "嵌套正文" }!
+                let nestedFrame = nested.convert(nested.bounds, to: hosted)
+                precondition(nestedFrame.minX > frame.minX && nestedFrame.minX < 100,
+                    "Nested lists must add only one marker column")
+                let ordered = views.filter { ["98.", "99.", "100."].contains($0.string) }
+                precondition(ordered.count == 3)
+                let rightEdges = ordered.map { $0.convert($0.bounds, to: hosted).maxX }
+                precondition(rightEdges.max()! - rightEdges.min()! <= 1, "Number markers must stay right-aligned")
+                for text in views {
+                    let used = text.layoutManager!.usedRect(for: text.textContainer!)
+                    precondition(used.width <= text.bounds.width + 1 && used.height <= text.bounds.height,
+                        "List text and markers must not clip")
+                }
+            }
+        }
+        print("Bubble widths passed: actual chat screenshot, short Chinese/emoji, styled text, long wrapping, bullet/numbered/nested lists in light/dark at 280/460 pt")
     }
 
     static func sourcesPreview() async throws {

@@ -42,13 +42,18 @@ struct ChatMarkdownView: View {
                 UnderlineStyle(.single)
             }
             .markdownBlockStyle(\.bulletedListMarker) { configuration in
+                // A minimum-width frame can claim half the row; markers need a bounded column.
                 ChatInlineText(markdown: ["•", "◦", "▪"][min(max(configuration.listLevel - 1, 0), 2)],
                                literal: true, shrinkToFit: true)
-                    .frame(minWidth: 21, alignment: .trailing)
+                    .frame(width: 21, alignment: .trailing)
             }
             .markdownBlockStyle(\.numberedListMarker) { configuration in
-                ChatInlineText(markdown: "\(configuration.itemNumber).", literal: true, shrinkToFit: true)
-                    .frame(minWidth: 21, alignment: .trailing)
+                let marker = "\(configuration.itemNumber)."
+                let width = ceil((marker as NSString).size(withAttributes: [
+                    .font: NSFont.systemFont(ofSize: Self.bodyStyle.size)
+                ]).width) + 2
+                ChatInlineText(markdown: marker, literal: true, shrinkToFit: true)
+                    .frame(width: max(21, width), alignment: .trailing)
             }
             .markdownBlockStyle(\.listItem) { configuration in
                 configuration.label
