@@ -94,6 +94,7 @@ private enum AgentLayout {
     static let headerHeight: CGFloat = 64
     static let messageHorizontalInset: CGFloat = 18
     static let messageVerticalInset: CGFloat = 14
+    static let userMessageVerticalInset: CGFloat = 12
 }
 
 struct AgentView: View {
@@ -990,7 +991,7 @@ private struct ChatBubble: View {
                     }
                 }
                 VStack(alignment: .trailing, spacing: 4) {
-                    HStack { Spacer(minLength: 40); bubble.padding(.horizontal, AgentLayout.messageHorizontalInset).padding(.vertical, AgentLayout.messageVerticalInset)
+                    HStack { Spacer(minLength: 40); bubble.padding(.horizontal, AgentLayout.messageHorizontalInset).padding(.vertical, AgentLayout.userMessageVerticalInset)
                         .background {
                             RoundedRectangle(cornerRadius: 16).fill(ThemeColor.kBackgroundNeutral)
                                 .overlay {
@@ -1010,9 +1011,8 @@ private struct ChatBubble: View {
                                             }
                                     }
                                     .overlay(Capsule().strokeBorder(scheme == .dark ? ThemeColor.kBorder.color(for: scheme) : .white, lineWidth: 1))
-                                    // Cross the bubble's lower-left edge by half the badge height.
-                                    // Its upper half stays within the 14 pt bottom text inset.
-                                    .offset(x: -8, y: 13)
+                                    // Keep the overlapping badge within the bottom text inset.
+                                    .offset(x: -8, y: 26 - AgentLayout.userMessageVerticalInset)
                                     .allowsHitTesting(false)
                                     .accessibilityLabel(String(format: NSLocalizedString("Asky 回应了 %@", comment: ""), emoji))
                             }
