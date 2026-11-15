@@ -155,7 +155,9 @@ public struct MessageQuote: Sendable, Hashable, Codable, Identifiable {
     }
 
     public static func contextText(_ quotes: [MessageQuote]) -> String {
-        quotes.map { "[引用消息 \($0.sourceMessageID)]\n" + $0.text }.joined(separator: "\n\n")
+        quotes.enumerated().map { index, quote in
+            "[引用 \(index + 1)，来源消息 \(quote.sourceMessageID)]\n" + quote.text
+        }.joined(separator: "\n\n")
     }
 }
 

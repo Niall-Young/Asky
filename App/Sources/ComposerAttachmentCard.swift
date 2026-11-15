@@ -7,6 +7,7 @@ import ToolService
 struct ComposerAttachmentCard: View {
     let attachment: AttachmentRef?
     let thumbnail: Data?
+    private var quoteNumber: Int? = nil
     var remove: (() -> Void)? = nil
     var imageSize: CGFloat = 52
     @State private var loadedThumbnail: Data?
@@ -23,14 +24,16 @@ struct ComposerAttachmentCard: View {
     }
 
     /// Quotes share the attachment label without exposing their contents or creating a file.
-    init(quoteWithRemoval remove: (() -> Void)? = nil) {
+    init(quoteNumber: Int, remove: (() -> Void)? = nil) {
         attachment = nil
         thumbnail = nil
+        self.quoteNumber = quoteNumber
         self.remove = remove
     }
 
     private var name: String {
-        attachment.map { URL(filePath: $0.path).lastPathComponent } ?? NSLocalizedString("引用的文本", comment: "")
+        if let attachment { return URL(filePath: attachment.path).lastPathComponent }
+        return String(format: NSLocalizedString("引用的文本 %d", comment: ""), quoteNumber ?? 1)
     }
     private var active: Bool { hovering || deleteFocused }
     private var iconFill: Color {

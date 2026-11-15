@@ -1080,7 +1080,9 @@ private struct ChatBubble: View {
 
     private var attachmentCards: some View {
         HStack(spacing: 8) {
-            ForEach(item.quotes) { _ in ComposerAttachmentCard(quoteWithRemoval: nil) }
+            ForEach(Array(item.quotes.enumerated()), id: \.element.id) { index, _ in
+                ComposerAttachmentCard(quoteNumber: index + 1)
+            }
             ForEach(inlineAttachments) { attachment in
                 ComposerAttachmentCard(attachment: attachment, thumbnail: nil)
             }
@@ -1139,8 +1141,8 @@ private struct Composer: View {
             if !model.attachments.isEmpty || !model.quotes.isEmpty {
                 ScrollView(.horizontal) {
                     HStack(spacing: 8) {
-                        ForEach(model.quotes) { quote in
-                            ComposerAttachmentCard(quoteWithRemoval: {
+                        ForEach(Array(model.quotes.enumerated()), id: \.element.id) { index, quote in
+                            ComposerAttachmentCard(quoteNumber: index + 1, remove: {
                                 model.quotes.removeAll { $0.id == quote.id }
                             })
                         }

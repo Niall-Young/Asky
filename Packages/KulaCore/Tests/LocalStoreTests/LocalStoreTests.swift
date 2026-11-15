@@ -246,7 +246,9 @@ func tempRoot() -> URL {
         let legacy = Data(#"{"needsPermissionSettings":false,"responseID":"old"}"#.utf8)
         #expect(try JSONDecoder().decode(MessagePresentation.self, from: legacy).quotes == nil)
         #expect(MessageQuote.contextText(quotes).contains(#"\sqrt{x}"#))
-        #expect(MessageQuote.contextText(quotes).contains("reply-2"))
+        #expect(MessageQuote.contextText(quotes).contains("[引用 1，来源消息 reply-1]"))
+        #expect(MessageQuote.contextText(quotes).contains("[引用 2，来源消息 reply-2]"))
+        #expect(MessageQuote.contextText(Array(quotes.dropFirst())).contains("[引用 1，来源消息 reply-2]"))
     }
 
     @Test func transcriptStepsSurviveDiskReopenPagingAndUpdates() throws {

@@ -916,7 +916,7 @@
 /* Chat selection */
 "添加到对话" = "Add to Chat";
 "移除引用" = "Remove quote";
-"引用的文本" = "Quoted text";
+"引用的文本 %d" = "Quoted text %d";
 
 "自定义头像" = "Customize avatar";
 "造型" = "Shape";
