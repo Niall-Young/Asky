@@ -142,21 +142,34 @@ public struct ConversationSummary: Sendable, Hashable, Identifiable {
     public var updatedAt: Date
 }
 
-/// An explicitly selected excerpt and its source, retained with the user message.
+/// An explicitly selected excerpt or whole-message reply, retained with the user message.
 public struct MessageQuote: Sendable, Hashable, Codable, Identifiable {
+    public enum Kind: String, Sendable, Codable { case selection, reply }
     public var id: String
     public var sourceMessageID: String
     public var text: String
+    public var kind: Kind
 
-    public init(id: String = UUID().uuidString, sourceMessageID: String, text: String) {
+    public init(id: String = UUID().uuidString, sourceMessageID: String, text: String, kind: Kind = .selection) {
         self.id = id
         self.sourceMessageID = sourceMessageID
         self.text = text
+        self.kind = kind
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, sourceMessageID, text, kind }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(String.self, forKey: .id)
+        sourceMessageID = try values.decode(String.self, forKey: .sourceMessageID)
+        text = try values.decode(String.self, forKey: .text)
+        kind = try values.decodeIfPresent(Kind.self, forKey: .kind) ?? .selection
     }
 
     public static func contextText(_ quotes: [MessageQuote]) -> String {
         quotes.enumerated().map { index, quote in
-            "[引用 \(index + 1)，来源消息 \(quote.sourceMessageID)]\n" + quote.text
+            "[\(quote.kind == .reply ? "回复" : "引用") \(index + 1)，来源消息 \(quote.sourceMessageID)]\n" + quote.text
         }.joined(separator: "\n\n")
     }
 }

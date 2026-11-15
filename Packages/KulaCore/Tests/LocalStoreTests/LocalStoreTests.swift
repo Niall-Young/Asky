@@ -238,13 +238,17 @@ func tempRoot() -> URL {
         let store = ConversationStore(try LocalStore(root: root))
         let cid = try store.create(title: "引用")
         let quotes = [MessageQuote(sourceMessageID: "reply-1", text: #"\sqrt{x}"#),
-                      MessageQuote(sourceMessageID: "reply-2", text: "另一段文字\n第二行")]
+                      MessageQuote(sourceMessageID: "reply-2", text: "另一段文字\n第二行"),
+                      MessageQuote(sourceMessageID: "reply-3", text: "完整回答", kind: .reply)]
         let message = try store.append(conversationID: cid, role: "user", text: "解释这两段",
                                        presentation: MessagePresentation(quotes: quotes))
         let reopened = ConversationStore(try LocalStore(root: root))
         #expect(reopened.message(message.id, conversationID: cid)?.presentation?.quotes == quotes)
         let legacy = Data(#"{"needsPermissionSettings":false,"responseID":"old"}"#.utf8)
         #expect(try JSONDecoder().decode(MessagePresentation.self, from: legacy).quotes == nil)
+        let legacyQuote = Data(#"{"id":"old-quote","sourceMessageID":"reply-1","text":"旧引用"}"#.utf8)
+        #expect(try JSONDecoder().decode(MessageQuote.self, from: legacyQuote).kind == .selection)
+        #expect(MessageQuote.contextText(quotes).contains("[回复 3，来源消息 reply-3]\n完整回答"))
         #expect(MessageQuote.contextText(quotes).contains(#"\sqrt{x}"#))
         #expect(MessageQuote.contextText(quotes).contains("[引用 1，来源消息 reply-1]"))
         #expect(MessageQuote.contextText(quotes).contains("[引用 2，来源消息 reply-2]"))

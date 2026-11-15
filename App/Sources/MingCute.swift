@@ -51,6 +51,7 @@ enum MingCute {
         "calendar": "MingCute-calendar",
         "message": "MingCute-message_1",
         "bubble.left": "MingCute-chat_2",
+        "text.bubble": "MingCute-chat_1",
         "terminal": "MingCute-terminal",
         "map": "MingCute-map",
         "car.fill": "MingCute-filled-car",

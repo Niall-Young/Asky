@@ -1386,7 +1386,7 @@ enum AgentReplyRegression {
     static func selectionPreview(app: AppModel) async throws {
         let store = ConversationStore(app.store)
         let cid = try store.create(title: "文字选区")
-        let source = try store.append(conversationID: cid, role: "assistant", text: #"平方根：`\sqrt{x}` → $\sqrt{x}$，立方根：$\sqrt[3]{x}$。"#)
+        let source = try store.append(conversationID: cid, role: "assistant", text: #"可以从最简单的例子开始理解：平方根和立方根是平方、立方的逆运算。平方根：`\sqrt{x}` → $\sqrt{x}$，立方根：$\sqrt[3]{x}$。先找到一个数，计算它的平方或立方，再对照原来的数，就容易理解这两个运算之间的关系。"#)
         let model = AgentModel(app: app)
         model.open(cid)
         let controller = AgentWindowController(model: model, presentation: WindowPresentation())
@@ -1424,8 +1424,8 @@ enum AgentReplyRegression {
         for _ in 0..<2 {
             let text = descendants(window.contentView!).compactMap { $0 as? ChatSelectableTextView }.first { $0.string.contains("平方根") }!
             let rect = text.convert(text.bounds, to: nil)
-            // The second 28 pt action follows Copy with a 16 pt gap below the bubble.
-            let point = NSPoint(x: rect.minX - 18 + 28 + 16 + 14,
+            // The second 28 pt action sits directly beside Copy below the bubble.
+            let point = NSPoint(x: rect.minX - 18 + 28 + 14,
                                 y: rect.minY - 14 - 6 - 14)
             for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
                 let event = NSEvent.mouseEvent(with: type, location: point, modifierFlags: [],
@@ -1436,12 +1436,16 @@ enum AgentReplyRegression {
             try await Task.sleep(for: .milliseconds(200))
             precondition(model.quotes.count == 1 && model.quotes[0].text == source.text,
                          "Reply must quote the complete answer exactly once")
-            precondition(model.quotes[0].sourceMessageID == source.id)
+            precondition(model.quotes[0].sourceMessageID == source.id && model.quotes[0].kind == .reply)
             precondition(model.draft == "继续解释这条回答", "Reply must preserve the prepared question")
             precondition(!model.isRunning, "Reply must not send automatically")
             precondition((window.firstResponder as? NSTextView)?.isEditable == true, "Reply must focus the composer")
         }
-        try capture("whole-reply", window: window)
+        for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+            window.appearance = NSAppearance(named: appearance)
+            try await Task.sleep(for: .milliseconds(700))
+            try capture("whole-reply-" + appearance.rawValue, window: window)
+        }
         model.quotes.removeAll()
         model.draft = ""
         for (appearance, name) in [(NSAppearance.Name.aqua, "light"), (.darkAqua, "dark")] {

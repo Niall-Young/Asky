@@ -125,11 +125,11 @@ final class AgentModel {
     var quotes: [MessageQuote] = []
     private(set) var quoteFocusRevision = 0
 
-    func addQuote(_ text: String, sourceMessageID: String) {
+    func addQuote(_ text: String, sourceMessageID: String, kind: MessageQuote.Kind = .selection) {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
-        if !quotes.contains(where: { $0.sourceMessageID == sourceMessageID && $0.text == text }) {
-            quotes.append(MessageQuote(sourceMessageID: sourceMessageID, text: text))
+        if !quotes.contains(where: { $0.sourceMessageID == sourceMessageID && $0.text == text && $0.kind == kind }) {
+            quotes.append(MessageQuote(sourceMessageID: sourceMessageID, text: text, kind: kind))
         }
         quoteFocusRevision += 1
     }

@@ -1,6 +1,8 @@
 import AppKit
 import SwiftUI
 import Contracts
+import LocalStore
+import MarkdownUI
 import Theme
 import ToolService
 
@@ -8,6 +10,7 @@ struct ComposerAttachmentCard: View {
     let attachment: AttachmentRef?
     let thumbnail: Data?
     private var quoteNumber: Int? = nil
+    private var replyPreview: String? = nil
     var remove: (() -> Void)? = nil
     var imageSize: CGFloat = 52
     @State private var loadedThumbnail: Data?
@@ -23,16 +26,27 @@ struct ComposerAttachmentCard: View {
         self.imageSize = imageSize
     }
 
-    /// Quotes share the attachment label without exposing their contents or creating a file.
-    init(quoteNumber: Int, remove: (() -> Void)? = nil) {
+    /// Whole-message replies preview the answer; selected excerpts retain their numbered label.
+    init(quote: MessageQuote, quoteNumber: Int, remove: (() -> Void)? = nil) {
         attachment = nil
         thumbnail = nil
         self.quoteNumber = quoteNumber
         self.remove = remove
+        if quote.kind == .reply {
+            let content = ChatFormParser.parse(quote.text, streaming: false).map { part in
+                switch part.content {
+                case .markdown(let text): text
+                case .form(let form): form.title
+                }
+            }.joined(separator: "\n")
+            let plain = MarkdownContent(content).renderPlainText()
+            replyPreview = plain.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        }
     }
 
     private var name: String {
         if let attachment { return URL(filePath: attachment.path).lastPathComponent }
+        if let replyPreview { return replyPreview }
         return String(format: NSLocalizedString("引用的文本 %d", comment: ""), quoteNumber ?? 1)
     }
     private var active: Bool { hovering || deleteFocused }
@@ -54,22 +68,29 @@ struct ComposerAttachmentCard: View {
                 .frame(width: imageSize, height: imageSize).clipped()
             } else {
                 HStack(spacing: 12) {
-                    Image(mingCute: "text.document", size: 24)
+                    Image(mingCute: replyPreview == nil ? "text.document" : "text.bubble", size: 24)
                         .foregroundStyle(ThemeColor.kIconSubtle.color(for: colorScheme))
                         .frame(width: 44, height: 44)
                         .background(iconFill, in: .rect(cornerRadius: 8))
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text(name).textStyle(.button)
+                    if let replyPreview {
+                        Text(replyPreview).textStyle(.button)
                             .foregroundStyle(ThemeColor.kText.color(for: colorScheme))
-                            .lineLimit(1).truncationMode(.tail)
-                            .frame(height: 22, alignment: .leading)
-                        if let attachment {
-                            Text(ByteCountFormatter.string(fromByteCount: Int64(attachment.byteSize), countStyle: .file))
-                                .textStyle(.secondary).foregroundStyle(ThemeColor.kTextSubtlest.color(for: colorScheme))
-                                .lineLimit(1).frame(height: 20, alignment: .leading)
+                            .lineLimit(2).truncationMode(.tail)
+                            .frame(width: 224, height: 44, alignment: .leading)
+                    } else {
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text(name).textStyle(.button)
+                                .foregroundStyle(ThemeColor.kText.color(for: colorScheme))
+                                .lineLimit(1).truncationMode(.tail)
+                                .frame(height: 22, alignment: .leading)
+                            if let attachment {
+                                Text(ByteCountFormatter.string(fromByteCount: Int64(attachment.byteSize), countStyle: .file))
+                                    .textStyle(.secondary).foregroundStyle(ThemeColor.kTextSubtlest.color(for: colorScheme))
+                                    .lineLimit(1).frame(height: 20, alignment: .leading)
+                            }
                         }
+                        .frame(maxWidth: 128, alignment: .leading)
                     }
-                    .frame(maxWidth: 128, alignment: .leading)
                 }
                 .padding(.leading, 4).padding(.trailing, 20).padding(.vertical, 4).frame(height: 52)
             }

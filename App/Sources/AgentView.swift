@@ -1108,8 +1108,8 @@ private struct ChatBubble: View {
 
     private var attachmentCards: some View {
         HStack(spacing: 8) {
-            ForEach(Array(item.quotes.enumerated()), id: \.element.id) { index, _ in
-                ComposerAttachmentCard(quoteNumber: index + 1)
+            ForEach(Array(item.quotes.enumerated()), id: \.element.id) { index, quote in
+                ComposerAttachmentCard(quote: quote, quoteNumber: index + 1)
             }
             ForEach(inlineAttachments) { attachment in
                 ComposerAttachmentCard(attachment: attachment, thumbnail: nil)
@@ -1120,7 +1120,7 @@ private struct ChatBubble: View {
 
     private var replyButton: some View {
         Button {
-            model.addQuote(item.text, sourceMessageID: item.id)
+            model.addQuote(item.text, sourceMessageID: item.id, kind: .reply)
         } label: {
             Image(mingCute: "arrow.turn.down.left", size: 14)
                 .frame(width: 16, height: 16).padding(6)
@@ -1183,7 +1183,7 @@ private struct Composer: View {
                 ScrollView(.horizontal) {
                     HStack(spacing: 8) {
                         ForEach(Array(model.quotes.enumerated()), id: \.element.id) { index, quote in
-                            ComposerAttachmentCard(quoteNumber: index + 1, remove: {
+                            ComposerAttachmentCard(quote: quote, quoteNumber: index + 1, remove: {
                                 model.quotes.removeAll { $0.id == quote.id }
                             })
                         }
