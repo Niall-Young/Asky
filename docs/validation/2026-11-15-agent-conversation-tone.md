@@ -25,4 +25,6 @@
 
 本次是提示词源码、核心回归与 Debug 构建验证；未调用真实模型做对话评估，未替换已安装应用或发布版本。提示词约束不等同于模型实际表达验收。
 
+后续安装验证（同日，用户要求更新当前 Debug）：已将新 Debug 构建替换至原运行位置 `/Applications/Asky.app`，保持原 Developer ID 签名，并用 `--show-agent` 重新启动。已核对运行进程路径、安装后二进制与构建产物 SHA-256 一致，以及 `codesign --verify --deep --strict` 通过。旧应用备份在被忽略的 `build/debug-install-backups/before-tone-6caj_zgv/Asky.app`；个人数据未改动。退出时 AppleScript 返回 -128，源码确认是应用异步清理先返回 terminateCancel，进程随后自行退出，确认退出后才替换。真实模型对话交由用户试用。
+
 后续试聊重点：具体事实查询不附阅读过程声明；缺少正文时不编造全文分析；好消息、挫折和闲聊能自然承接；直接追问读了什么时如实说明；工具失败不伪报成功。
