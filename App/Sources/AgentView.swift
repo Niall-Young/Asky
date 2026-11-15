@@ -134,7 +134,7 @@ struct AgentView: View {
             .animation(navigationAnimation, value: model.conversationID)
             .animation(navigationAnimation, value: isEmptyConversation)
             ProgressiveHeaderBlur(reversed: true)
-                .frame(height: composerHeight + 24)
+                .frame(height: composerHeight)
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
             Composer(model: model)
