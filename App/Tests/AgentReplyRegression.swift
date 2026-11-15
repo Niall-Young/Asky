@@ -1572,14 +1572,88 @@ enum AgentReplyRegression {
         print("Continuous selection passed: forward/reverse native drags, nested and numbered lists, partial endpoints, quote payload, select-all, blank cancellation and capsule radius")
     }
 
+    /// Exercise native cursor routing with a button overlapping NSTextView and a non-key menu.
+    static func actionCursorPreview() async throws {
+        let originalPointer = NSEvent.mouseLocation
+        func movePointer(_ point: NSPoint) {
+            let screenHeight = NSScreen.screens[0].frame.maxY
+            CGEvent(mouseEventSource: nil, mouseType: .mouseMoved,
+                mouseCursorPosition: CGPoint(x: point.x, y: screenHeight - point.y), mouseButton: .left)?
+                .post(tap: .cghidEventTap)
+        }
+        func descendants(_ node: NSView) -> [NSView] { [node] + node.subviews.flatMap(descendants) }
+        let window = NSWindow(contentRect: NSRect(x: 160, y: 200, width: 600, height: 300),
+            styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.level = .floating
+        var quotes = 0
+        var clicks = 0
+        window.contentView = NSHostingView(rootView:
+            ChatInlineText(markdown: String(repeating: "可选择的正文 Alpha Beta Gamma ", count: 8), literal: true)
+                .environment(\.chatQuoteAction, { _ in quotes += 1 })
+                .overlay {
+                    Button { clicks += 1 } label: {
+                        Image(systemName: "arrow.down").frame(width: 32, height: 32)
+                    }
+                    .buttonStyle(.plain)
+                    .glassPointerFeedback(pressed: false, in: Circle())
+                }
+                .frame(width: 560, height: 260).clipped().padding(20))
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        defer { window.orderOut(nil); movePointer(originalPointer) }
+        try await Task.sleep(for: .milliseconds(600))
+        let text = descendants(window.contentView!).compactMap { $0 as? ChatSelectableTextView }.first!
+        let textPoint = window.convertPoint(toScreen: text.convert(NSPoint(x: 30, y: 10), to: nil))
+        let buttonPoint = window.convertPoint(toScreen: NSPoint(x: 300, y: 150))
+        movePointer(window.convertPoint(toScreen: NSPoint(x: 5, y: 5)))
+        try await Task.sleep(for: .milliseconds(200))
+        precondition(text.visibleRect.contains(NSPoint(x: 30, y: 10)), "Cursor probe must target visible text")
+        for _ in 0..<3 {
+            movePointer(textPoint)
+            try await Task.sleep(for: .milliseconds(150))
+            precondition(NSCursor.current == .iBeam, "Selectable body must retain the I-beam")
+            movePointer(buttonPoint)
+            try await Task.sleep(for: .milliseconds(150))
+            precondition(NSCursor.current == .arrow, "An action overlapping body text must show the arrow")
+        }
+        for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+            let event = NSEvent.mouseEvent(with: type, location: NSPoint(x: 300, y: 150), modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                context: nil, eventNumber: 1, clickCount: 1, pressure: type == .leftMouseDown ? 1 : 0)!
+            NSApp.sendEvent(event)
+        }
+        precondition(clicks == 1, "Cursor ownership must preserve button clicks")
+        movePointer(textPoint)
+        try await Task.sleep(for: .milliseconds(150))
+        precondition(NSCursor.current == .iBeam)
+        window.makeFirstResponder(text)
+        text.setSelectedRange(NSRange(location: 0, length: 12))
+        text.showSelectionMenu()
+        try await Task.sleep(for: .milliseconds(200))
+        let menu = window.childWindows!.first { $0 is SurfacePanel && $0.isVisible }!
+        precondition(!menu.isKeyWindow)
+        for fraction in [0.20, 0.70] {
+            movePointer(menu.convertPoint(toScreen: NSPoint(x: menu.frame.width * fraction, y: menu.frame.height / 2)))
+            try await Task.sleep(for: .milliseconds(150))
+            precondition(NSCursor.current == .arrow, "Both floating selection actions must show the arrow")
+        }
+        movePointer(textPoint)
+        try await Task.sleep(for: .milliseconds(150))
+        precondition(NSCursor.current == .iBeam, "Leaving the action must restore the body cursor")
+        precondition(quotes == 0 && text.selectedRange().length == 12, "Hover must preserve selection without invoking actions")
+        print("Action cursor passed: body/overlay transitions, button click, both non-key selection actions and return to text")
+    }
+
     static func main() async throws {
         let application = NSApplication.shared
         application.setActivationPolicy(.accessory)
-        if CommandLine.arguments.contains("--user-bubble-hover") {
+        if CommandLine.arguments.contains("--action-cursor-preview") || CommandLine.arguments.contains("--user-bubble-hover") {
             var completed = false
             Task { @MainActor in
                 do {
-                    try await userBubbleHoverRegression()
+                    if CommandLine.arguments.contains("--action-cursor-preview") { try await actionCursorPreview() }
+                    else { try await userBubbleHoverRegression() }
                 } catch { preconditionFailure("User bubble hover failed: \(error)") }
                 completed = true
                 application.stop(nil)

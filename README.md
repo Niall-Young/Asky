@@ -167,6 +167,8 @@ python3 App/Tests/run-agent-reply-regression.py --latex-form-preview
 python3 App/Tests/run-agent-reply-regression.py --prefill-preview
 python3 App/Tests/run-agent-reply-regression.py --math-preview
 python3 App/Tests/run-agent-reply-regression.py --selection-preview
+# 光标回归会短暂移动鼠标，运行时请勿操作鼠标
+python3 App/Tests/run-agent-reply-regression.py --action-cursor-preview
 python3 App/Tests/run-agent-reply-regression.py --continuous-selection-preview
 python3 App/Tests/run-agent-reply-regression.py --avatar-preview
 python3 App/Tests/run-agent-reply-regression.py --reactions-preview
@@ -353,6 +355,8 @@ python3 App/Tests/run-agent-reply-regression.py --latex-form-preview
 python3 App/Tests/run-agent-reply-regression.py --prefill-preview
 python3 App/Tests/run-agent-reply-regression.py --math-preview
 python3 App/Tests/run-agent-reply-regression.py --selection-preview
+# The cursor regression briefly moves the pointer; leave the mouse idle while it runs
+python3 App/Tests/run-agent-reply-regression.py --action-cursor-preview
 python3 App/Tests/run-agent-reply-regression.py --continuous-selection-preview
 python3 App/Tests/run-agent-reply-regression.py --avatar-preview
 python3 App/Tests/run-agent-reply-regression.py --reactions-preview

@@ -34,6 +34,7 @@ private struct GlassPointerFeedback<S: Shape>: ViewModifier {
                        ? .easeOut(duration: 0.10)
                        : .spring(response: 0.34, dampingFraction: 0.42), value: active)
             .onHover { hovered = $0 }
+            .background(ActionArrowCursor())
     }
 }
 
@@ -111,5 +112,73 @@ struct GlassPressObserverStyle: ButtonStyle {
         configuration.label
             .onChange(of: configuration.isPressed) { _, value in pressed = value }
             .onDisappear { pressed = false }
+    }
+}
+
+/// Native text and SwiftUI may both update the cursor during one mouse event.
+/// Resolve the visible action after AppKit finishes dispatching that event.
+private struct ActionArrowCursor: NSViewRepresentable {
+    func makeNSView(context: Context) -> CursorView { CursorView() }
+    func updateNSView(_ view: CursorView, context: Context) {}
+
+    final class CursorView: NSView {
+        private struct Entry { weak var view: CursorView? }
+        private static var regions: [Entry] = []
+        private static var refreshPending = false
+        private var cursorTrackingArea: NSTrackingArea?
+
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            Self.regions.removeAll { $0.view == nil || $0.view === self }
+            if window != nil { Self.regions.append(Entry(view: self)) }
+            Self.refreshCursor()
+        }
+
+        override func updateTrackingAreas() {
+            super.updateTrackingAreas()
+            if let cursorTrackingArea { removeTrackingArea(cursorTrackingArea) }
+            // SwiftUI's unclipped native backgrounds can have a visibleRect larger
+            // than their bounds. Never let an action claim that surrounding text.
+            let area = NSTrackingArea(rect: bounds.intersection(visibleRect),
+                options: [.cursorUpdate, .mouseEnteredAndExited, .mouseMoved, .activeAlways],
+                owner: self, userInfo: nil)
+            addTrackingArea(area)
+            cursorTrackingArea = area
+            Self.refreshCursor()
+        }
+
+        override func cursorUpdate(with event: NSEvent) { Self.refreshCursor() }
+        override func mouseEntered(with event: NSEvent) { Self.refreshCursor() }
+        override func mouseMoved(with event: NSEvent) { Self.refreshCursor() }
+        override func mouseExited(with event: NSEvent) { Self.refreshCursor() }
+
+        private static func refreshCursor() {
+            guard !refreshPending else { return }
+            refreshPending = true
+            DispatchQueue.main.async {
+                refreshPending = false
+                let point = NSEvent.mouseLocation
+                let number = NSWindow.windowNumber(at: point, belowWindowWithWindowNumber: 0)
+                guard let window = NSApp.window(withWindowNumber: number),
+                      let content = window.contentView else { return }
+                let location = window.convertPoint(fromScreen: point)
+                regions.removeAll { $0.view == nil }
+                if regions.contains(where: { entry in
+                    guard let view = entry.view, view.window === window,
+                          !view.isHiddenOrHasHiddenAncestor else { return false }
+                    return view.bounds.intersection(view.visibleRect).contains(view.convert(location, from: nil))
+                }) {
+                    NSCursor.arrow.set()
+                } else if let target = content.hitTest(location),
+                          let event = NSEvent.enterExitEvent(with: .cursorUpdate, location: location, modifierFlags: [],
+                              timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: number,
+                              context: nil, eventNumber: 0, trackingNumber: 0, userData: nil) {
+                    // Restore the actual view's cursor, including text and link cursors.
+                    target.cursorUpdate(with: event)
+                }
+            }
+        }
     }
 }
