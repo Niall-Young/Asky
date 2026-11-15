@@ -1062,6 +1062,12 @@ enum AgentReplyRegression {
             scroll.contentView.scroll(to: .zero)
             scroll.reflectScrolledClipView(scroll.contentView)
             try await Task.sleep(for: .milliseconds(150))
+            if page == 1 {
+                let surface = window.contentView!
+                let bitmap = surface.bitmapImageRepForCachingDisplay(in: surface.bounds)!
+                surface.cacheDisplay(in: surface.bounds, to: bitmap)
+                try bitmap.representation(using: .png, properties: [:])!.write(to: URL(filePath: "build/scroll-older-button.png"))
+            }
             let previousFirst = model.items.first!.id
             let text = texts(scroll).first { $0.string.hasPrefix(model.items.first!.text.components(separatedBy: "\n\n")[0]) }!
             let before = scroll.contentView.convert(text.bounds, from: text).minY - scroll.contentView.bounds.minY
@@ -1084,8 +1090,8 @@ enum AgentReplyRegression {
         surface.cacheDisplay(in: surface.bounds, to: bitmap)
         try bitmap.representation(using: .png, properties: [:])!.write(to: URL(filePath: "build/scroll-newer-button.png"))
         // Follow the current composer position, including its variable height, instead of the window bottom.
-        // Editor top inset 10 + transcript tail 13 + page-button bottom padding 40 + half its label 9.
-        clickAboveComposer(72)
+        // Editor top inset 10 + transcript tail 13 + page-button bottom padding 40 + half its height 14.
+        clickAboveComposer(77)
         try await Task.sleep(for: .milliseconds(600))
         precondition(model.items.last?.id != lastID, "The newer-page button must recover the adjacent page")
         // The floating button must return to the latest persisted messages, not the end of an old page.

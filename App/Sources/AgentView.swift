@@ -325,6 +325,26 @@ struct AgentIconButtonStyle: ButtonStyle {
     }
 }
 
+private struct TranscriptPagingButton: View {
+    let title: String
+    let action: () -> Void
+    @Environment(\.isEnabled) private var isEnabled
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(ThemeColor.kTextSubtle)
+                .padding(.horizontal, 14)
+                .frame(height: 28)
+                .background(ThemeColor.kBackgroundNeutral, in: Capsule())
+        }
+        .buttonStyle(AgentIconButtonStyle(cornerRadius: 14))
+        .opacity(isEnabled ? 1 : 0.3)
+        .frame(maxWidth: .infinity)
+    }
+}
+
 private struct Transcript: View {
     let model: AgentModel
     let bottomInset: CGFloat
@@ -360,9 +380,11 @@ private struct Transcript: View {
                 // lazy height estimates changed during scrolling and moved native text offscreen.
                 VStack(alignment: .leading, spacing: 0) {
                     if hasOlder {
-                        Button(NSLocalizedString("加载更早的消息", comment: "")) {
+                        TranscriptPagingButton(title: NSLocalizedString("加载更早的消息", comment: "")) {
                             viewport.preserveReadingPosition { model.loadOlder() }
-                        }.buttonStyle(.link).frame(maxWidth: .infinity).disabled(isRunning)
+                        }
+                        .disabled(isRunning)
+                        .padding(.bottom, 16)
                     }
                     ForEach(Array(allGroups.enumerated()), id: \.element.id) { index, group in
                         ResponseGroupView(group: group, model: model)
@@ -370,9 +392,12 @@ private struct Transcript: View {
                             .padding(.top, index == 0 ? 0 : (group.items.first?.kind == .user ? 20 : 12))
                     }
                     if model.hasNewer {
-                        Button(NSLocalizedString("加载更新的消息", comment: "")) {
+                        TranscriptPagingButton(title: NSLocalizedString("加载更新的消息", comment: "")) {
                             viewport.preserveReadingPosition { model.loadNewer() }
-                        }.buttonStyle(.link).frame(maxWidth: .infinity).padding(.top, 12).padding(.bottom, 40).disabled(isRunning)
+                        }
+                        .disabled(isRunning)
+                        .padding(.top, 16)
+                        .padding(.bottom, 40)
                     }
                     // Scroll content continues behind the floating composer; its tail remains readable.
                     Color.clear.frame(height: bottomInset + 13).id("bottom")
