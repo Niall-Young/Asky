@@ -400,9 +400,10 @@ private struct ChatInlineNativeText: NSViewRepresentable {
             result.append(NSAttributedString(string: " ", attributes: [.font: NSFont.systemFont(ofSize: 14)]))
             let attachment = NSTextAttachment()
             let name = sourceName?.trimmingCharacters(in: .whitespacesAndNewlines)
-            attachment.image = ChatSourceTextView.badge(name: name.flatMap { $0.isEmpty ? nil : $0 } ?? ChatSourceTextView.domain(first),
+            let badge = ChatSourceTextView.badge(name: name.flatMap { $0.isEmpty ? nil : $0 } ?? ChatSourceTextView.domain(first),
                 count: sources.count, foreground: foreground, background: background)
-            attachment.bounds = NSRect(x: 0, y: -5, width: attachment.image!.size.width, height: 24)
+            attachment.image = badge.image
+            attachment.bounds = NSRect(x: 0, y: -badge.baseline, width: badge.image.size.width, height: badge.image.size.height)
             let fragment = NSMutableAttributedString(attachment: attachment)
             fragment.addAttributes([.link: first, .chatSources: sources], range: NSRange(location: 0, length: fragment.length))
             result.append(fragment)

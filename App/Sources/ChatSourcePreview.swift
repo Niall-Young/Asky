@@ -1,4 +1,5 @@
 import AppKit
+import CoreText
 import SwiftUI
 import ToolService
 import Theme
@@ -35,7 +36,7 @@ final class ChatSourceTextView: ChatSelectableTextView, NSTextViewDelegate {
         name + (count > 1 ? " +\(count - 1)" : "")
     }
 
-    static func badge(name: String, count: Int, foreground: NSColor, background: NSColor) -> NSImage {
+    static func badge(name: String, count: Int, foreground: NSColor, background: NSColor) -> (image: NSImage, baseline: CGFloat) {
         let attributes: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 13), .foregroundColor: foreground.withAlphaComponent(0.75)
         ]
@@ -47,13 +48,24 @@ final class ChatSourceTextView: ChatSelectableTextView, NSTextViewDelegate {
         }
         if shortened { name += "…" }
         let label = badgeLabel(name: name, count: count)
-        let size = (label as NSString).size(withAttributes: attributes)
-        return NSImage(size: NSSize(width: ceil(size.width) + 20, height: 24), flipped: false) { rect in
+        let line = CTLineCreateWithAttributedString(NSAttributedString(string: label, attributes: attributes))
+        var ascent: CGFloat = 0
+        var descent: CGFloat = 0
+        let width = CTLineGetTypographicBounds(line, &ascent, &descent, nil)
+        // Share the drawn label's baseline with its inline attachment, including fallback fonts.
+        let baseline = (24 - ascent - descent) / 2 + descent
+        let image = NSImage(size: NSSize(width: ceil(width) + 20, height: 24), flipped: false) { rect in
             background.setFill()
             NSBezierPath(roundedRect: rect, xRadius: 12, yRadius: 12).fill()
-            (label as NSString).draw(at: NSPoint(x: 10, y: (24 - size.height) / 2), withAttributes: attributes)
+            guard let context = NSGraphicsContext.current?.cgContext else { return false }
+            context.saveGState()
+            context.textMatrix = .identity
+            context.textPosition = CGPoint(x: 10, y: baseline)
+            CTLineDraw(line, context)
+            context.restoreGState()
             return true
         }
+        return (image, baseline)
     }
 
     func textView(_ textView: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
