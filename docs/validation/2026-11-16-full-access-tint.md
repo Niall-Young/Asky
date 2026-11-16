@@ -14,3 +14,11 @@
 本次未替换已安装应用；未单独截图选中完全访问后的收起按钮，也未覆盖其他壁纸、辅助功能显示设置或旧版 macOS。按钮与菜单使用同一外观解析样式。
 
 README 保持不变：仅调整颜色，使用方式与构建命令未变。构建与截图沿用已有 `build/`、`Packages/KulaCore/.build/` 忽略规则。
+
+## 第二轮：减少灰感
+
+用户实看首版后反馈偏灰。提高红色饱和度，最终浅色为 `#D94F55`、深色为 `#F57478`；按钮与菜单继续共用样式。
+
+重新运行上述指定 Xcode 的 `swift test`、`xcodegen generate`、Debug `xcodebuild` 与 `--approval-menu-hover`，均通过。重新检查两张亮暗菜单截图，红色更鲜明。`git diff --check` 通过。
+
+已退出旧 Debug 进程并启动 `build/DerivedData/Build/Products/Debug/Asky.app`，确认新 PID 4576 使用该路径。此轮已重启用户的 Debug 应用，未替换 `/Applications` 安装包。README 与忽略规则保持不变。

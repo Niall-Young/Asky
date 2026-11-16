@@ -9,7 +9,7 @@ public struct FullAccessTint: ShapeStyle {
     public init() {}
 
     public func resolve(in environment: EnvironmentValues) -> Color {
-        RGBA(hex: environment.colorScheme == .dark ? 0xD98F87 : 0xAC5B55, alpha: 1).color
+        RGBA(hex: environment.colorScheme == .dark ? 0xF57478 : 0xD94F55, alpha: 1).color
     }
 }
 
