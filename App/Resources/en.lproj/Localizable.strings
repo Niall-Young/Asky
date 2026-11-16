@@ -507,8 +507,6 @@
 "自动审批" = "Auto review";
 "完全访问" = "Full access";
 "完全访问权限" = "Full access";
-"仅对检测到的风险操作请求批准" = "Asks for approval only on detected risky actions";
-"AI 执行任何操作都不再询问，包括删除、发送和修改" = "AI runs every action without asking, including deleting, sending and editing";
 
 
 "完全自定义（OpenAI 兼容）" = "Fully custom (OpenAI compatible)";

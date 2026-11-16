@@ -1244,6 +1244,7 @@ private struct Composer: View {
 private struct ApprovalModePicker: View {
     @Bindable var model: AgentModel
     @State private var showing = false
+    @State private var pressed = false
 
     static let iconSize: CGFloat = 16
 
@@ -1257,11 +1258,12 @@ private struct ApprovalModePicker: View {
             }
             .foregroundStyle(mode == .fullAccess ? AnyShapeStyle(ThemeColor.kTextNegative) : AnyShapeStyle(ThemeColor.kTextSubtle))
             .padding(.horizontal, 10).frame(height: 28)
+            .contentShape(.rect(cornerRadius: 14))
         }
-        .buttonStyle(AgentIconButtonStyle(cornerRadius: 16))
+        .buttonStyle(GlassPressObserverStyle(pressed: $pressed))
         .accessibilityLabel(NSLocalizedString("审批模式", comment: ""))
         .accessibilityValue(Self.title(mode))
-        .modifier(ApprovalMenuPresentation(showing: $showing) { menu(mode) })
+        .modifier(ApprovalMenuPresentation(showing: $showing, pressed: pressed) { menu(mode) })
     }
 
     private func menu(_ mode: ApprovalMode) -> some View {
@@ -1273,7 +1275,7 @@ private struct ApprovalModePicker: View {
                 }
             }
         }
-        .padding(6).frame(width: 340)
+        .padding(6).frame(width: 220)
     }
 
     static func icon(_ mode: ApprovalMode) -> String {
@@ -1287,45 +1289,38 @@ private struct ApprovalModePicker: View {
     static func title(_ mode: ApprovalMode) -> String {
         mode == .fullAccess ? NSLocalizedString("完全访问权限", comment: "") : NSLocalizedString("自动审批", comment: "")
     }
-
-    static func detail(_ mode: ApprovalMode) -> String {
-        mode == .fullAccess
-            ? NSLocalizedString("AI 执行任何操作都不再询问，包括删除、发送和修改", comment: "")
-            : NSLocalizedString("仅对检测到的风险操作请求批准", comment: "")
-    }
 }
 
 private struct ApprovalModeRow: View {
     let option: ApprovalMode
     let selected: Bool
     let action: () -> Void
-    @State private var hovering = false
 
     var body: some View {
         let tint = option == .fullAccess ? AnyShapeStyle(ThemeColor.kTextNegative) : AnyShapeStyle(ThemeColor.kText)
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 10) {
-                    Image(mingCute: ApprovalModePicker.icon(option), size: ApprovalModePicker.iconSize)
-                        .frame(width: 20, height: ApprovalModePicker.iconSize)
-                    Text(ApprovalModePicker.title(option)).font(.system(size: 13, weight: .medium))
-                    Spacer(minLength: 8)
-                    if selected { Image(mingCute: "checkmark", size: 12) }
-                }
-                Text(ApprovalModePicker.detail(option)).font(.system(size: 12)).opacity(0.75)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.leading, 30)
+            HStack(spacing: 10) {
+                Image(mingCute: ApprovalModePicker.icon(option), size: ApprovalModePicker.iconSize)
+                    .frame(width: 20, height: ApprovalModePicker.iconSize)
+                Text(ApprovalModePicker.title(option)).font(.system(size: 13, weight: .medium))
+                Spacer(minLength: 8)
+                if selected { Image(mingCute: "checkmark", size: 12) }
             }
             .foregroundStyle(tint)
-            .padding(.horizontal, 10).padding(.vertical, 8)
-            .contentShape(.rect(cornerRadius: 8))
-            .background {
-                if hovering { RoundedRectangle(cornerRadius: 8).fill(ThemeColor.kInteractionHover) }
-            }
+            .padding(.horizontal, 10).frame(height: 36)
         }
-        .buttonStyle(.plain)
-        .onHover { hovering = $0 }
+        .buttonStyle(ApprovalModeRowButtonStyle())
+        .accessibilityLabel(ApprovalModePicker.title(option))
         .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+private struct ApprovalModeRowButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .frame(maxWidth: .infinity)
+            .contentShape(.rect(cornerRadius: 8))
+            .glassPointerFeedback(pressed: configuration.isPressed, in: RoundedRectangle(cornerRadius: 8))
     }
 }
 
@@ -1333,6 +1328,7 @@ private struct ApprovalModeRow: View {
 /// and so ignores the Liquid Glass setting.
 private struct ApprovalMenuPresentation<Menu: View>: ViewModifier {
     @Binding var showing: Bool
+    let pressed: Bool
     @ViewBuilder let menu: () -> Menu
     @State private var monitor: Any?
     @State private var menuView = WeakViewBox()
@@ -1340,19 +1336,19 @@ private struct ApprovalMenuPresentation<Menu: View>: ViewModifier {
 
     func body(content: Content) -> some View {
         content
+            .glassPointerFeedback(pressed: pressed, in: RoundedRectangle(cornerRadius: 14), illumination: false)
             .overlay(alignment: .bottomTrailing) {
                 if showing {
                     menu()
-                        .nativeGlassBackground(in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .nativeGlassBackground(in: RoundedRectangle(cornerRadius: 14), interactive: true)
                         .background(ViewReader(box: menuView).allowsHitTesting(false))
                         .fixedSize()
-                        // Sit 8 pt above the 32 pt picker, extending over the send button and its spacing.
-                        .offset(x: 40, y: -40)
-                        .transition(reduceMotion ? .opacity
-                                    : .opacity.combined(with: .scale(scale: 0.96, anchor: .bottomTrailing)))
+                        // Keep the trigger in place; present the menu 8 pt above it.
+                        .offset(x: 40, y: -36)
+                        .transition(.opacity)
                 }
             }
-            .animation(.easeOut(duration: 0.15), value: showing)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: showing)
             .onChange(of: showing) { _, shown in shown ? startMonitoring() : stopMonitoring() }
             .onDisappear { showing = false; stopMonitoring() }
     }
