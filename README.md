@@ -158,6 +158,7 @@ python3 App/Tests/run-settings-regression.py --command-reset
 python3 App/Tests/run-settings-regression.py --plugin-tabs
 # 气泡对话与等待状态回归（先完成 Debug 构建）
 python3 App/Tests/run-agent-reply-regression.py --reply-activity-preview
+python3 App/Tests/run-agent-reply-regression.py --window-presentation
 python3 App/Tests/run-agent-reply-regression.py --bubble-width-preview
 python3 App/Tests/run-agent-reply-regression.py --user-bubble-hover
 python3 App/Tests/run-agent-reply-regression.py --approval-menu-hover
@@ -356,6 +357,7 @@ python3 App/Tests/run-settings-regression.py --command-reset
 python3 App/Tests/run-settings-regression.py --plugin-tabs
 # Bubble conversation and waiting-state regression (build Debug first)
 python3 App/Tests/run-agent-reply-regression.py --reply-activity-preview
+python3 App/Tests/run-agent-reply-regression.py --window-presentation
 python3 App/Tests/run-agent-reply-regression.py --bubble-width-preview
 python3 App/Tests/run-agent-reply-regression.py --user-bubble-hover
 python3 App/Tests/run-agent-reply-regression.py --approval-menu-hover

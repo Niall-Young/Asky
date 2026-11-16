@@ -4,6 +4,7 @@ import AppKit
 @MainActor
 final class WindowPresentation: NSObject {
     private weak var pendingWindow: NSWindow?
+    private var pendingAlpha: CGFloat?
 
     override init() {
         super.init()
@@ -17,35 +18,68 @@ final class WindowPresentation: NSObject {
         }
     }
 
-    func show(_ window: NSWindow) {
+    func show(_ window: NSWindow, afterActivation: Bool = false) {
+        if pendingWindow !== window { cancelPending() }
         window.level = .normal
         window.hidesOnDeactivate = false
         if window.isMiniaturized { window.deminiaturize(nil) }
         pendingWindow = window
-        // Accessory-app activation is asynchronous. Order once within the normal
-        // level so the window is visible, then finalize key focus on activation.
+        // Accessory-app activation needs an ordered window. Keep a newly opened
+        // glass surface transparent until it has the active key appearance.
+        if afterActivation && !window.isVisible && pendingAlpha == nil {
+            pendingAlpha = window.alphaValue
+            window.alphaValue = 0
+        }
         window.orderFrontRegardless()
-        NSApp.activate()
+        if afterActivation {
+            // This is an explicit user request to open chat. Cooperative
+            // activate() may be declined, leaving the prepared window invisible.
+            NSApp.activate(ignoringOtherApps: true)
+        } else {
+            NSApp.activate()
+        }
         if NSApp.isActive { didBecomeActive() }
     }
 
     func yieldToAuthentication() {
         // A late activation notification must not take key focus from the
         // system password dialog once credential interaction has begun.
-        pendingWindow = nil
+        cancelPending()
     }
 
     @objc private func didBecomeActive() {
         let window = pendingWindow
+        let alpha = pendingAlpha
         pendingWindow = nil
-        guard let window, window.isVisible, !window.isMiniaturized else { return }
+        pendingAlpha = nil
+        guard let window else { return }
+        guard window.isVisible, !window.isMiniaturized else {
+            if let alpha { window.alphaValue = alpha }
+            return
+        }
+        if let alpha {
+            window.makeKey()
+            window.contentView?.superview?.layoutSubtreeIfNeeded()
+            window.contentView?.layoutSubtreeIfNeeded()
+            window.displayIfNeeded()
+            window.alphaValue = alpha
+        }
         window.makeKeyAndOrderFront(nil)
     }
 
-    @objc private func cancelPending() { pendingWindow = nil }
+    @objc private func cancelPending() {
+        let window = pendingWindow
+        let alpha = pendingAlpha
+        pendingWindow = nil
+        pendingAlpha = nil
+        if let window, let alpha {
+            window.orderOut(nil)
+            window.alphaValue = alpha
+        }
+    }
 
     @objc private func windowDismissed(_ notification: Notification) {
-        if notification.object as? NSWindow === pendingWindow { pendingWindow = nil }
+        if notification.object as? NSWindow === pendingWindow { cancelPending() }
     }
 }
 

@@ -37,6 +37,7 @@ final class AgentWindowController {
             w.titleVisibility = .hidden
             w.isOpaque = false
             w.backgroundColor = .clear
+            w.animationBehavior = .none
             w.isMovableByWindowBackground = true
             w.level = .normal
             w.collectionBehavior = [.moveToActiveSpace, .primary]
@@ -83,7 +84,7 @@ final class AgentWindowController {
 
     private func bringToFront() {
         guard let window else { return }
-        presentation.show(window)
+        presentation.show(window, afterActivation: true)
     }
 }
 

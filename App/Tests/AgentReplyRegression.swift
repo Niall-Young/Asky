@@ -1898,14 +1898,78 @@ enum AgentReplyRegression {
         print("Header cursor passed: 120 synchronous cursor/move pairs over real scrolled chat text, return to body")
     }
 
+    static func windowPresentationRegression() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: "Asky-window-presentation-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let app = try AppModel(root: root)
+        let application = NSApplication.shared
+        let originalAppearance = application.appearance
+        defer { application.appearance = originalAppearance }
+        for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+            application.appearance = NSAppearance(named: appearance)
+            let presentation = WindowPresentation()
+            let controller = AgentWindowController(model: AgentModel(app: app), presentation: presentation)
+            application.deactivate()
+            try await Task.sleep(for: .milliseconds(150))
+            precondition(!application.isActive, "Exercise opening from an inactive accessory app")
+            controller.show()
+            let window = application.windows.first { $0.title == "Asky AI" }!
+            window.title = "Chat presentation \(appearance.rawValue)"
+            precondition(!window.isVisible || window.alphaValue == 0,
+                "Chat must stay visually hidden until activation, without a dim first frame")
+            let observer = NotificationCenter.default.addObserver(forName: NSWindow.didBecomeKeyNotification,
+                object: window, queue: .main) { _ in
+                MainActor.assumeIsolated {
+                    precondition(application.isActive, "Chat must become key in the active app")
+                    precondition(!window.isVisible || window.alphaValue == 0,
+                        "Chat must acquire key appearance before revealing its glass")
+                }
+            }
+            defer { NotificationCenter.default.removeObserver(observer); window.close() }
+            for _ in 0..<50 {
+                if window.isVisible && window.isKeyWindow { break }
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            precondition(window.isVisible && window.isKeyWindow && application.isActive)
+            precondition(window.alphaValue == 1, "Activation must reveal the prepared surface")
+            precondition(window.animationBehavior == .none && window.level == .normal)
+            precondition(window.contentView!.bounds.size == window.frame.size)
+            window.close()
+            controller.show()
+            precondition(window.isVisible && window.isKeyWindow, "Reopening in the active app must be immediate")
+            controller.show()
+            precondition(window.isVisible && window.isKeyWindow, "Repeated show must retain focus")
+            window.close()
+
+            // Hold activation pending deterministically; a real activation can
+            // complete synchronously on subsequent shows in the same process.
+            application.setActivationPolicy(.prohibited)
+            application.deactivate()
+            try await Task.sleep(for: .milliseconds(150))
+            controller.show()
+            presentation.yieldToAuthentication()
+            NotificationCenter.default.post(name: NSApplication.didBecomeActiveNotification, object: application)
+            precondition(!window.isVisible, "Cancelled activation must not reveal chat over authentication")
+            precondition(window.alphaValue == 1, "Cancellation must restore the original alpha")
+            controller.show()
+            window.close()
+            NotificationCenter.default.post(name: NSApplication.didBecomeActiveNotification, object: application)
+            precondition(!window.isVisible, "Closing a pending window must cancel its presentation")
+            precondition(window.alphaValue == 1)
+            application.setActivationPolicy(.accessory)
+        }
+        print("Chat presentation passed: inactive first show, key before visibility, light/dark, reopen, repeated show, authentication and close cancellation")
+    }
+
     static func main() async throws {
         let application = NSApplication.shared
         application.setActivationPolicy(.accessory)
-        if CommandLine.arguments.contains("--header-cursor-preview") || CommandLine.arguments.contains("--action-cursor-preview") || CommandLine.arguments.contains("--user-bubble-hover") || CommandLine.arguments.contains("--approval-menu-hover") {
+        if CommandLine.arguments.contains("--window-presentation") || CommandLine.arguments.contains("--header-cursor-preview") || CommandLine.arguments.contains("--action-cursor-preview") || CommandLine.arguments.contains("--user-bubble-hover") || CommandLine.arguments.contains("--approval-menu-hover") {
             var completed = false
             Task { @MainActor in
                 do {
-                    if CommandLine.arguments.contains("--header-cursor-preview") { try await headerCursorPreview() }
+                    if CommandLine.arguments.contains("--window-presentation") { try await windowPresentationRegression() }
+                    else if CommandLine.arguments.contains("--header-cursor-preview") { try await headerCursorPreview() }
                     else if CommandLine.arguments.contains("--action-cursor-preview") { try await actionCursorPreview() }
                     else if CommandLine.arguments.contains("--approval-menu-hover") { try await approvalMenuHoverRegression() }
                     else { try await userBubbleHoverRegression() }
