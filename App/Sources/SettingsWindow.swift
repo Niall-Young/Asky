@@ -4,7 +4,7 @@ import Theme
 
 enum SettingsPage: String, CaseIterable, Identifiable {
     case general = "advanced", search, clipboard, model, hotkey, aliases, keywords, terminal
-    case sources, permissions, plugins, about, author
+    case mcp, data, sources, permissions, plugins, about, author
 
     var id: String { rawValue }
     var title: String {
@@ -12,7 +12,9 @@ enum SettingsPage: String, CaseIterable, Identifiable {
         case .search: NSLocalizedString("搜索与导航", comment: "")
         case .clipboard: NSLocalizedString("剪贴板", comment: "")
         case .general: NSLocalizedString("通用", comment: "")
-        case .model: NSLocalizedString("智能配置", comment: "")
+        case .model: NSLocalizedString("模型配置", comment: "")
+        case .mcp: "MCP"
+        case .data: NSLocalizedString("数据管理", comment: "")
         case .hotkey: NSLocalizedString("触发快捷键", comment: "")
         case .aliases: NSLocalizedString("别名与快捷指令", comment: "")
         case .keywords: NSLocalizedString("指令", comment: "")
@@ -30,6 +32,8 @@ enum SettingsPage: String, CaseIterable, Identifiable {
         case .clipboard: "doc.on.clipboard"
         case .general: "gearshape"
         case .model: "sparkles"
+        case .mcp: "link"
+        case .data: "externaldrive.badge.checkmark"
         case .hotkey: "keyboard"
         case .aliases: "command"
         case .keywords: "command.square"
@@ -41,10 +45,17 @@ enum SettingsPage: String, CaseIterable, Identifiable {
         case .author: "person.crop.circle"
         }
     }
+    var iconAsset: String {
+        switch self {
+        case .mcp: "MingCute-link"
+        case .data: "MingCute-storage"
+        default: "Settings-" + rawValue
+        }
+    }
     var color: Color {
         switch self {
         case .general, .hotkey, .about, .author: .gray
-        case .model: .purple
+        case .model, .mcp, .data: .purple
         case .aliases, .keywords, .terminal: .orange
         case .sources, .search, .clipboard: .blue
         case .permissions: .green
@@ -239,8 +250,9 @@ private struct SettingsSidebar: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                sidebarGroup("Settings", pages: [.general, .search, .clipboard, .hotkey, .permissions, .model])
-                sidebarGroup("Tools", pages: [.aliases, .keywords, .terminal, .sources, .plugins])
+                sidebarGroup("Settings", pages: [.general, .search, .clipboard, .hotkey, .permissions])
+                sidebarGroup("智能配置", pages: [.model, .mcp, .data, .sources])
+                sidebarGroup("Tools", pages: [.aliases, .keywords, .terminal, .plugins])
                 sidebarGroup("Others", pages: [.about, .author])
             }
             .padding(.horizontal, 12).padding(.top, 0)
@@ -257,7 +269,7 @@ private struct SettingsSidebar: View {
             ForEach(pages) { page in
                 Button { app.settingsTab = page.rawValue } label: {
                     HStack(spacing: 8) {
-                        Image("Settings-" + page.rawValue)
+                        Image(page.iconAsset)
                             .renderingMode(.template).resizable().frame(width: 16, height: 16)
                         Text(page.title).lineLimit(1)
                         Spacer(minLength: 0)

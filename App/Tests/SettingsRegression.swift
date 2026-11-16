@@ -76,7 +76,7 @@ enum SettingsRegression {
                     try model.memory.ensureExists()
                     let memoryBefore = try Data(contentsOf: model.memory.indexURL)
                     let chat = AgentModel(app: model)
-                    model.settingsTab = SettingsPage.model.rawValue
+                    model.settingsTab = SettingsPage.data.rawValue
                     let window = SettingsWindow.make(app: model)
                     let presentation = WindowPresentation()
                     presentation.show(window)
@@ -689,7 +689,7 @@ enum SettingsRegression {
                             NSApp.sendAction(choice.action!, to: choice.target, from: choice)
                             precondition(model.preferences.folderBackspaceBehavior == .parent)
                         }
-                        if page == .model {
+                        if page == .mcp {
                             try await assertMCPCheckboxLayout(in: split.splitViewItems[1].viewController.view)
                         }
                         guard let view = window.contentView,
