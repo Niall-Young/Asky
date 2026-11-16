@@ -251,6 +251,11 @@ public struct ConversationStore: Sendable {
             .first.map(Self.decode)
     }
 
+    /// Resolve a quoted message across the continuous timeline's storage segments.
+    public func message(_ id: String) -> StoredMessage? {
+        (try? db.query("SELECT * FROM messages WHERE id = ?", [id]))?.first.map(Self.decode)
+    }
+
     public enum FormReplyError: Error { case unavailable, alreadySubmitted }
 
     /// Save the answer and consume its source form together, even across timeline segments.

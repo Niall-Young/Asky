@@ -1003,6 +1003,104 @@ enum AgentReplyRegression {
         print("Paging passed: both directions, latest jump, 120-record bound, active response and live-trim cursor")
     }
 
+    static func replyNavigationRegression(app: AppModel) async throws {
+        let store = ConversationStore(app.store)
+        let sourceCID = try store.create(title: "Reply navigation sources")
+        let short = try store.append(conversationID: sourceCID, role: "assistant", text: "这是要定位的简短原回复")
+        let long = try store.append(conversationID: sourceCID, role: "assistant", text:
+            (0..<45).map { "原回复段落 \($0)：长回复必须从开头阅读，滚动后不能被重新拉回" }.joined(separator: "\n\n"))
+        let cid = try store.create(title: "Reply navigation references")
+        for index in 0..<160 {
+            try store.append(conversationID: cid, role: index.isMultiple(of: 2) ? "user" : "assistant", text: "中间历史消息 \(index)")
+        }
+        let reference = try store.append(conversationID: cid, role: "user", text: "查看之前的回复", presentation:
+            MessagePresentation(quotes: [MessageQuote(sourceMessageID: long.id, text: long.text, kind: .reply)]))
+        try store.append(conversationID: cid, role: "assistant", text: "可以点击上面的回复卡片")
+        let model = AgentModel(app: app)
+        let controller = AgentWindowController(model: model, presentation: WindowPresentation())
+        controller.show()
+        let window = NSApplication.shared.windows.first { $0.title == "Asky AI" }!
+        defer { window.orderOut(nil) }
+        func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
+        func marker(_ id: String) -> NSView? {
+            descendants(window.contentView!).first { $0.identifier?.rawValue == id }
+        }
+        func click(_ point: NSPoint) {
+            for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                window.sendEvent(NSEvent.mouseEvent(with: type, location: point, modifierFlags: [],
+                    timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                    context: nil, eventNumber: 1, clickCount: 1, pressure: type == .leftMouseDown ? 1 : 0)!)
+            }
+        }
+        try await Task.sleep(for: .milliseconds(1200))
+        let scroll = descendants(window.contentView!).compactMap { $0 as? NSScrollView }.first { $0.contentSize.height > 200 }!
+        model.draft = "保留未发送的草稿"
+        let originalIDs = model.items.map(\.id)
+        precondition(!originalIDs.contains(long.id), "The source must begin outside the loaded page")
+        let referenceView = marker("transcript-group-" + reference.id)!
+        let cardRect = scroll.contentView.convert(referenceView.bounds, from: referenceView)
+        let cardPoint = NSPoint(x: cardRect.maxX - 152, y: cardRect.minY + 26)
+        precondition(scroll.contentView.bounds.contains(cardPoint), "The actual reply card must be visible")
+        click(scroll.contentView.convert(cardPoint, to: nil))
+        try await Task.sleep(for: .milliseconds(1200))
+        precondition(model.replyNavigation?.messageID == long.id, "Clicking the sent card must navigate to its source")
+        precondition(model.items.count <= AgentModel.window && model.hasNewer)
+        precondition(model.draft == "保留未发送的草稿" && !model.isRunning)
+        func assertAligned(_ id: String) {
+            let reply = marker("transcript-reply-" + id)!
+            let offset = scroll.contentView.convert(reply.bounds, from: reply).minY - scroll.contentView.bounds.minY
+            precondition(abs(offset - 90) <= 2, "Original reply text must begin below the toolbar: \(offset)")
+        }
+        assertAligned(long.id)
+        let surface = window.contentView!
+        let bitmap = surface.bitmapImageRepForCachingDisplay(in: surface.bounds)!
+        surface.cacheDisplay(in: surface.bounds, to: bitmap)
+        try bitmap.representation(using: .png, properties: [:])!.write(to: URL(filePath: "build/reply-navigation.png"))
+        // Interrupt an in-flight scroll: animation and layout corrections must relinquish control.
+        precondition(model.revealReply(short.id))
+        try await Task.sleep(for: .milliseconds(100))
+        NotificationCenter.default.post(name: NSScrollView.willStartLiveScrollNotification, object: scroll)
+        let manualY = scroll.contentView.bounds.minY + 160
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: manualY))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        try await Task.sleep(for: .milliseconds(1000))
+        precondition(abs(scroll.contentView.bounds.minY - manualY) <= 1, "Manual reading must cancel reply alignment")
+        let beforeAnimation = scroll.contentView.bounds.minY
+        precondition(model.revealReply(short.id))
+        try await Task.sleep(for: .milliseconds(100))
+        if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            let intermediate = scroll.contentView.bounds.minY
+            precondition(intermediate > 1 && intermediate < beforeAnimation - 1,
+                         "Reply navigation must visibly scroll through an intermediate position: \(beforeAnimation) -> \(intermediate)")
+            print("Reply animation intermediate: \(beforeAnimation) -> \(intermediate)")
+        }
+        try await Task.sleep(for: .milliseconds(1100))
+        assertAligned(short.id)
+        precondition(model.revealReply(short.id))
+        try await Task.sleep(for: .milliseconds(1100))
+        assertAligned(short.id)
+        // The existing floating control returns from the historical neighborhood to the latest page.
+        let editor = descendants(window.contentView!).compactMap { $0 as? NSTextView }.first { $0.isEditable }!
+        let editorRect = scroll.contentView.convert(editor.bounds, from: editor)
+        click(scroll.contentView.convert(NSPoint(x: scroll.contentView.bounds.midX, y: editorRect.minY - 34), to: nil))
+        try await Task.sleep(for: .milliseconds(1100))
+        precondition(model.items.map(\.id) == originalIDs && !model.hasNewer)
+        let priorNavigation = model.replyNavigation
+        precondition(!model.revealReply("deleted-source"))
+        precondition(model.items.map(\.id) == originalIDs && model.replyNavigation == priorNavigation)
+        model.beginResponse(taskID: "navigation-active")
+        precondition(!model.revealReply(long.id), "Navigation must not evict an active response")
+        precondition(model.items.map(\.id) == originalIDs)
+        model.finishTask(conversationID: cid)
+        // Conversation-scoped navigation also loads older messages without switching segments.
+        model.open(cid)
+        let oldReply = store.messages(conversationID: cid, limit: 1000).first { $0.role == "assistant" }!
+        precondition(model.revealReply(oldReply.id))
+        precondition(model.conversationID == cid && model.items.contains { $0.id == oldReply.id })
+        precondition(!model.revealReply(long.id), "Scoped history must not switch conversations")
+        print("Reply navigation passed: actual card click, cross-segment history, short/long top alignment, repeated jumps, manual scroll, return to latest, missing source and active response protection")
+    }
+
     static func scrollStabilityRegression(app: AppModel) async throws {
         let store = ConversationStore(app.store)
         let cid = try store.create(title: "Scroll stability")
@@ -1883,6 +1981,10 @@ enum AgentReplyRegression {
         }
         if CommandLine.arguments.contains("--selection-preview") {
             try await selectionPreview(app: app)
+            return
+        }
+        if CommandLine.arguments.contains("--reply-navigation") {
+            try await replyNavigationRegression(app: app)
             return
         }
         if CommandLine.arguments.contains("--paging") {

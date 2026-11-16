@@ -125,6 +125,33 @@ final class AgentModel {
     var quotes: [MessageQuote] = []
     private(set) var quoteFocusRevision = 0
 
+    struct ReplyNavigation: Equatable {
+        let revision = UUID()
+        let messageID: String
+    }
+    private(set) var replyNavigation: ReplyNavigation?
+
+    /// Load a bounded neighborhood without changing the active conversation or draft.
+    @discardableResult
+    func revealReply(_ id: String) -> Bool {
+        if !items.contains(where: { $0.id == id && $0.kind == .assistant }) {
+            guard !isRunning, let source = store.message(id), source.role == "assistant",
+                  timelineMode || source.conversationID == conversationID else { return false }
+            let older = timelineMode
+                ? store.timeline(limit: Self.firstPage, before: source)
+                : store.messages(conversationID: source.conversationID, limit: Self.firstPage, beforeSeq: source.seq)
+            let newer = timelineMode
+                ? store.newerTimeline(after: source, limit: Self.firstPage)
+                : store.newerMessages(conversationID: source.conversationID, afterSeq: source.seq, limit: Self.firstPage)
+            items = (older + [source] + newer).map(Self.item)
+            hasOlder = older.count == Self.firstPage
+            hasNewer = newer.count == Self.firstPage
+            pruneFormValues()
+        }
+        replyNavigation = ReplyNavigation(messageID: id)
+        return true
+    }
+
     func addQuote(_ text: String, sourceMessageID: String, kind: MessageQuote.Kind = .selection) {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }

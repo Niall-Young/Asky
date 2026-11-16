@@ -380,7 +380,7 @@ private struct Transcript: View {
     var body: some View {
         GeometryReader { geometry in
             let allGroups = groups
-            CompatibleTranscriptScroll(submittedMessageID: items.last(where: { $0.kind == .user })?.id, isWaiting: isRunning, completedReplyID: items.last(where: { $0.kind == .assistant })?.id, viewport: viewport, bottomInset: bottomInset, hasNewer: model.hasNewer, loadLatest: model.loadLatestMessages) {
+            CompatibleTranscriptScroll(submittedMessageID: items.last(where: { $0.kind == .user })?.id, isWaiting: isRunning, completedReplyID: items.last(where: { $0.kind == .assistant })?.id, viewport: viewport, bottomInset: bottomInset, replyNavigation: model.replyNavigation, hasNewer: model.hasNewer, loadLatest: model.loadLatestMessages) {
                 // The model already bounds this window to 120 records. Measure it eagerly:
                 // lazy height estimates changed during scrolling and moved native text offscreen.
                 VStack(alignment: .leading, spacing: 0) {
@@ -456,15 +456,16 @@ private struct CompatibleTranscriptScroll<Content: View>: View {
     let completedReplyID: String?
     let viewport: TranscriptViewport
     let bottomInset: CGFloat
+    var replyNavigation: AgentModel.ReplyNavigation?
     var hasNewer = false
     var loadLatest: () -> Void = {}
     @ViewBuilder var content: Content
 
     var body: some View {
         if #available(macOS 15, *), !SurfaceCompatibility.useMacOS14Compatibility {
-            ModernTranscriptScroll(submittedMessageID: submittedMessageID, isWaiting: isWaiting, completedReplyID: completedReplyID, viewport: viewport, bottomInset: bottomInset, hasNewer: hasNewer, loadLatest: loadLatest, content: content)
+            ModernTranscriptScroll(submittedMessageID: submittedMessageID, isWaiting: isWaiting, completedReplyID: completedReplyID, viewport: viewport, bottomInset: bottomInset, replyNavigation: replyNavigation, hasNewer: hasNewer, loadLatest: loadLatest, content: content)
         } else {
-            LegacyTranscriptScroll(submittedMessageID: submittedMessageID, isWaiting: isWaiting, completedReplyID: completedReplyID, viewport: viewport, bottomInset: bottomInset, hasNewer: hasNewer, loadLatest: loadLatest, content: content)
+            LegacyTranscriptScroll(submittedMessageID: submittedMessageID, isWaiting: isWaiting, completedReplyID: completedReplyID, viewport: viewport, bottomInset: bottomInset, replyNavigation: replyNavigation, hasNewer: hasNewer, loadLatest: loadLatest, content: content)
         }
     }
 }
@@ -504,13 +505,13 @@ private final class TranscriptViewport {
 
     private var readingAnchor: (id: NSUserInterfaceItemIdentifier, offset: CGFloat)?
     private var anchorTask: Task<Void, Never>?
+    private var animatingReply = false
 
     func preserveReadingPosition(_ update: () -> Void) {
         guard let scroll, let document = scroll.documentView else { update(); return }
         followsLatestContent = false
         readerMoved = true
-        anchorTask?.cancel()
-        readingAnchor = nil
+        cancelReadingAnchor()
         func markers(_ view: NSView) -> [NSView] {
             if view.identifier?.rawValue.hasPrefix("transcript-group-") == true { return [view] }
             return view.subviews.flatMap(markers)
@@ -531,26 +532,67 @@ private final class TranscriptViewport {
         }
     }
 
+    func revealReply(_ id: String, reduceMotion: Bool) {
+        cancelReadingAnchor()
+        followsLatestContent = false
+        readerMoved = true
+        // The marker is on the text, so subtract the bubble inset as well.
+        readingAnchor = (NSUserInterfaceItemIdentifier("transcript-reply-" + id),
+                         AgentLayout.headerHeight + 12 + AgentLayout.messageVerticalInset)
+        animatingReply = !reduceMotion
+        anchorTask = Task { @MainActor [weak self] in
+            // Let a newly loaded history page settle before measuring the destination.
+            do { try await Task.sleep(for: .milliseconds(30)) } catch { return }
+            guard let self, !Task.isCancelled else { return }
+            if !reduceMotion, let scroll = self.scroll, self.readingOrigin() != nil {
+                let start = scroll.contentView.bounds.origin
+                let startedAt = ProcessInfo.processInfo.systemUptime
+                while !Task.isCancelled, let target = self.readingOrigin() {
+                    let progress = min(1, (ProcessInfo.processInfo.systemUptime - startedAt) / 0.22)
+                    let eased = 1 - pow(1 - progress, 3)
+                    let origin = NSPoint(x: start.x, y: start.y + (target.y - start.y) * eased)
+                    scroll.contentView.scroll(to: origin)
+                    scroll.reflectScrolledClipView(scroll.contentView)
+                    if progress >= 1 { break }
+                    do { try await Task.sleep(for: .milliseconds(8)) } catch { return }
+                }
+            }
+            guard !Task.isCancelled else { return }
+            self.animatingReply = false
+            self.restoreReadingPosition()
+            for _ in 0..<30 {
+                do { try await Task.sleep(for: .milliseconds(30)) } catch { return }
+                self.restoreReadingPosition()
+            }
+            self.readingAnchor = nil
+        }
+    }
+
     func cancelReadingAnchor() {
         anchorTask?.cancel()
         readingAnchor = nil
+        animatingReply = false
     }
 
     func restoreReadingPosition() {
-        guard let readingAnchor, let scroll, let document = scroll.documentView else { return }
+        guard !animatingReply, let scroll, let origin = readingOrigin() else { return }
+        if abs(scroll.contentView.bounds.minY - origin.y) > 0.5 {
+            scroll.contentView.scroll(to: origin)
+            scroll.reflectScrolledClipView(scroll.contentView)
+        }
+    }
+
+    private func readingOrigin() -> NSPoint? {
+        guard let readingAnchor, let scroll, let document = scroll.documentView else { return nil }
         document.layoutSubtreeIfNeeded()
         func find(_ view: NSView) -> NSView? {
             if view.identifier == readingAnchor.id { return view }
             return view.subviews.compactMap(find).first
         }
-        guard let marker = find(document) else { return }
+        guard let marker = find(document) else { return nil }
         var bounds = scroll.contentView.bounds
         bounds.origin.y = scroll.contentView.convert(marker.bounds, from: marker).minY - readingAnchor.offset
-        let origin = scroll.contentView.constrainBoundsRect(bounds).origin
-        if abs(scroll.contentView.bounds.minY - origin.y) > 0.5 {
-            scroll.contentView.scroll(to: origin)
-            scroll.reflectScrolledClipView(scroll.contentView)
-        }
+        return scroll.contentView.constrainBoundsRect(bounds).origin
     }
 
     func alignLatestContent() -> Bool {
@@ -627,6 +669,7 @@ private struct TranscriptReplyPosition: NSViewRepresentable {
 
 @MainActor
 private func alignTranscriptContent(viewport: TranscriptViewport, replyID: String?) -> Task<Void, Never> {
+    viewport.cancelReadingAnchor()
     viewport.replyID = replyID
     viewport.followsLatestContent = true
     return Task { @MainActor in
@@ -646,6 +689,7 @@ private struct ModernTranscriptScroll<Content: View>: View {
     let completedReplyID: String?
     let viewport: TranscriptViewport
     let bottomInset: CGFloat
+    var replyNavigation: AgentModel.ReplyNavigation?
     var hasNewer = false
     var loadLatest: () -> Void = {}
     var content: Content
@@ -666,6 +710,13 @@ private struct ModernTranscriptScroll<Content: View>: View {
             }
             .scrollIndicators(.hidden)
             .onDisappear { bottomTask?.cancel(); submissionTask?.cancel(); replyTask?.cancel(); viewport.followsLatestContent = false; viewport.cancelReadingAnchor() }
+            .onChange(of: replyNavigation) { _, request in
+                guard let request else { return }
+                bottomTask?.cancel()
+                submissionTask?.cancel()
+                replyTask?.cancel()
+                viewport.revealReply(request.messageID, reduceMotion: reduceMotion)
+            }
             .onChange(of: isWaiting) { _, waiting in
                 if !waiting { submissionTask?.cancel() }
             }
@@ -682,6 +733,7 @@ private struct ModernTranscriptScroll<Content: View>: View {
             .defaultScrollAnchor(.top, for: .sizeChanges)
             .onScrollPhaseChange { _, phase in
                 if phase == .interacting || phase == .tracking {
+                    viewport.cancelReadingAnchor()
                     viewport.followsLatestContent = false
                     bottomTask?.cancel()
                     submissionTask?.cancel()
@@ -794,6 +846,7 @@ private struct LegacyTranscriptScroll<Content: View>: View {
     let completedReplyID: String?
     let viewport: TranscriptViewport
     let bottomInset: CGFloat
+    var replyNavigation: AgentModel.ReplyNavigation?
     var hasNewer = false
     var loadLatest: () -> Void = {}
     var content: Content
@@ -815,6 +868,13 @@ private struct LegacyTranscriptScroll<Content: View>: View {
                 }
                 .scrollIndicators(.hidden)
                 .onDisappear { bottomTask?.cancel(); submissionTask?.cancel(); replyTask?.cancel(); viewport.followsLatestContent = false; viewport.cancelReadingAnchor() }
+                .onChange(of: replyNavigation) { _, request in
+                    guard let request else { return }
+                    bottomTask?.cancel()
+                    submissionTask?.cancel()
+                    replyTask?.cancel()
+                    viewport.revealReply(request.messageID, reduceMotion: reduceMotion)
+                }
                 .onChange(of: isWaiting) { _, waiting in
                     if !waiting { submissionTask?.cancel() }
                 }
@@ -995,6 +1055,7 @@ private struct ChatBubble: View {
     @State private var hovering = false
     @State private var copyHovering = false
     @State private var copyFeedbackID: UUID?
+    @State private var replyUnavailable = false
     @FocusState private var copyFocused: Bool
 
     private var imageAttachments: [AttachmentRef] { item.attachments.filter { $0.kind == .image } }
@@ -1070,9 +1131,7 @@ private struct ChatBubble: View {
                     .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
                     .background {
-                        if item.id == model.items.last(where: { $0.kind == .assistant })?.id {
-                            TranscriptReplyPosition(id: item.id)
-                        }
+                        TranscriptReplyPosition(id: item.id)
                     }
                     .padding(.horizontal, AgentLayout.messageHorizontalInset).padding(.vertical, AgentLayout.messageVerticalInset)
                     .background {
@@ -1114,13 +1173,28 @@ private struct ChatBubble: View {
     private var attachmentCards: some View {
         HStack(spacing: 8) {
             ForEach(Array(item.quotes.enumerated()), id: \.element.id) { index, quote in
-                ComposerAttachmentCard(quote: quote, quoteNumber: index + 1)
+                if quote.kind == .reply {
+                    Button {
+                        replyUnavailable = !model.revealReply(quote.sourceMessageID)
+                    } label: {
+                        ComposerAttachmentCard(quote: quote, quoteNumber: index + 1)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(model.isRunning && !model.items.contains { $0.id == quote.sourceMessageID })
+                    .accessibilityLabel(NSLocalizedString("查看原回复", comment: ""))
+                    .accessibilityIdentifier("reply-reference-" + quote.id)
+                } else {
+                    ComposerAttachmentCard(quote: quote, quoteNumber: index + 1)
+                }
             }
             ForEach(inlineAttachments) { attachment in
                 ComposerAttachmentCard(attachment: attachment, thumbnail: nil)
             }
         }
         .fixedSize(horizontal: true, vertical: false)
+        .alert(NSLocalizedString("原回复已不可用", comment: ""), isPresented: $replyUnavailable) {
+            Button(NSLocalizedString("确定", comment: ""), role: .cancel) {}
+        }
     }
 
     private var replyButton: some View {

@@ -939,3 +939,7 @@
 
 "模型配置" = "Model Configuration";
 "数据管理" = "Data Management";
+
+/* Reply reference navigation */
+"查看原回复" = "View original reply";
+"原回复已不可用" = "Original reply is unavailable";
