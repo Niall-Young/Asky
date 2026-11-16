@@ -1379,7 +1379,7 @@ enum AgentReplyRegression {
         }
         assertReplyAboveComposer()
         let compactHeight = scroll.documentView!.bounds.height
-        model.draft = (1...6).map { "第 \($0) 行草稿" }.joined(separator: "\n")
+        model.draft = (1...20).map { "第 \($0) 行草稿：输入框达到最大高度后，滚动条靠近玻璃边缘。" }.joined(separator: "\n")
         try await Task.sleep(for: .milliseconds(600))
         try capture("expanded-before-scroll")
         precondition(scroll.documentView!.bounds.height > compactHeight + 40,
@@ -1389,6 +1389,19 @@ enum AgentReplyRegression {
         try await Task.sleep(for: .milliseconds(200))
         assertReplyAboveComposer()
         try capture("expanded-composer")
+        let editor = textViews(window.contentView!).first { $0.isEditable }!
+        let editorScroll = editor.enclosingScrollView!
+        let viewport = window.contentView!.convert(editorScroll.bounds, from: editorScroll)
+        let textOrigin = window.contentView!.convert(editor.textContainerOrigin, from: editor)
+        precondition(abs(textOrigin.x - 24) < 1, "Composer text must keep its original left inset")
+        precondition(abs(window.contentView!.bounds.maxX - viewport.maxX - 16) < 1,
+                     "Scroll view must sit 4 pt inside the glass, which is 12 pt inside the window")
+        for (name, appearance) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
+            window.appearance = NSAppearance(named: appearance)
+            editorScroll.flashScrollers()
+            try await Task.sleep(for: .milliseconds(150))
+            try capture("composer-scroller-" + name)
+        }
         print("Natural chat flow passed: short, overflowing and fitting replies, fixed window, waiting bubble")
     }
 

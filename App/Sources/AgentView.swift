@@ -1286,7 +1286,7 @@ private struct Composer: View {
                 pasteAttachment: { model.pasteAttachments() }, submit: { model.send() }, shortcuts: model.shortcutPreferences)
                 .environment(\.chatSelectionColor, model.avatarColor.tint)
                 .frame(height: editorHeight)
-            .padding(.horizontal, 12)
+                .padding(.horizontal, 4)
             HStack {
                 Button { importing = true } label: {
                     Image(mingCute: "plus", size: 14).frame(width: 28, height: 28)

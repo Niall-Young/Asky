@@ -105,7 +105,8 @@ struct ComposerTextEditor: NSViewRepresentable {
         editor.importsGraphics = false
         editor.drawsBackground = false
         editor.font = .systemFont(ofSize: 14)
-        editor.textContainerInset = NSSize(width: 0, height: 4)
+        // Keep text 12 pt from the glass while the scroll view sits only 4 pt in.
+        editor.textContainerInset = NSSize(width: 8, height: 4)
         editor.textContainer?.lineFragmentPadding = 0
         editor.minSize = NSSize(width: 0, height: 28)
         editor.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
