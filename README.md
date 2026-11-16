@@ -35,7 +35,7 @@ Asky 是使用 SwiftUI 与 AppKit 构建的 macOS 原生效率入口。本地搜
 - **系统与扩展**：按授权访问日历、提醒事项、备忘录、通讯录和地图；短信以草稿交给用户发送。支持 MCP 和 GitHub 插件，包括[飞书](https://github.com/Niall-Young/asky-plugin-lark)与 [Orca](https://github.com/Niall-Young/asky-plugin-orca)。
 - **原生体验与隐私**：适配系统外观和“减少动态效果”，macOS 26+ 支持液态玻璃；不向作者服务器上传用户数据，API Key 存于系统钥匙串。使用模型或外部工具时的数据处理见[隐私政策](PRIVACY.md)。
 
-联网检索默认使用免 Key Bing，保留完整型号补搜并返回缺失内容与失败原因；搜索摘要不等于全文。AI 可读取指定 Chrome 普通标签页已加载的正文（需在 Chrome“查看 › 开发者”开启“允许 Apple 事件中的 JavaScript”），不读取无痕窗口。详见[网页搜索与页面读取](docs/native-tools-and-mcp.md#agent-公开网页搜索)。
+联网检索直接调用 Parallel / Exa 的免 Key 远程工具，返回较长摘录并支持按 URL 读取公开网页正文；不启动浏览器、不安装组件，也不使用作者的付费账号。免费接口有服务端限流，触限会明确报告，不转付费。详见[网页搜索与页面读取](docs/native-tools-and-mcp.md#agent-公开网页搜索)。
 
 ### 安装与配置
 
@@ -116,7 +116,7 @@ Asky is a native macOS launcher built with SwiftUI and AppKit. Local search and 
 - **System integration and extensions**: Authorized access to Calendar, Reminders, Notes, Contacts, and Maps. Messages are handed off as drafts for the user to send. Supports MCP and GitHub plugins, including [Feishu](https://github.com/Niall-Young/asky-plugin-lark) and [Orca](https://github.com/Niall-Young/asky-plugin-orca).
 - **Native experience and privacy**: Supports system appearance and Reduce Motion, with Liquid Glass on macOS 26+. No user data is uploaded to author servers; API keys stay in Keychain. See the [Privacy Policy](PRIVACY.md) for data handling when using models or external tools.
 
-Web search uses key-free Bing by default, preserves complete model identifiers during retries, and reports missing content and failure reasons; snippets are not full articles. The AI can read loaded text from a specified regular Chrome tab (enable View › Developer › Allow JavaScript from Apple Events in Chrome). Incognito windows are excluded. See [web search and page reading](docs/native-tools-and-mcp.md#agent-公开网页搜索).
+Web search calls the anonymous Parallel / Exa remote tools, with longer excerpts and public page reading by URL. It needs no browser, extra installation, or developer-paid account. Free endpoints have provider rate limits; failures are reported without switching to paid access. See [web search and page reading](docs/native-tools-and-mcp.md#agent-公开网页搜索).
 
 ### Installation and Setup
 

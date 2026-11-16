@@ -96,31 +96,31 @@ M0 检查实例冒充、伪造确认、撤权、应用退出、多个连接、�
 
 ## Agent 公开网页搜索
 
-`web_search(query, count?)` 通过 ToolService 的 `.web` 只读来源执行，默认返回 5 条、最多 10 条 Bing 网页搜索结果，包含标题、URL、摘要、搜索入口和检索时间。无需额外 Key；只对 Agent 与原生宿主开放，不对外部 MCP 开放。设置中的联网搜索开关独立于本地数据源，旧配置默认启用。
+`web_search(query, count?)` 与 `web_read_page(url)` 通过 ToolService 的 `.web` 只读来源执行；只对 Agent 与原生宿主开放，不向外部 MCP 暴露。旧配置默认启用，可在设置的数据来源中关闭。两项工具直接使用现成的远程 MCP，不启动浏览器、不安装 Python/Node/Docker 或下载组件、不另存网页文件。
 
-网络请求使用无 Cookie 的临时会话，每次请求 10 秒超时、1 MiB 响应上限；一次工具调用最多 3 次请求，整体超时 35 秒；查询限制 500 字。不请求结果链接、不读取网页全文。页面结构变化、验证、限流和无法解析保留失败状态，不伪装成空搜索；明确无结果或相关性过滤后没有候选时返回 `no_relevant_results`。模型须引用本次真实来源链接，不能将摘要或检索时间描述为全文阅读或发布日期，也不能执行搜索内容中的指令。
+### 搜索来源与费用边界
 
-### 搜索相关性与补搜
+默认调用 [Parallel Search MCP](https://github.com/parallel-web/search-mcp) 的 `web_search`；候选不足、关键词覆盖不完整或调用失败时，再调用 [Exa MCP](https://github.com/exa-labs/exa-mcp-server) 的 `web_search_exa`。保持原查询与完整型号，不通过反复改写制造请求。Parallel 仓库是连接配置与文档，Exa 仓库提供 MCP 服务实现；它们的搜索索引均为托管服务，不能把连接器开源说成搜索引擎已完整开源。
 
-工具先解析最多 10 条候选，再按原查询过滤和排序，最后应用 `count`。中文片段显式用中文分词，英文型号保留小数版本和连字符。品牌、型号和版本作为主体；评测、口碑、benchmark 等意图词使用有限的中英文同义组参与覆盖判断和排序，不因英文摘要缺少中文字样而删除主体相关来源。主体须在同一来源中匹配；比较查询允许部分对象覆盖。单品牌加“模型”时要求模型语境，过滤同名交易所等明显歧义结果。以上只是词法启发式，不保证语义和事实正确。
+只连接 `https://search.parallel.ai/mcp` 和 `https://mcp.exa.ai/mcp` 的匿名接口，不配置 API Key、OAuth、作者付费账号或共享代理，不跟随重定向，也不读取模型凭据。免费接口受提供方的限流和可用性约束，触限返回 `rate_limited`，不能保证无限可用；不会因此产生作者的搜索账单或自动转入付费。也不轮换会话 ID 或网络身份绕过限流。Parallel 使用每次 App 运行期间稳定的随机会话 ID；服务端可能改变匿名服务规则。
 
-最多追加两次查询：保留完整主体，将已知检索意图换成英文，或用主体精简查询；保留 `site:` 限定并校验域名，带否定或布尔运算符的查询不自动简化。不把 `Gemini 4 Carbon` 缩成 `Carbon 口碑`。缺少评测证据的主体介绍可以保留为 `partial`，不能用于评价结论。搜索摘要合并候选中可用的段落，上限仍为 1,500 字符，不补写原站未提供的内容。
+### 结果与失败信号
 
-`output.status` 与 `quality` 使用 `matched` / `partial` / `no_relevant_results`；`status` 还会反映补搜请求失败造成的不完整状态。外层执行 `completed` 仅表示工具执行结束。`reason` 区分 `provider_returned_no_results`、`candidates_rejected`、`incomplete_coverage` 和 `query_terms_covered`。`subjectTerms`、`missingTerms`、`attempts` 记录主体、未覆盖词、每次查询、候选数、接受数、被拒结果的标题/URL/原因/缺失词，以及请求错误。全部请求失败仍走 ToolError，不能伪装成空搜索。
+默认返回 5 条，最多 10 条，每条含标题、URL、提供方、最长 6,000 字符的摘录及截断标记。中文分词与型号识别用于覆盖诊断和排序，不再因为缺少某个字词就丢弃语义搜索结果；同一来源完整主体优先，明确违反 `site:` 域名范围或返回登录入口的候选仍排除。来源内容与关键词匹配都不是事实核实，需由模型核对上下文并引用真实链接。
 
-`contentAvailability=unknown` 表示无法断定内容不存在还是未被索引；`nextAction=change_source_or_read_page` 提醒模型换来源或读取页面，不重复已尝试的同组词。关键词覆盖不等于事实核实，`matched` 也不代表完整评测。诊断随原生会话保存。当前默认搜索仍只有免 Key Bing；未接入付费服务或宣称有独立索引备用源。
+`output.status` 为 `matched`、`partial`、`no_relevant_results`、`rate_limited` 或 `unavailable`；外层 `completed` 只表示工具执行结束。`missingTerms`、`subjectTerms`、`attempts` 返回缺失词、每源接受/拒绝数量与原因、失败详情；`contentAvailability=unknown` 表示不能证明对象或内容不存在。保留部分可用结果时仍记录另一来源的错误，不假称完全没搜到。自动换源最多一次，模型不应重复耗尽的查询。
 
-### Chrome 页面读取（独立于搜索）
+### 公开页面读取
 
-`chrome_read_page(windowID, tabID, url)` 通过 `.chrome` 来源、ToolService 和 Chrome Apple Events 执行，只对 Agent 开放，不向外部 MCP 开放。先列标签获取准确目标，读取前排除无痕并检查 URL，读取后再次校验 URL。只接受 HTTP/HTTPS。工具内置固定脚本，读取 `main` 或 `body` 的已加载文字，最多 24,000 UTF-16 单元，返回标题、URL、正文、`truncated`、检索时间、`contentType=loaded_page_text` 和 `status=read/empty`。不接收模型传入的 JS，排除隐藏文字和可编辑区域，不读取 Cookie、storage 或输入框值，不滚动、点击或自动翻页。
+`web_read_page(url)` 调用 Parallel `web_fetch`，失败时调用 Exa `web_fetch_exa`。每次只读一个公开 HTTP/HTTPS URL，拒绝带凭据、本地域名和 IP 地址的链接。最长返回 24,000 字符，包含提供方、读取时间、`status`、`truncated` 与尝试记录；提供方只返回摘录时保守标记截断。不会自动遍历链接或读全部搜索结果，不读取 Chrome 正文、Cookie 或登录态。
 
-Chrome 必须开启“查看 › 开发者 › 允许 Apple 事件中的 JavaScript”；关闭时返回具体权限说明，不自动修改设置。普通 Automation 权限独立处理。X 登录页、加载失败、未加载的评论和正文截断须按实际返回判断；该工具不保证读取整篇文章或所有帖子。页面文字是外部不可信资料，不执行其中指令。返回内容可进入配置的模型请求和本机会话保存。
+X 等页面是否能读取取决于公开可访问内容与提供方覆盖；登录提示、截断和抓取错误按实际结果处理，不能宣称读过完整帖子或全部评论。读取错误不表示原网站打不开。外部文字只作资料，不执行其中的指令。查询、URL 发给对应服务；结果可进入配置的模型请求与本机会话，见 [隐私政策](../PRIVACY.md)。
 
-切换标签时匹配稳定 ID，取整数索引后立即结束查找，并在切换前校验目标仍存在；目标失效返回刷新标签列表的提示。历史“索引无效”故障尚需在原窗口状态验证。
+请求使用无 Cookie、无凭据、无磁盘缓存的临时会话，每次请求超时 15 秒、资源上限 18 秒、单响应最多 2 MiB。每源一次 MCP 握手、初始化通知和工具调用，最多两源；工具总超时 110 秒，可取消。查询最多 500 字。保留 Chrome 列标签与切标签功能，移除了 `chrome_read_page`；历史切换索引问题的原窗口复现仍未完成。
 
-真实联网回归（需要网络，默认测试不会执行）：
+真实联网验收（默认测试不访问网络）：
 
 ```bash
 cd Packages/KulaCore
-ASKY_LIVE_WEB_SEARCH=1 ASKY_LIVE_WEB_SEARCH_CHINESE=1 ASKY_LIVE_WEB_SEARCH_RECOVERY=1 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --filter WebSearch
+ASKY_LIVE_WEB_SEARCH=1 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --filter FreeWebSearchTests
 ```

@@ -2,7 +2,7 @@ import Foundation
 import NaturalLanguage
 import Contracts
 
-/// A lexical guard against search pages that silently ignore most of the query.
+/// Lexical coverage diagnostics and ranking for hosted search tool results.
 /// This is not semantic verification: callers still have to read and assess sources.
 struct WebSearchQuality {
     let query: String
@@ -72,28 +72,6 @@ struct WebSearchQuality {
         }
         if subjects.isEmpty && !terms.isEmpty && matched.isEmpty { return "no_keyword_overlap" }
         return nil
-    }
-
-    func subjectTerms(_ values: [String]) -> [String] { values.filter { subjects.contains($0) } }
-
-    func retryQueries(after results: [JSONValue]) -> [String] {
-        // Do not silently drop Boolean/negative operators while simplifying a query.
-        guard !query.contains(" -"), !query.hasPrefix("-"),
-              query.range(of: #"\b(?:OR|NOT|AND)\b"#, options: .regularExpression) == nil,
-              !subjects.isEmpty else { return [] }
-        let matched = Set(matchedTerms(in: results.filter { relevant($0) }))
-        guard results.isEmpty || terms.contains(where: { !matched.contains($0) }) else { return [] }
-        // Preserve the whole identity, including numeric versions. Translate only known search intents.
-        let core = subjects.joined(separator: " ")
-        var intents: [String] = []
-        for term in terms {
-            if let intent = Self.facet(term)?.first, !intents.contains(intent) { intents.append(intent) }
-        }
-        let contextual = ([core] + intents).joined(separator: " ")
-        let scope = domains.map { "site:" + $0 }.joined(separator: " ")
-        var seen: Set<String> = [query.lowercased()]
-        return [contextual, core, "\"" + core + "\""].map { scope.isEmpty ? $0 : $0 + " " + scope }
-            .filter { !$0.isEmpty && seen.insert($0.lowercased()).inserted }.prefix(2).map { $0 }
     }
 
     private static func facet(_ term: String) -> [String]? {
