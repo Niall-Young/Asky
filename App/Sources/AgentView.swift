@@ -102,6 +102,7 @@ struct AgentView: View {
     var close: () -> Void = {}
     var setPinned: (Bool) -> Void = { _ in }
     @State private var composerHeight: CGFloat = 94
+    @State private var showingApprovalMenu = false
     @State private var pinned = false
     @State private var toolbarPressed: Int?
     @State private var toolbarHovered: Int?
@@ -138,7 +139,7 @@ struct AgentView: View {
                 .frame(height: composerHeight)
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
-            Composer(model: model)
+            Composer(model: model, showingApprovalMenu: $showingApprovalMenu)
                 .padding(.horizontal, 12).padding(.bottom, 12)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { composerHeight = $0 }
         }
@@ -155,6 +156,9 @@ struct AgentView: View {
                               expression: Binding(get: { model.avatarExpression }, set: { model.avatarExpression = $0 }))
                 .padding(.leading, 16).padding(.top, 14)
         }
+        .modifier(ApprovalMenuPresentation(showing: $showingApprovalMenu) {
+            ApprovalModeMenu(model: model, showing: $showingApprovalMenu)
+        })
         .foregroundStyle(ThemeColor.kText.color(for: colorScheme))
         .windowSurfaceBackground(in: shape)
         .clipShape(shape)
@@ -1173,6 +1177,7 @@ private struct ChatBubble: View {
 
 private struct Composer: View {
     @Bindable var model: AgentModel
+    @Binding var showingApprovalMenu: Bool
     @State private var importing = false
     @State private var editorHeight: CGFloat = 28
     @State private var editorFocused = false
@@ -1213,7 +1218,7 @@ private struct Composer: View {
                 .buttonStyle(AgentIconButtonStyle(cornerRadius: 14))
                 .accessibilityLabel(NSLocalizedString("选择文件或图片", comment: ""))
                 Spacer()
-                ApprovalModePicker(model: model)
+                ApprovalModePicker(model: model, showing: $showingApprovalMenu)
                 Button { if model.isRunning { model.stop() } else { model.send() } } label: {
                     Image(mingCute: model.isRunning ? "stop.fill" : "arrow.up", size: 14).frame(width: 28, height: 28)
                 }
@@ -1243,7 +1248,7 @@ private struct Composer: View {
 
 private struct ApprovalModePicker: View {
     @Bindable var model: AgentModel
-    @State private var showing = false
+    @Binding var showing: Bool
     @State private var pressed = false
 
     static let iconSize: CGFloat = 16
@@ -1263,19 +1268,9 @@ private struct ApprovalModePicker: View {
         .buttonStyle(GlassPressObserverStyle(pressed: $pressed))
         .accessibilityLabel(NSLocalizedString("审批模式", comment: ""))
         .accessibilityValue(Self.title(mode))
-        .modifier(ApprovalMenuPresentation(showing: $showing, pressed: pressed) { menu(mode) })
-    }
-
-    private func menu(_ mode: ApprovalMode) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            ForEach(ApprovalMode.allCases, id: \.self) { option in
-                ApprovalModeRow(option: option, selected: option == mode) {
-                    model.approvalMode = option
-                    showing = false
-                }
-            }
-        }
-        .padding(6).frame(width: 220)
+        .glassPointerFeedback(pressed: pressed, in: RoundedRectangle(cornerRadius: 14), illumination: false)
+        .anchorPreference(key: ApprovalMenuAnchorKey.self, value: .bounds) { $0 }
+        .accessibilityIdentifier("approval-mode-trigger")
     }
 
     static func icon(_ mode: ApprovalMode) -> String {
@@ -1288,6 +1283,31 @@ private struct ApprovalModePicker: View {
 
     static func title(_ mode: ApprovalMode) -> String {
         mode == .fullAccess ? NSLocalizedString("完全访问权限", comment: "") : NSLocalizedString("自动审批", comment: "")
+    }
+}
+
+private struct ApprovalMenuAnchorKey: PreferenceKey {
+    static let defaultValue: Anchor<CGRect>? = nil
+    static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) {
+        value = nextValue() ?? value
+    }
+}
+
+private struct ApprovalModeMenu: View {
+    @Bindable var model: AgentModel
+    @Binding var showing: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ForEach(ApprovalMode.allCases, id: \.self) { option in
+                ApprovalModeRow(option: option, selected: option == model.approvalMode) {
+                    model.approvalMode = option
+                    showing = false
+                }
+            }
+        }
+        .padding(6).frame(width: 220)
+        .accessibilityIdentifier("approval-mode-menu")
     }
 }
 
@@ -1311,6 +1331,7 @@ private struct ApprovalModeRow: View {
         }
         .buttonStyle(ApprovalModeRowButtonStyle())
         .accessibilityLabel(ApprovalModePicker.title(option))
+        .accessibilityIdentifier(option == .fullAccess ? "approval-mode-full" : "approval-mode-auto")
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
@@ -1328,7 +1349,6 @@ private struct ApprovalModeRowButtonStyle: ButtonStyle {
 /// and so ignores the Liquid Glass setting.
 private struct ApprovalMenuPresentation<Menu: View>: ViewModifier {
     @Binding var showing: Bool
-    let pressed: Bool
     @ViewBuilder let menu: () -> Menu
     @State private var monitor: Any?
     @State private var menuView = WeakViewBox()
@@ -1336,16 +1356,19 @@ private struct ApprovalMenuPresentation<Menu: View>: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .glassPointerFeedback(pressed: pressed, in: RoundedRectangle(cornerRadius: 14), illumination: false)
-            .overlay(alignment: .bottomTrailing) {
-                if showing {
-                    menu()
-                        .nativeGlassBackground(in: RoundedRectangle(cornerRadius: 14), interactive: true)
-                        .background(ViewReader(box: menuView).allowsHitTesting(false))
-                        .fixedSize()
-                        // Keep the trigger in place; present the menu 8 pt above it.
-                        .offset(x: 40, y: -36)
-                        .transition(.opacity)
+            .overlayPreferenceValue(ApprovalMenuAnchorKey.self) { anchor in
+                if showing, let anchor {
+                    GeometryReader { geometry in
+                        let trigger = geometry[anchor]
+                        menu()
+                            .nativeGlassBackground(in: RoundedRectangle(cornerRadius: 14), interactive: true)
+                            .background(ViewReader(box: menuView).allowsHitTesting(false))
+                            .fixedSize()
+                            // Present in the full window, outside the composer's glass/hover bounds.
+                            .position(x: min(geometry.size.width - 122, trigger.maxX + 40 - 110),
+                                      y: trigger.minY - 8 - 43)
+                    }
+                    .transition(.opacity)
                 }
             }
             .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: showing)

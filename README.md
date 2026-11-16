@@ -160,6 +160,7 @@ python3 App/Tests/run-settings-regression.py --plugin-tabs
 python3 App/Tests/run-agent-reply-regression.py --reply-activity-preview
 python3 App/Tests/run-agent-reply-regression.py --bubble-width-preview
 python3 App/Tests/run-agent-reply-regression.py --user-bubble-hover
+python3 App/Tests/run-agent-reply-regression.py --approval-menu-hover
 python3 App/Tests/run-agent-reply-regression.py --reading-scroll
 python3 App/Tests/run-agent-reply-regression.py --scroll-stability
 python3 App/Tests/run-agent-reply-regression.py --paging
@@ -353,6 +354,7 @@ python3 App/Tests/run-settings-regression.py --plugin-tabs
 python3 App/Tests/run-agent-reply-regression.py --reply-activity-preview
 python3 App/Tests/run-agent-reply-regression.py --bubble-width-preview
 python3 App/Tests/run-agent-reply-regression.py --user-bubble-hover
+python3 App/Tests/run-agent-reply-regression.py --approval-menu-hover
 python3 App/Tests/run-agent-reply-regression.py --reading-scroll
 python3 App/Tests/run-agent-reply-regression.py --scroll-stability
 python3 App/Tests/run-agent-reply-regression.py --paging

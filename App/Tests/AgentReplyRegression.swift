@@ -1744,11 +1744,12 @@ enum AgentReplyRegression {
     static func main() async throws {
         let application = NSApplication.shared
         application.setActivationPolicy(.accessory)
-        if CommandLine.arguments.contains("--action-cursor-preview") || CommandLine.arguments.contains("--user-bubble-hover") {
+        if CommandLine.arguments.contains("--action-cursor-preview") || CommandLine.arguments.contains("--user-bubble-hover") || CommandLine.arguments.contains("--approval-menu-hover") {
             var completed = false
             Task { @MainActor in
                 do {
                     if CommandLine.arguments.contains("--action-cursor-preview") { try await actionCursorPreview() }
+                    else if CommandLine.arguments.contains("--approval-menu-hover") { try await approvalMenuHoverRegression() }
                     else { try await userBubbleHoverRegression() }
                 } catch { preconditionFailure("User bubble hover failed: \(error)") }
                 completed = true
