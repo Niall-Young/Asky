@@ -196,6 +196,7 @@ struct AgentView: View {
         .frame(height: AgentLayout.headerHeight)
         .contentShape(Rectangle())
         .compatibleWindowDrag()
+        .actionArrowCursor()
         .background {
             Group {
                 Button("", action: close)
