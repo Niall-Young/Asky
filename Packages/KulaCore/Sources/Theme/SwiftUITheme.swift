@@ -4,12 +4,12 @@ extension RGBA {
     public var color: Color { Color(.sRGB, red: red, green: green, blue: blue, opacity: alpha) }
 }
 
-/// Persistent full-access status uses a softer red than transient errors.
+/// Persistent full-access status uses amber adapted to each appearance.
 public struct FullAccessTint: ShapeStyle {
     public init() {}
 
     public func resolve(in environment: EnvironmentValues) -> Color {
-        RGBA(hex: environment.colorScheme == .dark ? 0xF57478 : 0xD94F55, alpha: 1).color
+        RGBA(hex: environment.colorScheme == .dark ? 0xE8AD52 : 0xAD690B, alpha: 1).color
     }
 }
 

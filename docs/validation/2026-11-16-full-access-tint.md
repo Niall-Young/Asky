@@ -22,3 +22,11 @@ README 保持不变：仅调整颜色，使用方式与构建命令未变。构�
 重新运行上述指定 Xcode 的 `swift test`、`xcodegen generate`、Debug `xcodebuild` 与 `--approval-menu-hover`，均通过。重新检查两张亮暗菜单截图，红色更鲜明。`git diff --check` 通过。
 
 已退出旧 Debug 进程并启动 `build/DerivedData/Build/Products/Debug/Asky.app`，确认新 PID 4576 使用该路径。此轮已重启用户的 Debug 应用，未替换 `/Applications` 安装包。README 与忽略规则保持不变。
+
+## 第三轮：亮暗统一橙黄色
+
+按用户最新要求，亮暗两种外观均改为橙黄色：浅色 `#AD690B`，深色 `#E8AD52`。浅色加深以保持可读性。
+
+最终色值应用后重新运行指定 Xcode 的 `swift test`、`xcodegen generate`、Debug `xcodebuild` 与 `--approval-menu-hover`，均通过。检查新生成的亮暗菜单截图，图标与文字均为对应的橙黄色；`git diff --check` 通过。仅修改暗色的中间回归在用户补充要求后中止，不作为本轮通过依据。
+
+Debug 已重启，确认 PID 5288 运行 `build/DerivedData/Build/Products/Debug/Asky.app/Contents/MacOS/Asky`。README 保持不变，使用方式未变；构建和截图沿用现有忽略规则。
