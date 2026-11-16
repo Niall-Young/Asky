@@ -8,63 +8,122 @@ struct WebSearchQuality {
     let query: String
     let terms: [String]
     let domains: [String]
+    let subjects: [String]
+    private let calendarTerms: Set<String>
+    private let comparison: Bool
 
     init(query: String) {
         self.query = query
+        comparison = query.range(of: #"(?i)\b(?:vs|versus|compare|comparison|OR)\b|对比|比较"#, options: .regularExpression) != nil
         domains = Self.matches(#"(?i)(?:^|\s)site:([a-z0-9.-]+)"#, query).map { $0.lowercased() }
         var withoutSites = query.replacingOccurrences(of: #"(?i)(?:^|\s)site:[a-z0-9.-]+"#, with: " ", options: .regularExpression)
         withoutSites = withoutSites
             .replacingOccurrences(of: #"(?i)\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}\b"#, with: " ", options: .regularExpression)
             .replacingOccurrences(of: #"(?i)\b(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}\b"#, with: " ", options: .regularExpression)
-        let tokenizer = NLTokenizer(unit: .word)
-        tokenizer.string = withoutSites
+        calendarTerms = Set(Self.matches(#"((?:19|20)\d{2})年"#, withoutSites)
+            + Self.matches(#"(\d{1,2})月"#, withoutSites) + Self.matches(#"(\d{1,2})日"#, withoutSites))
+        // Tokenize each script separately: automatic language detection can split 谷歌 into 谷/歌.
+        // Keep dotted/hyphenated model identifiers intact (K3.1, SWE-bench, gemini-4-carbon).
         var words: [String] = []
-        tokenizer.enumerateTokens(in: withoutSites.startIndex..<withoutSites.endIndex) { range, _ in
-            words += Self.matches(#"([\p{L}\p{N}]+)"#, String(withoutSites[range]).lowercased())
-            return true
+        for span in Self.matches(#"([a-zA-Z0-9]+(?:[.\-+][a-zA-Z0-9]+)*|[\p{Han}]+|[\p{L}\p{N}]+)"#, withoutSites) {
+            if span.range(of: #"\p{Han}"#, options: .regularExpression) == nil {
+                words.append(span.lowercased())
+            } else {
+                let tokenizer = NLTokenizer(unit: .word)
+                tokenizer.setLanguage(.simplifiedChinese)
+                tokenizer.string = span
+                tokenizer.enumerateTokens(in: span.startIndex..<span.endIndex) { range, _ in
+                    words.append(String(span[range]))
+                    return true
+                }
+            }
         }
         var seen = Set<String>()
         terms = words.filter { !Self.queryWords.contains($0) && seen.insert($0).inserted }
+        let dates = calendarTerms
+        subjects = terms.filter { Self.facet($0) == nil && !Self.isDate($0) && !dates.contains($0) && !Self.isMeasurement($0) }
     }
 
     func matchedTerms(in results: [JSONValue]) -> [String] {
-        terms.filter { term in results.contains { Self.contains(term, in: Self.searchable($0)) } }
+        terms.filter { term in results.contains { Self.matchesTerm(term, in: Self.searchable($0)) } }
     }
 
-    func relevant(_ result: JSONValue) -> Bool {
+    func relevant(_ result: JSONValue) -> Bool { rejectionReason(result) == nil }
+
+    func rejectionReason(_ result: JSONValue) -> String? {
         if !domains.isEmpty {
             guard let value = result["url"]?.stringValue, let host = URL(string: value)?.host?.lowercased(),
-                  domains.contains(where: { host == $0 || host.hasSuffix("." + $0) }) else { return false }
+                  domains.contains(where: { host == $0 || host.hasSuffix("." + $0) }) else { return "outside_site_scope" }
         }
-        guard !terms.isEmpty else { return true }
-        let text = Self.searchable(result)
-        let matched = terms.filter { Self.contains($0, in: text) }.count
-        // A result matching only the first word of a multiword query must not pass.
-        return matched >= min(2, terms.count) && Double(matched) / Double(terms.count) >= 0.6
+        if let link = result["url"]?.stringValue, let url = URL(string: link) {
+            let path = "/" + url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            let wantsLogin = query.range(of: #"(?i)login|sign.?in|登录|登陆"#, options: .regularExpression) != nil
+            if !wantsLogin && ["/login", "/signin", "/ssb/signin", "/client"].contains(path) { return "navigation_page" }
+        }
+        let matched = matchedTerms(in: [result])
+        // Brand AND model/version must occur in the same source. A collection of portal pages is not evidence.
+        let subjectMatches = subjects.filter { matched.contains($0) }.count
+        let minimum = comparison ? max(1, Int(ceil(Double(subjects.count) * 0.6))) : subjects.count
+        if subjectMatches < minimum { return "missing_subject_terms" }
+        // A single ambiguous brand plus an explicit model context needs that context.
+        let contexts = terms.filter { Self.facet($0)?.first == "model" }
+        if subjects.count == 1 && subjects[0].allSatisfy({ $0.isLetter }) && !contexts.isEmpty && !contexts.contains(where: { matched.contains($0) }) {
+            return "missing_context"
+        }
+        if subjects.isEmpty && !terms.isEmpty && matched.isEmpty { return "no_keyword_overlap" }
+        return nil
     }
 
-    func subjectTerms(_ values: [String]) -> [String] {
-        values.filter { $0.count > 1 && $0.first?.isLetter == true && !Self.dateWords.contains($0) }
-    }
+    func subjectTerms(_ values: [String]) -> [String] { values.filter { subjects.contains($0) } }
 
     func retryQueries(after results: [JSONValue]) -> [String] {
         // Do not silently drop Boolean/negative operators while simplifying a query.
         guard !query.contains(" -"), !query.hasPrefix("-"),
-              !query.contains(" OR "), !query.contains(" NOT "),
-              !query.contains(" AND ") else { return [] }
-        let matched = Set(matchedTerms(in: results))
-        let words = subjectTerms(terms)
-        let missing = words.filter { !matched.contains($0) }
-        guard let last = missing.last else { return [] }
-        // Use the ignored words, with one context word, rather than the engine's dominant first word.
-        let anchor = missing.count > 1 ? missing.first : words.first(where: { $0 != last })
-        let focused = [anchor, last].compactMap { $0 }.joined(separator: " ")
-        let compact = words.joined(separator: " ")
+              query.range(of: #"\b(?:OR|NOT|AND)\b"#, options: .regularExpression) == nil,
+              !subjects.isEmpty else { return [] }
+        let matched = Set(matchedTerms(in: results.filter { relevant($0) }))
+        guard results.isEmpty || terms.contains(where: { !matched.contains($0) }) else { return [] }
+        // Preserve the whole identity, including numeric versions. Translate only known search intents.
+        let core = subjects.joined(separator: " ")
+        var intents: [String] = []
+        for term in terms {
+            if let intent = Self.facet(term)?.first, !intents.contains(intent) { intents.append(intent) }
+        }
+        let contextual = ([core] + intents).joined(separator: " ")
         let scope = domains.map { "site:" + $0 }.joined(separator: " ")
         var seen: Set<String> = [query.lowercased()]
-        return [focused, compact, "\"" + focused + "\""].map { scope.isEmpty ? $0 : $0 + " " + scope }
-            .filter { !$0.isEmpty && seen.insert($0.lowercased()).inserted }
+        return [contextual, core, "\"" + core + "\""].map { scope.isEmpty ? $0 : $0 + " " + scope }
+            .filter { !$0.isEmpty && seen.insert($0.lowercased()).inserted }.prefix(2).map { $0 }
     }
+
+    private static func facet(_ term: String) -> [String]? {
+        facets.first { $0.contains(term) }
+    }
+
+    private static func matchesTerm(_ term: String, in text: String) -> Bool {
+        (facet(term) ?? [term]).contains { contains($0, in: text) }
+    }
+
+    private static func isMeasurement(_ term: String) -> Bool {
+        term.range(of: #"^\d+(?:\.\d+)?(?:k|m|b|gb|mb|tokens)$"#, options: .regularExpression) != nil
+    }
+
+    private static func isDate(_ term: String) -> Bool {
+        dateWords.contains(term) || term.range(of: #"^(?:19|20)\d{2}$"#, options: .regularExpression) != nil
+            || ["年", "月", "日"].contains(term)
+    }
+
+    // Generic intent equivalents affect coverage/ranking; they are never substituted for product identities.
+    private static let facets: [[String]] = [
+        ["review", "reviews", "评测", "评价", "口碑", "实测"],
+        ["benchmark", "benchmarks", "跑分", "基准", "基准测试"],
+        ["company", "公司", "企业", "corporation", "business"],
+        ["model", "models", "模型", "llm", "ai", "人工智能"],
+        ["developer", "developers", "开发者"],
+        ["coding", "编程", "code"],
+        ["release", "released", "发布"],
+        ["swe-bench", "swe bench"]
+    ]
 
     private static func searchable(_ value: JSONValue) -> String {
         ["title", "snippet", "url"].compactMap { value[$0]?.stringValue }.joined(separator: " ").lowercased()
@@ -74,6 +133,7 @@ struct WebSearchQuality {
         // Latin terms need word boundaries (e.g. Go must not match Google); CJK words can be adjacent.
         let latin = term.unicodeScalars.allSatisfy { $0.isASCII }
         let escaped = NSRegularExpression.escapedPattern(for: term)
+            .replacingOccurrences(of: "-", with: #"[\s_-]+"#)
         let pattern = latin ? "(?<![a-z0-9])" + escaped + "(?![a-z0-9])" : escaped
         return text.range(of: pattern, options: .regularExpression) != nil
     }
@@ -88,9 +148,9 @@ struct WebSearchQuality {
     private static let queryWords: Set<String> = [
         "a", "an", "the", "is", "are", "was", "were", "of", "for", "to", "in", "on", "at", "and", "or", "with", "by", "from",
         "what", "which", "how", "when", "why", "does", "do", "can", "please", "search", "find", "about", "vs", "versus",
-        "introducing", "new", "latest", "model", "models", "release", "released", "benchmark", "benchmarks", "comparison", "compare",
-        "official", "documentation", "context", "window", "id",
-        "的", "了", "是", "吗", "什么", "怎么", "如何", "为什么", "请", "帮", "我", "查", "搜索", "查询", "介绍", "最新", "发布", "开放", "模型", "旗舰", "对比", "比较", "官方", "文档"
+        "introducing", "new", "latest", "comparison", "compare",
+        "official", "documentation", "blog", "context", "window", "id",
+        "的", "了", "是", "吗", "什么", "怎么", "如何", "为什么", "请", "帮", "我", "查", "搜索", "查询", "介绍", "最新", "新", "一", "代", "新一代", "开放", "旗舰", "对比", "比较", "官方", "文档"
     ]
     private static let dateWords: Set<String> = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"]
 }

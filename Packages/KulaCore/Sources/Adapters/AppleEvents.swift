@@ -46,6 +46,8 @@ public enum AppleScript {
 
     static func mapError(code: Int, message: String) -> ToolError {
         switch code {
+        // Application-defined error preserves Chrome page-reading permission guidance.
+        case -27001: ToolError(.permissionDenied, message)
         case -1743: ToolError(.permissionDenied, CoreLocalization.text("未获得自动化授权（系统设置 › 隐私与安全性 › 自动化）"))
         case -600, -609: ToolError(.unavailable, CoreLocalization.text("目标应用未运行"))
         case -1728, -1719: ToolError(.targetNotFound, message)

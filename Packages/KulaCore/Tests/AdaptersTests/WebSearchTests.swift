@@ -72,7 +72,7 @@ import ToolService
 
     @Test func retriesIgnoredSubjectAndDropsPortalPages() async throws {
         let portal = page("Orion official homepage", "https://orion.example/")
-        let found = page("Orion Nova release", "https://example.com/nova")
+        let found = page("Orion Nova model release", "https://example.com/nova")
         let fetcher = SearchFixture([portal, found])
         let tool = WebSearchTool(fetch: { try await fetcher.fetch($0) })
         let value = try await tool.execute(["query": "Orion Nova model release", "count": 1]).output
@@ -140,7 +140,98 @@ import ToolService
     @Test func chineseAndModelIdentifiersKeepSubjectTerms() {
         #expect(WebSearchQuality(query: "Gemini 4 Carbon 模型 Google 发布").terms.contains("carbon"))
         #expect(WebSearchQuality(query: "杭州 天气").terms.contains("杭州"))
-        #expect(WebSearchQuality(query: "gemini-4-carbon").terms.contains("carbon"))
+        #expect(WebSearchQuality(query: "gemini-4-carbon").terms.contains("gemini-4-carbon"))
+    }
+
+    @Test func chineseIntentAcceptsEnglishSourcesAndKeepsIdentity() async throws {
+        let fetcher = SearchFixture([page("Gemini exchange", "https://gemini.com"),
+                                    page("Gemini 4 Carbon review", "https://example.com/carbon", "Model benchmark results")])
+        let value = try await WebSearchTool(fetch: { try await fetcher.fetch($0) })
+            .execute(["query": "Gemini 4 Carbon 评测 口碑 benchmark"]).output
+        #expect(value["status"]?.stringValue == "matched")
+        #expect(value["results"]?.arrayValue?.count == 1)
+        #expect(await fetcher.queries == ["Gemini 4 Carbon 评测 口碑 benchmark", "gemini 4 carbon review benchmark"])
+        #expect(value["attempts"]?.arrayValue?.first?["rejected"]?.arrayValue?.first?["reason"]?.stringValue == "missing_subject_terms")
+    }
+
+    @Test func topicSourceSurvivesMissingReviewWithoutClaimingReviewCoverage() async throws {
+        let fetcher = SearchFixture([page("Kimi K3.1 Pro", "https://example.com/k3", "New language model")])
+        let value = try await WebSearchTool(fetch: { try await fetcher.fetch($0) })
+            .execute(["query": "Kimi K3.1 Pro 评测 SWE-bench"]).output
+        #expect(value["status"]?.stringValue == "partial")
+        #expect(value["results"]?.arrayValue?.count == 1)
+        #expect(value["missingTerms"]?.arrayValue?.contains("评测") == true)
+        #expect(value["missingTerms"]?.arrayValue?.contains("swe-bench") == true)
+        #expect(value["nextAction"]?.stringValue == "change_source_or_read_page")
+        for query in await fetcher.queries { #expect(query.lowercased().contains("kimi k3.1 pro")) }
+    }
+
+    @Test func brandAndVersionCannotBeSatisfiedByDifferentResults() async throws {
+        let html = page("Gemini 4 homepage", "https://example.com/gemini")
+            + page("Carbon review", "https://example.com/carbon")
+        let fetcher = SearchFixture([html])
+        let value = try await WebSearchTool(fetch: { try await fetcher.fetch($0) })
+            .execute(["query": "Gemini 4 Carbon 评测"]).output
+        #expect(value["status"]?.stringValue == "no_relevant_results")
+        #expect(value["reason"]?.stringValue == "candidates_rejected")
+        #expect(value["contentAvailability"]?.stringValue == "unknown")
+    }
+
+    @Test func chineseCompanyQuestionAndModelDisambiguation() {
+        let slack = WebSearchQuality(query: "Slack 是什么公司")
+        #expect(slack.subjects == ["slack"])
+        #expect(!slack.relevant(["title": "Slack", "url": "https://slack.com/signin"]))
+        #expect(WebSearchQuality(query: "Slack login").relevant(["title": "Slack login", "url": "https://slack.com/login"]))
+        #expect(!WebSearchQuality(query: "Москва погода").terms.isEmpty)
+        #expect(slack.relevant(["title": "Slack", "snippet": "A collaboration platform owned by Salesforce"]))
+        let model = WebSearchQuality(query: "Gemini 模型")
+        #expect(!model.relevant(["title": "Gemini", "snippet": "Cryptocurrency exchange"]))
+        #expect(model.relevant(["title": "Gemini", "snippet": "An AI model from Google"]))
+        #expect(!WebSearchQuality(query: "Kimi K3.1 Pro 评测").relevant(["title": "Kimi K2.5 Pro review"]))
+        #expect(WebSearchQuality(query: "谷歌 Gemini 新模型 2026年11月").subjects == ["谷歌", "gemini"])
+    }
+
+    @Test func comparisonsAndSpecificationsKeepPartialSources() {
+        let source: JSONValue = ["title": "Gemini 4 Carbon", "url": "https://blog.google/carbon"]
+        #expect(WebSearchQuality(query: "Google Gemini 4 Argon Carbon 对比").relevant(source))
+        let spec = WebSearchQuality(query: "gemini-4-carbon model ID context window 1M")
+        #expect(spec.relevant(source))
+        #expect(!spec.matchedTerms(in: [source]).contains("1m"))
+    }
+
+    @Test func emptyProviderAndFailedRecoveryHaveDistinctSignals() async throws {
+        let empty = SearchFixture(["<li class='b_no'>No results</li>"])
+        let value = try await WebSearchTool(fetch: { try await empty.fetch($0) }).execute(["query": "Orion Nova"]).output
+        #expect(value["status"]?.stringValue == "no_relevant_results")
+        #expect(value["reason"]?.stringValue == "provider_returned_no_results")
+        let partial = SearchFixture([page("Orion Nova"), "<html>broken</html>"])
+        let output = try await WebSearchTool(fetch: { try await partial.fetch($0) }).execute(["query": "Orion Nova 评测"]).output
+        #expect(output["status"]?.stringValue == "partial")
+        #expect(output["attempts"]?.arrayValue?.last?["status"]?.stringValue == "failed")
+        #expect(output["results"]?.arrayValue?.isEmpty == false)
+    }
+
+    @Test func collectsAvailableSnippetParagraphs() throws {
+        let html = page("Slack", "https://example.com", "First paragraph")
+        let expanded = html.replacingOccurrences(of: "</p>", with: "</p><p>Second paragraph</p>")
+        let value = try WebSearchTool.output(html: expanded, query: "Slack", searchURL: WebSearchTool.searchURL("Slack"), count: 5)
+        #expect(value["results"]?.arrayValue?.first?["snippet"]?.stringValue == "First paragraph Second paragraph")
+    }
+
+    @Test func liveReportedChineseQueriesThroughToolService() async throws {
+        guard ProcessInfo.processInfo.environment["ASKY_LIVE_WEB_SEARCH_CHINESE"] == "1" else { return }
+        let store = try LocalStore(inMemoryWithRoot: FileManager.default.temporaryDirectory)
+        let service = ToolService(store: store, policy: { PolicySnapshot(enabledSources: [.web]) }, presenter: { _ in .rejected })
+        await service.register(WebSearchTool())
+        for query in ["Slack 是什么公司", "Kimi K3.1 Pro 评测 SWE-bench", "Gemini 4 Carbon 评测 口碑 benchmark", "Gemini 4 Carbon 开发者 评价 实测"] {
+            let result = await service.submit(ActionRequest(tool: "web_search", arguments: ["query": .string(query)], origin: .agent(sessionID: "live-chinese"), intent: .explicitRequest))
+            #expect(result.status == .completed, "\(query): \(String(describing: result.error))")
+            #expect(result.output?["status"]?.stringValue != nil)
+            if query.hasPrefix("Slack") { #expect(result.output?["results"]?.arrayValue?.isEmpty == false) }
+            // Emerging model coverage is observed, not asserted as proof the named product exists.
+            let data = try JSONEncoder().encode(result.output)
+            print("Chinese live: \(query) | \(String(decoding: data, as: UTF8.self))")
+        }
     }
 
     @Test func liveOriginalQueriesThroughToolService() async throws {

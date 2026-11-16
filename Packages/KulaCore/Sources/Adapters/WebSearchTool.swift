@@ -10,7 +10,7 @@ public struct WebSearchTool: ToolAdapter {
     init(fetch: @escaping Fetch) { self.fetch = fetch }
     public var executionTimeout: Duration? { .seconds(35) }
     public var definition: ToolDefinition {
-        ToolDefinition(name: "web_search", summary: CoreLocalization.text("联网核实公开信息（Bing，无需 API Key）。回答可能变化的信息、产品推荐与比较、软件/API 用法、拿不准的事实或用户要求查证时，必须先调用，不必等待用户说“联网”。返回标题、来源链接和摘要；摘要不等于网页全文") + CoreLocalization.text("。工具会检查关键词覆盖并最多补搜两次；检查 quality、missingTerms 和 attempts，partial 或 no_relevant_results 不能作为否定事实的证据"),
+        ToolDefinition(name: "web_search", summary: CoreLocalization.text("联网核实公开信息（Bing，无需 API Key）。回答可能变化的信息、产品推荐与比较、软件/API 用法、拿不准的事实或用户要求查证时，必须先调用，不必等待用户说“联网”。返回标题、来源链接和摘要；摘要不等于网页全文") + CoreLocalization.text("。工具会检查关键词覆盖并最多补搜两次；读取 output.status、missingTerms、attempts 和 nextAction；外层 completed 只代表执行结束。补搜已耗尽时换来源或读取具体页面，不重复同组查询；partial 或 no_relevant_results 不能作为否定事实的证据"),
             inputSchema: Args.schema(["query": Args.stringProp,
                 "count": ["type": "integer", "minimum": 1, "maximum": 10]], required: ["query"]),
             source: .web, effect: .read, confirmation: .never, externallyExposable: false)
@@ -31,7 +31,6 @@ public struct WebSearchTool: ToolAdapter {
         var results: [JSONValue] = []
         var attempts: [JSONValue] = []
         var seen = Set<String>()
-        var ignoredTerms: [String] = []
         var lastFailure: Error?
         while !pending.isEmpty && attempts.count < 3 {
             try Task.checkCancellation()
@@ -43,16 +42,25 @@ public struct WebSearchTool: ToolAdapter {
                 // Inspect every available result before enforcing the caller's count.
                 let page = try Self.output(html: html, query: searchQuery, searchURL: url, count: 10)
                 let candidates = page["results"]?.arrayValue ?? []
-                let matched = quality.matchedTerms(in: candidates)
+                let accepted = candidates.filter { quality.relevant($0) }
+                let matched = quality.matchedTerms(in: accepted)
+                let rejected: [JSONValue] = candidates.compactMap { candidate in
+                    guard let reason = quality.rejectionReason(candidate) else { return nil }
+                    let covered = quality.matchedTerms(in: [candidate])
+                    return ["url": candidate["url"] ?? .null, "title": candidate["title"] ?? .null,
+                            "reason": .string(reason),
+                            "missingTerms": .array(quality.terms.filter { !covered.contains($0) }.map { .string($0) })]
+                }
                 let missing = quality.terms.filter { !matched.contains($0) }
                 attempts.append(["query": .string(searchQuery), "searchURL": .string(url.absoluteString),
                                  "resultCount": .number(Double(candidates.count)),
-                                 "missingTerms": .array(missing.map { .string($0) }), "status": "completed"])
+                                 "missingTerms": .array(missing.map { .string($0) }),
+                                 "acceptedCount": .number(Double(accepted.count)), "rejected": .array(rejected),
+                                 "status": .string(candidates.isEmpty ? "no_results" : accepted.isEmpty ? "no_relevant_results" : missing.isEmpty ? "matched" : "partial")])
                 if attempts.count == 1 {
-                    ignoredTerms = missing
                     pending += quality.retryQueries(after: candidates)
                 }
-                for candidate in candidates where quality.relevant(candidate) {
+                for candidate in accepted {
                     guard let link = candidate["url"]?.stringValue, seen.insert(link).inserted else { continue }
                     results.append(candidate)
                 }
@@ -66,22 +74,11 @@ public struct WebSearchTool: ToolAdapter {
                                  "status": "failed", "error": .string(error.localizedDescription)])
             }
         }
-        // Generic portal pages must not survive when the engine ignored a subject term.
-        let ignoredSubjects = quality.subjectTerms(ignoredTerms)
-        if !ignoredSubjects.isEmpty {
-            results.removeAll { candidate in
-                !quality.matchedTerms(in: [candidate]).contains(where: { ignoredSubjects.contains($0) })
-            }
-        }
-        // Prefer results covering the terms that the first response ignored.
+        // Rank by original query coverage, preserving provider order for ties.
         results = results.enumerated().sorted { lhs, rhs in
-            let left = quality.matchedTerms(in: [lhs.element])
-            let right = quality.matchedTerms(in: [rhs.element])
-            let leftRecovered = left.filter { ignoredTerms.contains($0) }.count
-            let rightRecovered = right.filter { ignoredTerms.contains($0) }.count
-            if leftRecovered != rightRecovered { return leftRecovered > rightRecovered }
-            if left.count != right.count { return left.count > right.count }
-            return lhs.offset < rhs.offset
+            let left = quality.matchedTerms(in: [lhs.element]).count
+            let right = quality.matchedTerms(in: [rhs.element]).count
+            return left == right ? lhs.offset < rhs.offset : left > right
         }.map(\.element)
         let selected = Array(results.prefix(count))
         let matched = quality.matchedTerms(in: selected)
@@ -90,10 +87,17 @@ public struct WebSearchTool: ToolAdapter {
             throw lastFailure
         }
         let status = selected.isEmpty ? "no_relevant_results" : (missing.isEmpty ? "matched" : "partial")
+        let hadFailure = attempts.contains { $0["status"]?.stringValue == "failed" }
+        let rawCount = attempts.reduce(0) { $0 + Int($1["resultCount"]?.numberValue ?? 0) }
+        let reason = selected.isEmpty ? (rawCount == 0 ? "provider_returned_no_results" : "candidates_rejected")
+            : (missing.isEmpty && !hadFailure ? "query_terms_covered" : "incomplete_coverage")
         return AdapterOutput(output: ["provider": "Bing", "query": .string(query),
             "searchURL": .string(Self.searchURL(query).absoluteString),
             "retrievedAt": .string(ISO8601DateFormatter().string(from: Date())),
             "contentType": "search_snippets", "quality": .string(status),
+            "status": .string(hadFailure && !selected.isEmpty ? "partial" : status), "reason": .string(reason),
+            "contentAvailability": "unknown", "subjectTerms": .array(quality.subjects.map { .string($0) }),
+            "nextAction": .string(status == "matched" && !hadFailure ? "assess_sources" : "change_source_or_read_page"),
             "missingTerms": .array(missing.map { .string($0) }), "attempts": .array(attempts),
             "results": .array(selected),
             "notice": .string(CoreLocalization.text("关键词匹配不等于事实核实；partial 表示仍缺查询内容，no_relevant_results 表示未找到足够相关的结果，均不能据此断言对象不存在。摘要不等于网页全文。"))])
@@ -144,7 +148,7 @@ public struct WebSearchTool: ToolAdapter {
                   let link = sourceURL(text(anchor[0])), seen.insert(link).inserted else { continue }
             let title = String(text(anchor[1]).prefix(300))
             guard !title.isEmpty else { continue }
-            let snippet = captures(#"<p\b[^>]*>(.*?)</p>"#, block[0]).first.map { text($0[0]) } ?? ""
+            let snippet = captures(#"<p\b[^>]*>(.*?)</p>"#, block[0]).map { text($0[0]) }.filter { !$0.isEmpty }.joined(separator: " ")
             results.append(["title": .string(title), "url": .string(link), "snippet": .string(String(snippet.prefix(1500)))])
             if results.count == count { break }
         }

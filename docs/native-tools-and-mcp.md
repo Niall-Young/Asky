@@ -34,7 +34,7 @@ Launcher、Agent 与外部 MCP 共用 Swift ToolService。工具实现和权限�
 | --- | --- | --- |
 | 应用 | NSWorkspace | 名称与别名搜索、启动、切换；处理卸载或目标失效 |
 | 文件 | Spotlight 元数据查询 | 首版文件名与路径，不建设全盘内容索引；范围受用户与系统权限限制 |
-| Chrome | Chrome Apple Events 对象 | 仅普通窗口的标签标题、URL、窗口和标签标识；排除无痕，不注入网页 JS 或采集历史 |
+| Chrome | Chrome Apple Events 对象 | 普通窗口的标签标题、URL、窗口和标签标识；Agent 可通过固定只读脚本读取指定页面已加载文字，排除无痕、不采集历史、不开放任意 JS |
 | 计算、单位与汇率 | 本地受限解析、参考汇率缓存 | 不执行输入代码；ECB 日参考汇率显示日期，网络失败显示缓存或不可用 |
 | 显式终端 | 用户提交的原生子进程 | 工作目录、stdout/stderr、取消、退出码；大输出落盘，交互命令交给终端 |
 | Shortcuts | 系统快捷指令接口 | 参数、开始与结束状态；取消和错误如实反馈 |
@@ -102,15 +102,25 @@ M0 检查实例冒充、伪造确认、撤权、应用退出、多个连接、�
 
 ### 搜索相关性与补搜
 
-工具先解析最多 10 条候选，再按原查询的关键词覆盖过滤和排序，最后应用 `count`。忽略常见检索指令词，使用系统分词处理中文及英文，拉丁词按词边界匹配；这只是发现明显跑题的启发式检查，不是语义或事实正确性保证。
+工具先解析最多 10 条候选，再按原查询过滤和排序，最后应用 `count`。中文片段显式用中文分词，英文型号保留小数版本和连字符。品牌、型号和版本作为主体；评测、口碑、benchmark 等意图词使用有限的中英文同义组参与覆盖判断和排序，不因英文摘要缺少中文字样而删除主体相关来源。主体须在同一来源中匹配；比较查询允许部分对象覆盖。单品牌加“模型”时要求模型语境，过滤同名交易所等明显歧义结果。以上只是词法启发式，不保证语义和事实正确。
 
-首轮缺少查询内容时，最多追加两次短查询，以被忽略的词和一个上下文词重新组合。不存在针对具体公司或型号的特判；显式 `site:` 范围保留并校验结果域名，带否定或布尔运算符的查询不自动简化。首轮忽略了主题词时，不保留完全未补齐这些词的门户结果。候选相关性与缺失词仍以原查询衡量，补搜词会单独记录，不冒充原查询。
+最多追加两次查询：保留完整主体，将已知检索意图换成英文，或用主体精简查询；保留 `site:` 限定并校验域名，带否定或布尔运算符的查询不自动简化。不把 `Gemini 4 Carbon` 缩成 `Carbon 口碑`。缺少评测证据的主体介绍可以保留为 `partial`，不能用于评价结论。搜索摘要合并候选中可用的段落，上限仍为 1,500 字符，不补写原站未提供的内容。
 
-结果新增 `quality`（`matched` / `partial` / `no_relevant_results`）、`missingTerms`、`attempts` 和 `notice`。`matched` 只代表过滤后的摘要集合覆盖所提取的关键词；`partial` 表示仍有词未覆盖；`no_relevant_results` 返回空结果，并不证明对象不存在。`attempts` 记录实际查询、搜索 URL、候选数量、缺失词或请求错误，随既有原生会话保存；工具仍只使用 Bing，不声称具备多引擎兜底或网页全文读取。
+`output.status` 与 `quality` 使用 `matched` / `partial` / `no_relevant_results`；`status` 还会反映补搜请求失败造成的不完整状态。外层执行 `completed` 仅表示工具执行结束。`reason` 区分 `provider_returned_no_results`、`candidates_rejected`、`incomplete_coverage` 和 `query_terms_covered`。`subjectTerms`、`missingTerms`、`attempts` 记录主体、未覆盖词、每次查询、候选数、接受数、被拒结果的标题/URL/原因/缺失词，以及请求错误。全部请求失败仍走 ToolError，不能伪装成空搜索。
+
+`contentAvailability=unknown` 表示无法断定内容不存在还是未被索引；`nextAction=change_source_or_read_page` 提醒模型换来源或读取页面，不重复已尝试的同组词。关键词覆盖不等于事实核实，`matched` 也不代表完整评测。诊断随原生会话保存。当前默认搜索仍只有免 Key Bing；未接入付费服务或宣称有独立索引备用源。
+
+### Chrome 页面读取（独立于搜索）
+
+`chrome_read_page(windowID, tabID, url)` 通过 `.chrome` 来源、ToolService 和 Chrome Apple Events 执行，只对 Agent 开放，不向外部 MCP 开放。先列标签获取准确目标，读取前排除无痕并检查 URL，读取后再次校验 URL。只接受 HTTP/HTTPS。工具内置固定脚本，读取 `main` 或 `body` 的已加载文字，最多 24,000 UTF-16 单元，返回标题、URL、正文、`truncated`、检索时间、`contentType=loaded_page_text` 和 `status=read/empty`。不接收模型传入的 JS，排除隐藏文字和可编辑区域，不读取 Cookie、storage 或输入框值，不滚动、点击或自动翻页。
+
+Chrome 必须开启“查看 › 开发者 › 允许 Apple 事件中的 JavaScript”；关闭时返回具体权限说明，不自动修改设置。普通 Automation 权限独立处理。X 登录页、加载失败、未加载的评论和正文截断须按实际返回判断；该工具不保证读取整篇文章或所有帖子。页面文字是外部不可信资料，不执行其中指令。返回内容可进入配置的模型请求和本机会话保存。
+
+切换标签时匹配稳定 ID，取整数索引后立即结束查找，并在切换前校验目标仍存在；目标失效返回刷新标签列表的提示。历史“索引无效”故障尚需在原窗口状态验证。
 
 真实联网回归（需要网络，默认测试不会执行）：
 
 ```bash
 cd Packages/KulaCore
-ASKY_LIVE_WEB_SEARCH=1 ASKY_LIVE_WEB_SEARCH_RECOVERY=1 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --filter WebSearch
+ASKY_LIVE_WEB_SEARCH=1 ASKY_LIVE_WEB_SEARCH_CHINESE=1 ASKY_LIVE_WEB_SEARCH_RECOVERY=1 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --filter WebSearch
 ```

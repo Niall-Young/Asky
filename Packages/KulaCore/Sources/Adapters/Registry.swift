@@ -191,7 +191,7 @@ public struct NativeTools: Sendable {
             NotesListFoldersTool(notes), NotesSearchTool(notes), NotesReadTool(notes), NotesCreateTool(notes), NotesAppendTool(notes),
             ContactsSearchTool(contacts), MessagesDraftTool(contacts),
             MessagesSearchTool(enabled: messagesEnabled, days: messagesDays),
-            ChromeListTabsTool(chrome), ChromeActivateTabTool(chrome),
+            ChromeListTabsTool(chrome), ChromeActivateTabTool(chrome), ChromeReadPageTool(chrome),
             ShortcutsListTool(), ShortcutsRunTool(), WebSearchTool(), MapsSearchPlacesTool(), MapsRoutesTool(),
         ]
         if let memory {
