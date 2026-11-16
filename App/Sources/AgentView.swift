@@ -1337,7 +1337,7 @@ private struct ApprovalModePicker: View {
                     .frame(width: Self.iconSize, height: Self.iconSize)
                 Text(Self.shortTitle(mode)).font(.system(size: 13))
             }
-            .foregroundStyle(mode == .fullAccess ? AnyShapeStyle(ThemeColor.kTextNegative) : AnyShapeStyle(ThemeColor.kTextSubtle))
+            .foregroundStyle(mode == .fullAccess ? AnyShapeStyle(FullAccessTint()) : AnyShapeStyle(ThemeColor.kTextSubtle))
             .padding(.horizontal, 10).frame(height: 28)
             .contentShape(.rect(cornerRadius: 14))
         }
@@ -1393,7 +1393,7 @@ private struct ApprovalModeRow: View {
     let action: () -> Void
 
     var body: some View {
-        let tint = option == .fullAccess ? AnyShapeStyle(ThemeColor.kTextNegative) : AnyShapeStyle(ThemeColor.kText)
+        let tint = option == .fullAccess ? AnyShapeStyle(FullAccessTint()) : AnyShapeStyle(ThemeColor.kText)
         Button(action: action) {
             HStack(spacing: 10) {
                 Image(mingCute: ApprovalModePicker.icon(option), size: ApprovalModePicker.iconSize)

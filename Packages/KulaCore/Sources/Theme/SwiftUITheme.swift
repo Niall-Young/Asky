@@ -4,6 +4,15 @@ extension RGBA {
     public var color: Color { Color(.sRGB, red: red, green: green, blue: blue, opacity: alpha) }
 }
 
+/// Persistent full-access status uses a softer red than transient errors.
+public struct FullAccessTint: ShapeStyle {
+    public init() {}
+
+    public func resolve(in environment: EnvironmentValues) -> Color {
+        RGBA(hex: environment.colorScheme == .dark ? 0xD98F87 : 0xAC5B55, alpha: 1).color
+    }
+}
+
 /// Theme bridge for SwiftUI: resolves semantic tokens against the current color scheme.
 public struct ThemeColor: ShapeStyle {
     public let native: String
