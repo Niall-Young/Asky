@@ -4,11 +4,14 @@ import ToolService
 
 public struct WebSearchTool: ToolAdapter {
     private let call: FreeWebMCP.Call
-    public init() { call = FreeWebMCP.call }
-    init(call: @escaping FreeWebMCP.Call) { self.call = call }
-    public var executionTimeout: Duration? { .seconds(110) }
+    private let coordinator: FreeWebCoordinator
+    public init() { call = FreeWebMCP.call; coordinator = .shared }
+    init(call: @escaping FreeWebMCP.Call, coordinator: FreeWebCoordinator = FreeWebCoordinator()) {
+        self.call = call; self.coordinator = coordinator
+    }
+    public var executionTimeout: Duration? { .seconds(140) }
     public var definition: ToolDefinition {
-        ToolDefinition(name: "web_search", summary: CoreLocalization.text("搜索公开网页，直接调用免 Key 的 Parallel / Exa 工具。返回来源链接、较长正文摘录、status、missingTerms 和 attempts；关键词覆盖不是事实核实。工具已自动换源，失败或限流时不要反复提交同组查询。需要页面正文时调用 web_read_page，不使用浏览器"),
+        ToolDefinition(name: "web_search", summary: CoreLocalization.text("搜索公开网页，直接调用免 Key 的 Parallel / Exa / Keenable 工具。返回来源链接、较长正文摘录、status、missingTerms 和 attempts；关键词覆盖不是事实核实。工具已自动换源，失败或限流时不要反复提交同组查询。需要页面正文时调用 web_read_page，不使用浏览器"),
             inputSchema: Args.schema(["query": Args.stringProp, "count": ["type": "integer", "minimum": 1, "maximum": 10]], required: ["query"]),
             source: .web, effect: .read, confirmation: .never, externallyExposable: false)
     }
@@ -23,16 +26,24 @@ public struct WebSearchTool: ToolAdapter {
             }
             count = Int(n)
         } else { count = 5 }
+        let key = String(decoding: JSONValue.array(["search", .string(query), .number(Double(count))]).canonicalData(), as: UTF8.self)
+        return AdapterOutput(output: try await coordinator.run(key: key) {
+            try await search(query: query, count: count)
+        })
+    }
+
+    private func search(query: String, count: Int) async throws -> JSONValue {
         let quality = WebSearchQuality(query: query)
         var results: [JSONValue] = [], attempts: [JSONValue] = []
         var seen = Set<String>()
-        for provider in FreeWebProvider.allCases {
+        for provider in await coordinator.providers() {
             try Task.checkCancellation()
+            if let skipped = await coordinator.skip(provider) { attempts.append(skipped); continue }
             do {
                 let args: JSONValue = provider == .parallel
                     ? ["objective": .string(query), "search_queries": [.string(query)], "session_id": .string(FreeWebMCP.sessionID)]
                     : ["query": .string(query), "objective": .string(query), "numResults": .number(Double(max(count, 5)))]
-                let response = try await call(provider, provider == .parallel ? "web_search" : "web_search_exa", args)
+                let response = try await call(provider, provider == .parallel ? "web_search" : provider == .exa ? "web_search_exa" : "search", args)
                 let candidates = try FreeWebMCP.searchResults(response, provider: provider)
                 var accepted: [JSONValue] = [], rejected: [JSONValue] = []
                 for candidate in candidates {
@@ -51,7 +62,10 @@ public struct WebSearchTool: ToolAdapter {
                     if let url = candidate["url"]?.stringValue, seen.insert(url).inserted { results.append(candidate) }
                 }
                 if !accepted.isEmpty && missing.isEmpty && accepted.contains(where: quality.relevant) { break }
-            } catch { attempts.append(try FreeWebMCP.failure(error, provider: provider)) }
+            } catch {
+                attempts.append(try FreeWebMCP.failure(error, provider: provider))
+                await coordinator.record(error, provider: provider)
+            }
         }
         // Prefer a complete identity in one source; retain partial sources for the agent to assess.
         results = results.enumerated().sorted { a, b in
@@ -67,13 +81,14 @@ public struct WebSearchTool: ToolAdapter {
         if selected.isEmpty {
             status = failures.isEmpty ? "no_relevant_results" : failures.contains { $0["status"]?.stringValue == "rate_limited" } ? "rate_limited" : "unavailable"
         } else { status = covered ? "matched" : "partial" }
-        return AdapterOutput(output: ["query": .string(query), "provider": .string("Parallel / Exa"),
+        return ["query": .string(query), "provider": .string("Parallel / Exa / Keenable"),
+            "cached": false, "coalesced": false,
             "reason": .string(selected.isEmpty ? (failures.isEmpty ? "no_accepted_results" : "sources_unavailable") : covered ? "query_terms_covered" : "incomplete_coverage"),
             "status": .string(status), "quality": .string(selected.isEmpty ? "unknown" : covered ? "matched" : "partial"),
             "contentType": "search_excerpts", "contentAvailability": "unknown", "billing": "anonymous_no_credentials",
             "retrievedAt": .string(ISO8601DateFormatter().string(from: Date())),
             "subjectTerms": .array(quality.subjects.map(JSONValue.string)), "missingTerms": .array(missing.map(JSONValue.string)),
             "attempts": .array(attempts), "results": .array(selected),
-            "nextAction": .string(selected.isEmpty ? "report_search_unavailable_or_no_results" : covered ? "assess_sources" : "read_specific_page_or_report_gap")])
+            "nextAction": .string(selected.isEmpty ? "report_search_unavailable_or_no_results" : covered ? "assess_sources" : "read_specific_page_or_report_gap")]
     }
 }

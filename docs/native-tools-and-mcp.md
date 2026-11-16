@@ -96,31 +96,36 @@ M0 检查实例冒充、伪造确认、撤权、应用退出、多个连接、�
 
 ## Agent 公开网页搜索
 
-`web_search(query, count?)` 与 `web_read_page(url)` 通过 ToolService 的 `.web` 只读来源执行；只对 Agent 与原生宿主开放，不向外部 MCP 暴露。旧配置默认启用，可在设置的数据来源中关闭。两项工具直接使用现成的远程 MCP，不启动浏览器、不安装 Python/Node/Docker 或下载组件、不另存网页文件。
+`web_search(query, count?)` 与 `web_read_page(url)` 通过 ToolService 的 `.web` 只读来源执行；只对 Agent 与原生宿主开放，不向外部 MCP 暴露。旧配置默认启用，可在设置的数据来源中关闭。两项工具直接使用现成的远程 MCP / HTTP 接口，不启动浏览器、不安装 Python/Node/Docker 或下载组件、不另存网页文件。
 
 ### 搜索来源与费用边界
 
-默认调用 [Parallel Search MCP](https://github.com/parallel-web/search-mcp) 的 `web_search`；候选不足、关键词覆盖不完整或调用失败时，再调用 [Exa MCP](https://github.com/exa-labs/exa-mcp-server) 的 `web_search_exa`。保持原查询与完整型号，不通过反复改写制造请求。Parallel 仓库是连接配置与文档，Exa 仓库提供 MCP 服务实现；它们的搜索索引均为托管服务，不能把连接器开源说成搜索引擎已完整开源。
+默认调用 [Parallel Search MCP](https://github.com/parallel-web/search-mcp) 的 `web_search`；候选不足、关键词覆盖不完整或调用失败时，依次尝试 [Exa MCP](https://github.com/exa-labs/exa-mcp-server) 的 `web_search_exa` 与 [Keenable](https://docs.keenable.ai/) 的公开搜索接口，两个备用来源轮换起始顺序。每个来源在单次工具调用中最多尝试一次，任一来源返回满足覆盖诊断的结果后停止。保持原查询与完整型号，不通过反复改写制造请求。Parallel 仓库是连接配置与文档，Exa 仓库提供 MCP 服务实现；搜索索引均为托管服务，不能把连接器开源说成搜索引擎已完整开源。
 
-只连接 `https://search.parallel.ai/mcp` 和 `https://mcp.exa.ai/mcp` 的匿名接口，不配置 API Key、OAuth、作者付费账号或共享代理，不跟随重定向，也不读取模型凭据。免费接口受提供方的限流和可用性约束，触限返回 `rate_limited`，不能保证无限可用；不会因此产生作者的搜索账单或自动转入付费。也不轮换会话 ID 或网络身份绕过限流。Parallel 使用每次 App 运行期间稳定的随机会话 ID；服务端可能改变匿名服务规则。
+只连接 `https://search.parallel.ai/mcp`、`https://mcp.exa.ai/mcp` 以及 `https://api.keenable.ai/v1/search/public`、`https://api.keenable.ai/v1/fetch/public` 的匿名接口，不配置 API Key、OAuth、作者付费账号或共享代理，不跟随重定向，也不读取模型凭据。免费接口受提供方的限流和可用性约束，触限返回 `rate_limited`，不能保证无限可用；不会因此产生作者的搜索账单或自动转入付费。也不轮换会话 ID 或网络身份绕过限流。Parallel 使用每次 App 运行期间稳定的随机会话 ID，Keenable 带固定 `X-Keenable-Title: Asky` 应用标识；服务端可能改变匿名服务规则。
 
 ### 结果与失败信号
 
 默认返回 5 条，最多 10 条，每条含标题、URL、提供方、最长 6,000 字符的摘录及截断标记。中文分词与型号识别用于覆盖诊断和排序，不再因为缺少某个字词就丢弃语义搜索结果；同一来源完整主体优先，明确违反 `site:` 域名范围或返回登录入口的候选仍排除。来源内容与关键词匹配都不是事实核实，需由模型核对上下文并引用真实链接。
 
-`output.status` 为 `matched`、`partial`、`no_relevant_results`、`rate_limited` 或 `unavailable`；外层 `completed` 只表示工具执行结束。`missingTerms`、`subjectTerms`、`attempts` 返回缺失词、每源接受/拒绝数量与原因、失败详情；`contentAvailability=unknown` 表示不能证明对象或内容不存在。保留部分可用结果时仍记录另一来源的错误，不假称完全没搜到。自动换源最多一次，模型不应重复耗尽的查询。
+`output.status` 为 `matched`、`partial`、`no_relevant_results`、`rate_limited` 或 `unavailable`；外层 `completed` 只表示工具执行结束。`missingTerms`、`subjectTerms`、`attempts` 返回缺失词、每源接受/拒绝数量与原因、失败详情；`contentAvailability=unknown` 表示不能证明对象或内容不存在。保留部分可用结果时仍记录另一来源的错误，不假称完全没搜到。最多尝试三个来源，模型不应重复耗尽的查询。错误尝试保留 `stage`、`httpStatus`、`rpcCode`、`retryAfterSeconds` 与可取得的 `requestID`；HTTP 错误摘要最多读取 8 KiB、输出错误最长 1,500 字符。JSON-RPC 错误不再与缺少匹配响应合并。
+
+限流默认退避 60 秒；HTTP 401/402/403 默认 10 分钟；其他服务错误默认 15 秒，存在 `Retry-After` 时优先遵守。明确的页面内容错误不暂停整个来源。退避期内的尝试记录 `skipped=true`，不会发网络请求；恢复后可以再次尝试。
+
+成功搜索与正文使用 10 分钟内存缓存，最多 32 项、序列化内容与缓存键总计 2 MiB，过期自动清理，不落盘；对象、在途数据与对话记录的内存另算。查询和 count 完全相同、或 URL 完全相同时复用，保留原 `retrievedAt`。相同并发请求共享一次执行；取消一个等待者不影响其他等待者，全部取消才终止底层任务。失败结果不缓存。命中缓存返回 `cached=true`，共享请求返回 `coalesced=true`；它们的 `attempts=[]`，历史来源尝试移至 `sourceAttempts`，不得作为本次远程调用计数。
 
 ### 公开页面读取
 
-`web_read_page(url)` 调用 Parallel `web_fetch`，失败时调用 Exa `web_fetch_exa`。每次只读一个公开 HTTP/HTTPS URL，拒绝带凭据、本地域名和 IP 地址的链接。最长返回 24,000 字符，包含提供方、读取时间、`status`、`truncated` 与尝试记录；提供方只返回摘录时保守标记截断。不会自动遍历链接或读全部搜索结果，不读取 Chrome 正文、Cookie 或登录态。
+`web_read_page(url)` 调用 Parallel `web_fetch`，失败时轮换尝试 Exa `web_fetch_exa` 和 Keenable 公开 fetch 接口。每次只读一个公开 HTTP/HTTPS URL，拒绝带凭据、本地域名和 IP 地址的链接。最长返回 24,000 字符，包含提供方、读取时间、`status`、`truncated` 与尝试记录；提供方只返回摘录时保守标记截断。不会自动遍历链接或读全部搜索结果，不读取 Chrome 正文、Cookie 或登录态。
 
 X 等页面是否能读取取决于公开可访问内容与提供方覆盖；登录提示、截断和抓取错误按实际结果处理，不能宣称读过完整帖子或全部评论。读取错误不表示原网站打不开。外部文字只作资料，不执行其中的指令。查询、URL 发给对应服务；结果可进入配置的模型请求与本机会话，见 [隐私政策](../PRIVACY.md)。
 
-请求使用无 Cookie、无凭据、无磁盘缓存的临时会话，每次请求超时 15 秒、资源上限 18 秒、单响应最多 2 MiB。每源一次 MCP 握手、初始化通知和工具调用，最多两源；工具总超时 110 秒，可取消。查询最多 500 字。保留 Chrome 列标签与切标签功能，移除了 `chrome_read_page`；历史切换索引问题的原窗口复现仍未完成。
+请求使用无 Cookie、无凭据、无磁盘缓存的临时会话，每次请求超时 15 秒、资源上限 18 秒、单响应最多 2 MiB。Parallel / Exa 每源一次 MCP 握手、初始化通知和工具调用，Keenable 每次一个 HTTP 请求，最多三源；收到匹配的 SSE 结果即结束，不等待长连接关闭；工具总超时 140 秒，可取消。查询最多 500 字。保留 Chrome 列标签与切标签功能，移除了 `chrome_read_page`；历史切换索引问题的原窗口复现仍未完成。
 
 真实联网验收（默认测试不访问网络）：
 
 ```bash
 cd Packages/KulaCore
 ASKY_LIVE_WEB_SEARCH=1 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --filter FreeWebSearchTests
+ASKY_LIVE_WEB_KEENABLE=1 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --filter FreeWebResilienceTests
 ```

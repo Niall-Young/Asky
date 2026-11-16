@@ -92,7 +92,7 @@ import ToolService
     }
 
     @Test func emptyIsDistinctFromServiceFailureAndCancellation() async throws {
-        let empty = WebSearchTool(call: { p, _, _ in p == .parallel ? ["structuredContent": ["results": []]] : ["content": [["type": "text", "text": "No results found"]]] })
+        let empty = WebSearchTool(call: { p, _, _ in p == .parallel ? ["structuredContent": ["results": []]] : p == .keenable ? ["results": []] : ["content": [["type": "text", "text": "No results found"]]] })
         #expect(try await empty.execute(["query": "Orion Nova"]).output["status"]?.stringValue == "no_relevant_results")
         let broken = WebSearchTool(call: { _, _, _ in throw FreeWebFailure(status: "unavailable", message: "HTTP 403") })
         #expect(try await broken.execute(["query": "Orion Nova"]).output["status"]?.stringValue == "unavailable")
@@ -178,6 +178,7 @@ import ToolService
             let output = response.output
             let rows = output?["results"]?.arrayValue ?? []
             #expect(!rows.isEmpty, "\(query): \(String(describing: output))")
+            print("LIVE attempts: \(String(decoding: (output?["attempts"] ?? .null).canonicalData(), as: UTF8.self))")
             print("LIVE \(query): status=\(output?["status"]?.stringValue ?? "error") attempts=\(output?["attempts"]?.arrayValue?.count ?? 0)")
             for row in rows.prefix(3) { print("  \(row["title"]?.stringValue ?? ""): \(row["url"]?.stringValue ?? "") [\(row["snippet"]?.stringValue?.count ?? 0) chars]") }
         }
