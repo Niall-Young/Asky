@@ -25,197 +25,77 @@ A native macOS launcher for local search, clipboard history, and an on-demand AI
 <a id="中文"></a>
 ## 中文
 
-Asky 是使用 SwiftUI 与 AppKit 构建的 macOS 原生效率入口。本地全局搜索与剪贴板历史可完全独立离线使用，AI 助手按需唤起，兼具极致轻量的系统体验与强大的扩展能力。
+Asky 是使用 SwiftUI 与 AppKit 构建的 macOS 原生效率入口。本地搜索和剪贴板历史可离线使用，AI 助手按需唤起。
 
-🌐 **官方网站**：[https://asky.niallspace.workers.dev/](https://asky.niallspace.workers.dev/)  
-📖 **使用教程**：[功能指南与操作手册](https://asky.niallspace.workers.dev/docs)
+### 核心功能
 
-### ✨ 核心功能
+- **快速搜索**：查找应用、本地文件、Chrome 标签页与书签、应用窗口；支持分类过滤、文件夹浏览、计算与换算、屏幕取色、网页搜索和终端命令。
+- **剪贴板历史**：记录文本、富文本、图片与文件，按关键词或来源应用检索；支持颜色预览、自动粘贴、拖拽和自定义保留期限。
+- **AI 助手**：Swift 原生 Agent，支持兼容 OpenAI 的模型服务、联网检索、本地 Markdown 记忆和持续对话；可发送附件、引用消息，并在对话中填写原生表单。
+- **系统与扩展**：按授权访问日历、提醒事项、备忘录、通讯录和地图；短信以草稿交给用户发送。支持 MCP 和 GitHub 插件，包括[飞书](https://github.com/Niall-Young/asky-plugin-lark)与 [Orca](https://github.com/Niall-Young/asky-plugin-orca)。
+- **原生体验与隐私**：适配系统外观和“减少动态效果”，macOS 26+ 支持液态玻璃；不向作者服务器上传用户数据，API Key 存于系统钥匙串。使用模型或外部工具时的数据处理见[隐私政策](PRIVACY.md)。
 
-- 🔍 **全局快速搜索**
-  - **全能检索**：秒级检索应用程序、本地文件、Chrome 标签页与书签，以及当前运行的应用窗口（`sw`）。
-  - **分类过滤与下钻**：支持 `app `（应用）、`file `（文件）、`ql `（快捷方式）、`sc `（快捷指令）专属分类过滤；选中文件夹按 `Tab` 可直接下钻浏览或检索子目录。
-  - **即时计算与换算**：支持数学表达式计算、单位换算与实时汇率换算；输入 `calc` 查看计算历史并支持一键回填算式。
-  - **屏幕取色器**：输入 `co` 快速调用 macOS 原生取色工具，点击即复制大写 sRGB 十六进制色值。
-  - **快捷指令与终端**：集成网页搜索指令（`go`、`yt`、`x` 等预设）与终端命令执行（`> 命令`），支持系统终端、iTerm2、Ghostty 1.3+、Otty 1.2+ 和 Kero。
+### 安装与配置
 
-- 📋 **强大的剪贴板历史**
-  - **多类型支持**：完整记录文本、富文本、图片与文件历史，支持关键词与来源应用组合检索。列表每批加载 40 条，滚动或键盘接近末尾继续加载；搜索在后台分批读取，输入防抖并取消旧查询，隐藏滚动条。
-  - **智能颜色预览**：自动识别 `#RGB`、`rgb()`、`hsl()`、`oklch()` 等颜色代码并显示直观的圆形色盘预览。
-  - **无缝粘贴体验**：`Return` 自动粘贴到目标应用（需辅助功能权限），`⌘ Return` 仅复制并保留窗口；支持文件与图片的平滑拖拽。
-  - **灵活历史管理**：支持自定义保留期限（8 小时 ~ 30 天）与自动清理，支持快捷键 `⌘⌫` 单条删除或 `⌘K` 菜单清空历史。
-
-- 🤖 **按需 AI 助手与本地记忆**
-  - **AI 表情回应**：Asky 可正常回答、只贴一个 emoji，或贴表情并回答。表情贴在本轮用户气泡左下角，与边缘交叉重叠，底座沿用气泡底色并以 1 pt 描边分隔（浅色模式为白色，暗色模式为柔和灰色），避开文字，并随历史保留；只贴表情时不出现空白回复气泡。
-  - **图片附件**：对话消息中的多张图片默认堆叠收起，悬停展开、移开收起；展开后可横向滚动。聚焦后按 Return 或空格切换展开，Esc 收起；遵循系统“减少动态效果”。单张图片、文件附件和输入区保留原有布局。
-  - **选区与引用**：AI 回答下方的复制按钮旁提供「回复」图标，点击将整条回答加入引用并聚焦输入框；重复点击同一回答不会重复添加，输入问题后发送即可针对该回答继续对话。整条消息回复使用带横线的聊天图标和最多两行原文预览，卡片宽 304 pt，发送与历史中保留相同样式。点击已发送的回复卡片以约 0.22 秒快速平滑滚动到原回复，在内容边界允许时将气泡顶部对齐工具栏下方 12 pt；跨页时加载原回复附近的历史，手动滚动接管阅读位置。聊天文字选区跟随 Agent 配色，可跨段落、无序/有序列表和嵌套列表连续拖选；拖选后显示胶囊形横向液态玻璃菜单，可复制片段或「添加到对话」；添加操作使用圆形聊天气泡图标，菜单取消额外窗口投影，当前操作一侧的玻璃平滑提亮并向另一侧衰减，按压时保持尺寸不变，点击完成后立即关闭菜单；点击空白处或 Esc 同时清除选区和菜单。文字选区引用复用上传附件的标签样式，使用文档图标和「引用的文本 1」「引用的文本 2」等连续序号，每条消息从 1 开始，移除引用后重新编号，不展示原文；输入区可移除，发送后在消息和历史中保留标签。引用原文连同对应序号随问题作为上下文提交，公式保留 LaTeX 源码。
-  - **Asky 形象**：对话左上角默认显示原来的蓝色小怪物；点击头像在原位置展开 260 × 340 pt 液态玻璃面板，上方实时预览，下方直接选择小怪物、正圆、圆齿、软糖、幽灵五种造型，微笑、墨镜、眨眼、困困四种表情，以及蓝、黄、紫、绿、粉五色。造型选项保留当前表情，表情选项使用当前造型预览；五种造型统一沿用原小怪物的柔软立体材质；各项可独立组合，选择即时保留，点击外部或 Esc 收起；不提供命名或保存按钮。发送按钮、用户消息染色及文字选区同步使用当前配色，Agent 回复保持中性色。收起后的头像容器仍为 36 pt，与右侧按钮组同高。
-  - **紧凑对话窗口**：固定 560 × 680 pt、26 pt 普通圆角，不可拖拽缩放；聊天内容区连续延伸至窗口底部，输入框悬浮其上，滚动内容可从玻璃下透出，底部模糊从输入框顶部的零半径向下渐增，不延伸至输入框上方；末尾留白随输入框高度调整，最后一条消息可完整滚至输入框上方。紧凑玻璃输入框采用 16 pt 圆角，附件与发送按钮均为 28 pt。顶部不显示会话标题，顶部 64 pt 内的背景模糊半径由 6 pt 向下渐进到零，不叠加颜色；右侧为无分割线的连体胶囊按钮组，常驻置顶和电源符号关闭按钮，按钮组为 96 × 36 pt、图标中心距 48 pt，悬停和按下以对应图标为中心形成柔和高光，连续向另一侧衰减，不在中间硬切；按钮组与输入框使用原生 Regular 玻璃，保留柔和的明暗过渡和边缘，避免浅色背景上的突兀白块；头像保留 Clear 玻璃与 85% 效果不透明度；按钮提供悬停柔和提亮、按下整体膨胀和松手回弹；开启“减少动态效果”时不缩放。
-  - **液态按钮交互**：聊天与启动器操作按钮采用参考 iOS 录屏定制的按压膨胀和松手回弹，保持原有静止外观；玻璃表面悬停时柔和提亮；启动器与剪贴板底部操作按钮使用原生 Clear 玻璃，以 85% 整体透明度柔化高光并保留大部分折射，文字与快捷键保持完整不透明度。该交互不是 macOS 系统自带动画。设置按钮采用 28 pt 原生胶囊样式，单行输入、密码、下拉与搜索框统一为 28 pt 高度和胶囊圆角，指令与插件分类使用中性选中态的原生分段控件；窗口失焦时保持控件尺寸，不再额外加深背景染色；减少动态效果时关闭定制缩放。添加插件、插件配置与别名编辑弹窗相对整个设置窗口居中，采用紧凑的原生 Regular 玻璃表面，不叠加自绘阴影。
-  - **Swift 原生 Agent**：模型请求、工具循环、会话恢复和上下文压缩均由 Swift 执行。对话采用左右气泡，仅在本轮结束后展示完整回答；等待期间显示三点加载气泡，隐藏工具调用与过程说明。消息按实际高度连续排列，不为当前轮预留整屏空白；新消息自然将旧消息往上推。短回答完整显示，长回答自动滚动最多到回答开头，后续内容由用户向下滚动阅读；用户问题可被推到可视区域上方。已手动翻阅时保持阅读位置，也可手动回到底部。回复保留原生表单、复制和完成时间，Markdown 标题使用普通正文样式；无需 Node / Pi 辅助进程，支持 OpenAI-compatible Chat Completions。
-  - **持续对话**：各入口和重启后接入同一时间线，消息按前后两个方向每批加载 40 条，内存窗口最多保留 120 条，翻页保留阅读位置；回到底部可直接恢复最新消息；不再提供单独的历史对话页面和快捷键，滚动条隐藏；新请求按需读取保留的历史，清空聊天后保留长期记忆。
-  - **对话历史**：新保存的会话保留工具调用状态、错误、回复分组与耗时，支持分页恢复；旧会话未保存的工具展示记录不会自动补回。在“设置 › 智能配置 › 数据管理 › 对话历史”选择保留 7 天、30 天（默认）、90 天或永久；按用户提交轮次的时间清理，启动时、每天及修改期限后检查。到期或手动删除会清理会话、执行记录、索引及无引用的自有附件，已保存记忆独立保留，失败文件自动重试。
-  - **主动协助**：Agent 提示词优先要求利用上下文、授权记忆和工具补全信息；可调整的低风险细节采用合理默认，只询问影响结果或操作对象的关键信息。回复随语境自然表达关心、欣赏、幽默与有依据的判断，避免客服套话、重复确认和例行免责声明；信息缺口确实影响判断或操作时，就近简短说明。
-  - **原生交互表单**：AI 回复完成后一次显示原生单选按钮组、下拉单选、多选、文本输入、日期及按需显示时、分、秒的时间/时长控件，AI 澄清需求或确认方案时可同时提供预设选项与「自己填写」，选择或自填后点击「提交回复」自动发送到同一会话并继续处理。所有字段支持预填已知信息或合理默认值，用户可直接修改后提交；无效预填会被忽略，手动清空不会被默认值覆盖，预填本身不提交或授权操作。重开未提交表单会恢复原始预填，尚未提交的编辑仅保留在当前打开的会话中。未提交的表单一直可填写，不因后续聊天或重开历史失效；提交后保存当时的答案并变为只读，提交按钮禁用，重新打开历史也不能重复提交。控件复用设置页组件，日期选择复用创建日程弹窗的月历。兼容表单字符串中的非法反斜杠转义（如 `\[...\]`），历史原文保持不变。
-  - **主动联网核实**：提示词要求对可能变化的公开信息、产品推荐与比较、软件/API 用法和不确定事实先搜索，再引用来源回答；搜索失败时说明未能核实，遵循用户不联网的要求。搜索工具检测关键词覆盖不足后最多补搜两次，优先返回补齐关键内容的结果，标明未覆盖内容，并过滤明显跑题页面。
-  - **本地记忆与上下文**：基于本地 Markdown 存储用户偏好与记忆，支持长上下文智能压缩与网络实时检索。
-  - **网页来源预览**：网页来源在对应段落末尾合并为“来源名称 +N”标签；悬停或点击展开来源列表，显示来源名称、标题和可获取的发布日期，点击条目打开原文。标签与卡片条目悬停时显示箭头光标；预览卡片宽 300 pt，左右留白 12 pt、上下留白 10 pt，来源较多时可在卡片内滚动。
-  - **本地数学公式排版**：原生支持行内与独立 LaTeX 公式（`$…$`、`$$…$$`）排版。
-  - **日程与路线规划**：集成系统 MapKit 能力，对比驾车、公交与步行耗时，自动为日程计算含缓冲时间的建议出发时间。
-
-- 🧩 **系统生态与扩展**
-  - **日常操作审批**：自动审批模式下，明确要求新建或追加备忘录、新建或修改单个日程、新建提醒事项时，校验目标与参数后直接执行，不重复确认。删除日程、运行快捷指令仍需确认；完全访问模式跳过应用内 Agent 审批，外部 MCP 写入始终确认。
-  - **macOS 系统集成**：按授权安全访问系统日历、提醒事项、备忘录与通讯录。
-  - **短信草稿**：明确要求准备短信且收件人、正文完整时，直接交接到 Messages，不重复弹出执行确认；最终由用户检查并手动发送。外部 MCP 调用仍需原生确认。
-  - **MCP 协议支持**：内置 MCP（Model Context Protocol）桥接，可无缝连接外部工具生态。
-  - **可信插件体系**：支持用户主动安装 GitHub 插件；设置中按 AI 插件和功能插件分 Tab 查看，并可跨分类搜索名称与命令；插件可提供无需 AI 的启动器命令与动态搜索结果，支持复制和打开链接，详见[插件开发](docs/plugins.md)。官方提供 [飞书插件](https://github.com/Niall-Young/asky-plugin-lark) 与 [Orca 插件](https://github.com/Niall-Young/asky-plugin-orca)。
-
-- 🎨 **纯正 macOS 原生体验与隐私优先**
-  - **现代视觉语言**：采用 AppKit 原生 Regular 玻璃与液态视觉质感，窗口平滑展开后保持固定高度，结果变化不再伸缩，完全清空普通搜索时收回单行输入，空查询搜索模式保持展开；严格适配系统“减少动态效果”。
-  - **背景交互**：点击搜索框外部时收起窗口，原始点击继续交给背景应用；背景滚动与拖动不受遮罩拦截。
-  - **严格隐私保护**：不向作者服务器上传任何用户数据；API 密钥安全存放在 macOS 系统钥匙串中，数据完全归用户所有。详见[隐私政策](PRIVACY.md)。
-
----
-
-### ⌨️ 快捷键与常用入口
-
-| 功能 | 触发方式 / 快捷键 | 说明 |
-| :--- | :--- | :--- |
-| **快速搜索** | 菜单栏图标 / 自定义全局快捷键 | 键入关键词，方向键选择，`Return` 打开 |
-| **剪贴板历史** | `Ctrl + Shift + C` | 浏览历史记录，`Return` 粘贴，`⌘ Return` 仅复制 |
-| **打开 AI 对话** | `Ctrl + Shift + /` | 唤出按需 AI 对话界面 |
-| **分类检索** | `file ` / `app ` / `ql ` / `sc ` | 仅搜索指定分类（文件/应用/快捷方式/快捷指令），`Esc` 退出 |
-| **文件夹浏览** | 选中文件夹按 `Tab` | 在搜索框内直接浏览或搜索该文件夹目录内容 |
-| **窗口搜索** | `sw ` 或 `sw` 后回车 | 检索应用通过辅助功能暴露的窗口并一键切换聚焦；`⌘K` 菜单提供“关闭窗口”，固定在最下方；多屏时可用“切换到上一块屏幕 / 下一块屏幕”（`⇧ ←` / `⇧ →`），横排从左到右、竖排从上到下并循环；单屏或选中的窗口处于系统全屏时隐藏这两项；屏幕切换快捷键可在“设置 › 快捷键 › 启动器”配置 |
-| **屏幕取色** | `co` 后回车 | 开启屏幕取色放大镜，点击后自动复制色值到剪贴板 |
-| **计算历史** | `calc` 后回车 | 浏览最近 200 条计算结果，回车回填算式继续编辑 |
-| **网页指令** | `go 关键词`、`yt 关键词` 等 | 输入指令后按空格或回车进入，输入关键词后回车打开搜索结果 |
-| **终端执行** | `> pwd` | 直接在启动器中执行 Shell 命令 |
-| **项操作菜单** | `⌘K` | 打开当前项的更多操作菜单（如展示文件简介 `⌘I`、复制文件名 `⌘⇧.` 等） |
-| **打开设置** | `⌘,`（窗口获焦时） | 呼出 Asky 设置面板 |
-
-在“设置 › 指令”中可自定义触发词。恢复默认时若触发词已被其他指令或别名占用，会保留当前配置并提示冲突。
-
-*完整快捷键配置与高级技巧见[使用教程](https://asky.niallspace.workers.dev/docs)。*
-
----
-
-### 📦 安装与配置
-
-#### Homebrew
+需要 **macOS 14+、Apple Silicon**。
 
 ```sh
 brew tap niall-young/asky https://github.com/Niall-Young/Asky.git
 brew install --cask niall-young/asky/asky
 ```
 
-支持 macOS 14+、Apple Silicon，使用与手动下载相同的正式安装包。应用内自动更新默认开启；也可运行 `brew update && brew upgrade --cask --greedy niall-young/asky/asky` 更新，或运行 `brew uninstall --cask niall-young/asky/asky` 卸载应用。卸载保留个人数据与设置。
+也可从 [Releases](https://github.com/Niall-Young/Asky/releases) 下载 DMG，将 `Asky.app` 拖入“应用程序”。应用内自动更新默认开启，可在“设置 › 关于 Asky › 软件更新”中管理。
 
-#### 下载安装
-- 前往 [GitHub Releases](https://github.com/Niall-Young/Asky/releases) 或 [官方网站](https://asky.niallspace.workers.dev/) 下载最新 DMG 安装包（支持 macOS 14+，Apple Silicon）。
-- 打开 DMG，将 `Asky.app` 拖入“应用程序”目录即可。Agent 已使用 Swift 原生运行时，安装包不再携带 Node.js 或 Pi。Orca、飞书插件执行器与 Text Tools 聚焦搜索示例使用 API v2 Swift 原生入口，无需 Node；CLI 自身环境由用户准备。旧版 JavaScript 插件另需本机 Node.js 22+。
-- 应用默认开启静默自动更新，可在“设置 › 关于 Asky › 软件更新”中管理。
+- **权限**：自动粘贴和窗口搜索需要辅助功能权限；日历、备忘录等在首次使用时申请授权。
+- **AI 配置**：在“设置 › 智能配置 › 模型配置”填写 API Key，或配置兼容 OpenAI 的 Base URL 与模型名。
+- **运行环境**：Agent 不依赖 Node.js 或 Pi；旧版 JavaScript 插件需要本机 Node.js 22+，详情见[插件开发](docs/plugins.md)。
 
-#### 权限与 AI 配置
-- **系统权限**：自动粘贴与窗口搜索功能需要 macOS **辅助功能**（Accessibility）权限；访问日历、备忘录等需在首次使用时授权。
-- **智能配置**：在“设置 › 智能配置 › 模型配置”中填入对应模型服务商的 API Key，或自定义兼容 OpenAI 协议的 Base URL 及模型名。API 密钥安全存放在 macOS 系统钥匙串中。智能配置分组包含模型配置、MCP、数据管理和数据来源；数据管理集中提供对话历史与记忆设置。
+### 常用入口
 
----
+| 功能 | 触发方式 / 快捷键 |
+| --- | --- |
+| 快速搜索 | 菜单栏图标 / 自定义全局快捷键，`Return` 打开结果 |
+| 剪贴板历史 | `Ctrl + Shift + C`；`Return` 粘贴，`⌘ Return` 仅复制 |
+| AI 对话 | `Ctrl + Shift + /` |
+| 分类检索 | `app ` / `file ` / `ql ` / `sc `（应用 / 文件 / 快捷方式 / 快捷指令） |
+| 文件夹浏览 | 选中文件夹后按 `Tab` |
+| 窗口搜索 / 屏幕取色 / 计算历史 | `sw` / `co` / `calc` 后回车 |
+| 网页搜索 / 终端命令 | `go 关键词`、`yt 关键词` / `> pwd` |
+| 操作菜单 / 设置 | `⌘K` / `⌘,`（窗口获焦时） |
 
-### 🛠️ 开发与构建
+触发词可在“设置 › 指令”中自定义。更多操作与配置见[使用教程](https://asky.niallspace.workers.dev/docs)。
 
-当前源码最低支持 macOS 14，功能与 macOS 15 保持一致，均使用原生背景模糊材质；macOS 26+ 可使用液态玻璃。14 的设置使用原生分组表单，15+ 保留自定义卡片。macOS 14/15 实机验收尚待完成。0.2.10 起的正式安装包与 Homebrew Cask 支持 macOS 14。
+### 开发与构建
 
-登录时启动的开关以 macOS 实际状态为准；若需要批准，在“设置 › 通用”点击“打开登录项设置…”完成授权，返回后会刷新状态。已有安装保留系统选择，关闭后不会自动重新开启。
-
-#### 环境要求
-- 目标运行系统：macOS 14+ (Apple Silicon)
-- Xcode 16+ / Swift 6.2+
-- [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`)
-
-应用图标源文件为 `App/Branding/AskyNative.icon`，使用 Xcode 附带的 Icon Composer 编辑。修改后同步导出的 `AppIcon.appiconset`、`AskyLogo.imageset` 和 `App/Branding` 中的 PNG / ICNS 兼容资源。
-
-#### 构建与运行
-在仓库根目录执行：
+需要带有 **Swift 6.2+** 的 Xcode 和 [XcodeGen](https://github.com/yonaskolb/XcodeGen)（`brew install xcodegen`）。在仓库根目录执行：
 
 ```sh
-# 1. 生成 Xcode 工程
 xcodegen generate
-
-# 2. 编译并启动 Debug 版本
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project Asky.xcodeproj -scheme Asky -configuration Debug -derivedDataPath build/DerivedData build
 open build/DerivedData/Build/Products/Debug/Asky.app
-# 直接打开 AI 窗口，不发送请求
-open -n build/DerivedData/Build/Products/Debug/Asky.app --args --show-agent
 ```
 
-#### 运行测试
+核心检查：
+
 ```sh
-# 核心测试套件
 (cd MCPBridge && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift build)
 (cd Packages/KulaCore && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test)
-python3 App/Tests/run-settings-regression.py --command-reset
-python3 App/Tests/run-settings-regression.py --plugin-tabs
-# 气泡对话与等待状态回归（先完成 Debug 构建）
-python3 App/Tests/run-agent-reply-regression.py --reply-activity-preview
-python3 App/Tests/run-agent-reply-regression.py --window-presentation
-python3 App/Tests/run-agent-reply-regression.py --bubble-width-preview
-python3 App/Tests/run-agent-reply-regression.py --user-bubble-hover
-python3 App/Tests/run-agent-reply-regression.py --approval-menu-hover
-python3 App/Tests/run-agent-reply-regression.py --reading-scroll
-python3 App/Tests/run-agent-reply-regression.py --scroll-stability
-python3 App/Tests/run-agent-reply-regression.py --reply-navigation
-python3 App/Tests/run-agent-reply-regression.py --paging
-python3 App/Tests/run-agent-reply-regression.py --bottom-push
-python3 App/Tests/run-agent-reply-regression.py --restored-transcript
-python3 App/Tests/run-agent-reply-regression.py --restored-transcript --restored-long-reply
-python3 App/Tests/run-agent-reply-regression.py --forms-preview --custom-preview
-python3 App/Tests/run-agent-reply-regression.py --latex-form-preview
-python3 App/Tests/run-agent-reply-regression.py --prefill-preview
-python3 App/Tests/run-agent-reply-regression.py --sources-preview
-python3 App/Tests/run-agent-reply-regression.py --math-preview
-python3 App/Tests/run-agent-reply-regression.py --selection-preview
-# 光标回归会短暂移动鼠标，运行时请勿操作鼠标
-python3 App/Tests/run-agent-reply-regression.py --action-cursor-preview
-# 顶部遮挡正文时，每次光标事件都保持箭头（含兼容分支）
-python3 App/Tests/run-agent-reply-regression.py --header-cursor-preview
-python3 App/Tests/run-agent-reply-regression.py --header-cursor-preview --preview-macos14
-python3 App/Tests/run-agent-reply-regression.py --continuous-selection-preview
-python3 App/Tests/run-agent-reply-regression.py --avatar-preview
-python3 App/Tests/run-agent-reply-regression.py --reactions-preview
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun swiftc App/Sources/ChatForm.swift App/Tests/ChatFormParserRegression.swift -o build/chat-form-parser-regression
-build/chat-form-parser-regression
 ```
 
-启动器首帧诊断使用隔离数据，录制独立 Debug 进程的首次打开与再次打开；需要屏幕录制权限。输出保存在 `build/`，不操作日常安装和数据：
+UI 回归、Debug 预览、`scripts/package-release.py` 签名与打包流程见[开发与发布指南](docs/development.md)。macOS 14/15 实机验收尚待完成，具体测试范围以[验证记录](docs/validation/)为准。
 
-```sh
-python3 App/Tests/run-launcher-presentation-diagnostic.py --output build/launcher-presentation/current
-```
+| 目录 | 职责 |
+| --- | --- |
+| `App/` | SwiftUI / AppKit 界面与交互 |
+| `Packages/KulaCore/` | 核心逻辑、原生 Agent 与统一系统访问入口 `ToolService` |
+| `MCPBridge/` | 原生 MCP 桥接服务 |
+| `PluginSupport/` | 旧版 JavaScript 插件兼容脚本 |
 
-录制请求 60 fps，实际交付帧率以输出文件与日志为准；复制 Debug 应用路径的检查不等同于正式安装更新验证。详细覆盖见[开发指南](docs/development.md)。
+[文档索引](docs/README.md) · [产品需求](docs/PRD.md) · [系统架构](docs/framework.md) · [设计规范](docs/design-system.md) · [插件开发](docs/plugins.md)
 
-> [!NOTE]
-> 完整的 UI 自动化回归脚本、Debug 交互预览参数以及 Developer ID 签名与公证打包流程，详见[开发与发布指南](docs/development.md)。
+### 许可证
 
----
-
-### 📂 代码结构与文档
-
-| 目录 | 职责说明 |
-| :--- | :--- |
-| `App/` | 基于 SwiftUI 与 AppKit 的原生客户端界面与交互实现 |
-| `Packages/KulaCore/` | 核心业务模型与统一系统访问入口 `ToolService` |
-| `PluginSupport/` | 旧版 JavaScript 插件兼容脚本；Agent 本身位于 KulaCore 的 AgentHost |
-| `MCPBridge/` | Model Context Protocol 原生桥接服务 |
-
-- [文档索引](docs/README.md) · [产品需求 (PRD)](docs/PRD.md) · [系统架构](docs/framework.md) · [设计规范](docs/design-system.md) · [插件开发](docs/plugins.md) · [隐私政策](PRIVACY.md)
-
----
-
-### 📄 许可证
-
-本项目采用 [MIT 许可证](LICENSE)。第三方依赖项遵循其各自的开源协议。
+本项目采用 [MIT 许可证](LICENSE)，第三方依赖遵循各自的许可证。
 
 [English](#english) · [返回顶部](#asky)
 
@@ -224,195 +104,75 @@ python3 App/Tests/run-launcher-presentation-diagnostic.py --output build/launche
 <a id="english"></a>
 ## English
 
-Asky is a native macOS efficiency launcher built with SwiftUI and AppKit. Local global search and clipboard history work completely offline without relying on AI, while the AI assistant runs on-demand—delivering both lightweight performance and extensive expandability.
+Asky is a native macOS launcher built with SwiftUI and AppKit. Local search and clipboard history work offline; the AI assistant runs on demand.
 
-🌐 **Website**: [https://asky.niallspace.workers.dev/](https://asky.niallspace.workers.dev/)  
-📖 **Documentation**: [User Guide & Manual](https://asky.niallspace.workers.dev/docs)
+### Features
 
-### ✨ Key Features
+- **Quick search**: Find apps, local files, Chrome tabs and bookmarks, and app windows. Includes category filters, folder browsing, calculations and conversions, a color picker, web search, and terminal commands.
+- **Clipboard history**: Save text, rich text, images, and files. Search by keyword or source app, preview colors, paste or drag items, and choose a retention period.
+- **AI assistant**: A native Swift Agent with OpenAI-compatible model support, web search, local Markdown memory, and continuous conversation. Send attachments, quote messages, and fill out native forms in chat.
+- **System integration and extensions**: Authorized access to Calendar, Reminders, Notes, Contacts, and Maps. Messages are handed off as drafts for the user to send. Supports MCP and GitHub plugins, including [Feishu](https://github.com/Niall-Young/asky-plugin-lark) and [Orca](https://github.com/Niall-Young/asky-plugin-orca).
+- **Native experience and privacy**: Supports system appearance and Reduce Motion, with Liquid Glass on macOS 26+. No user data is uploaded to author servers; API keys stay in Keychain. See the [Privacy Policy](PRIVACY.md) for data handling when using models or external tools.
 
-- 🔍 **Global Fast Search**
-  - **Continuous conversation**: All entry points resume one timeline, including after restart. Messages page in both directions in batches of 40, with at most 120 items in memory and the reading position preserved across page changes. Return to Bottom restores the latest messages directly. The separate history browser and its shortcut are removed, and scrollbars are hidden. Each request uses retained history as needed; clearing chat history preserves long-term memory.
-  - **Comprehensive Retrieval**: Instantly search applications, local files, Chrome tabs and bookmarks, and active application windows (`sw`).
-  - **Category Filtering & Deep Dive**: Use dedicated filters like `app `, `file `, `ql ` (quick links), and `sc ` (shortcuts). Press `Tab` on any folder to browse or search its subdirectories directly.
-  - **Instant Calculations & Conversions**: Support for mathematical formulas, unit conversions, and live currency rates. Enter `calc` to view calculation history and restore expressions with one click.
-  - **Screen Color Picker**: Enter `co` to launch macOS's native color sampler; click to copy the sRGB uppercase hex value.
-  - **Web Commands & Terminal**: Quick web search presets (`go`, `yt`, `x`, etc.) and terminal command execution (`> command`) with Terminal, iTerm2, Ghostty 1.3+, Otty 1.2+, and Kero.
+### Installation and Setup
 
-- 📋 **Robust Clipboard History**
-  - **Multi-Type Support**: Records text, rich text, images, and files with combined keyword and source app search. The list loads 40 entries per page, fetching more near the end via scrolling or keyboard navigation. Search reads bounded batches in the background, debounces typing and cancels stale queries; scrollbars are hidden.
-  - **Smart Color Previews**: Automatically detects `#RGB`, `rgb()`, `hsl()`, `oklch()`, and other CSS color formats, rendering circular color previews.
-  - **Seamless Pasting**: Press `Return` to paste into the active target app (requires Accessibility permission); `⌘ Return` copies while keeping the panel open. Supports smooth drag-and-drop for files and images.
-  - **Flexible Retention**: Configure history retention (8 hours to 30 days) with automatic cleanup. Delete single entries with `⌘⌫` or clear all via the More menu (`⌘K`).
-
-- 🤖 **On-Demand AI Assistant & Local Memory**
-  - **AI Reactions**: Asky can reply with text, attach a single emoji reaction, or do both. Reactions overlap the bottom-left edge of the current user bubble, match its background color with a 1 pt border (white in light mode and subtle gray in dark mode), avoid covering its text, and persist in history; a reaction-only response creates no empty assistant bubble.
-  - **Image Attachments**: Multiple images in a message form a compact stack that opens on hover and closes when the pointer leaves. Expanded stacks scroll horizontally. When focused, Return or Space toggles expansion and Escape collapses it; system Reduce Motion is respected. Single images, files, and composer attachments retain their existing layout.
-  - **Selection and Quotes**: A Reply icon beside Copy below each AI answer adds the whole answer as a quote and focuses the composer. Repeated clicks do not duplicate the same quote; type and send a follow-up to discuss that answer. Whole-message replies use a lined chat icon and up to two lines of answer preview in a 304 pt card, with the same appearance in sent messages and history. Clicking a sent reply card smoothly scrolls to the original answer in about 0.22 seconds with its bubble 12 pt below the toolbar where content bounds allow, loading nearby history when needed; manual scrolling takes over the reading position. Chat text selections follow the Agent color and extend continuously across paragraphs, bulleted/numbered lists and nested items. A compact capsule-shaped horizontal Liquid Glass menu offers Copy and Add to Chat with a round chat-bubble icon. The menu has no extra window shadow; the glass brightens on the active side and fades smoothly toward the opposite side, keeping its size while pressed and closing immediately when an action completes. Clicking blank space or pressing Escape clears both the selection and menu. Selected excerpts reuse the upload attachment tag with a document icon and labels “Quoted text 1”, “Quoted text 2”, and so on, numbered from 1 per message and renumbered after removal, without displaying the excerpt. Tags can be removed in the composer and remain in sent messages and restored history. The quoted content and matching numbers are sent as context with the question; formulas retain their LaTeX source.
-  - **Asky Avatar**: The top-left avatar defaults to the original blue monster. Click it to expand a 260 × 340 pt Liquid Glass panel in place, with a live preview above five shapes (original monster, circle, rounded cog, gummy, ghost), four expressions (smile, sunglasses, wink, sleepy), and five colors (blue, yellow, purple, green, pink). Shape options retain the current expression, and expression options preview the current shape. All five shapes share the original monster’s soft, dimensional material. Combine choices independently; selections persist immediately, and clicking outside or pressing Esc closes the panel. There is no name field or Save button. The send button, user-message tint, and text selection follow the chosen color; Agent replies stay neutral. The collapsed avatar remains 36 pt tall, matching the toolbar controls.
-  - **Compact Chat Window**: Fixed at 560 × 680 pt with 26 pt circular corners and user resizing disabled; the transcript extends continuously to the window bottom beneath the floating glass composer, with scrolling content visible through it and a progressive blur starting at zero radius at the composer top and increasing toward the bottom edge, without extending above the composer. Trailing space follows the composer height so the last message can scroll fully above it. The compact glass composer uses 16 pt corners and matching 28 pt attachment and send buttons. The title-free header progressively blurs the top 64 pt from a 6 pt radius down to zero without a color overlay, with a joined capsule group without dividers for Pin and a power-symbol Close button on the right. The group measures 96 × 36 pt with 48 pt between icon centers; hover and press create a soft glow centered on the active icon, fading continuously toward the other side without a hard center seam; the toolbar group and composer use native Regular glass for subtle shading and edges without a stark white fill over light backgrounds; the avatar retains Clear glass at 85% effect opacity. Buttons retain soft hover illumination, uniform press expansion and a spring release; Reduce Motion disables scaling.
-  - **Liquid Button Interaction**: Chat and launcher action buttons use custom press expansion and spring release based on an iOS recording, preserving their resting appearance. Glass surfaces brighten softly on hover; launcher and clipboard footer buttons use native Clear glass at 85% overall opacity to soften highlights while retaining most refraction, with fully opaque labels and shortcut keys. This motion is custom, not a built-in macOS animation. Settings use 28 pt native capsule buttons, 28 pt capsule text, password, dropdown and search fields, and native segmented category controls with a neutral selection. Controls retain their size when the window loses focus, without extra background tint. Reduce Motion disables custom scaling. Add Plugin, plugin configuration and alias editor dialogs center within the entire Settings window, using compact native Regular glass surfaces without additional custom shadows.
-  - **Native Swift Agent**: Swift handles model requests, tool loops, session recovery, and context compaction without a Node / Pi helper. Chat uses left/right message bubbles and shows the complete answer after the turn finishes, with a three-dot typing bubble while waiting. Messages flow at their natural height without reserving a screen for each turn; new messages push earlier messages upward. Short replies appear in full. Automatic scrolling stops at the start of a long reply so the reader can scroll down through the rest; the user question may move above the viewport. Manual reading positions are preserved. A manual return-to-bottom button is available. Tool calls and progress narration are hidden; native forms, copy actions, and completion times remain, and Markdown headings use body typography; supports OpenAI-compatible Chat Completions.
-  - **Conversation History**: Newly saved conversations retain tool statuses, errors, response groups, and elapsed time across paginated reloads. Tool display records missing from older conversations are not backfilled. Settings › AI Settings › Data Management › Conversation History offers 7, 30 (default), or 90 days, or forever, based on each user turn’s submission time. Cleanup runs at startup, daily, and after retention changes. Expiry and manual deletion remove sessions, execution records, indexes, and unreferenced managed attachments while preserving saved memory; failed file removals are retried.
-  - **Proactive Assistance**: Agent instructions prioritize existing context, authorized memory, and tools to fill information gaps, use reasonable defaults for low-risk adjustable details, and ask only about essential information affecting the result or action target. Replies can express care, appreciation, humor, and reasoned opinions as the conversation calls for them, avoiding stock service phrases, repeated confirmation, and routine disclaimers. Gaps that affect a judgment or action are explained briefly alongside the relevant content.
-  - **Native Interactive Forms**: Completed AI replies display structured form controls (text fields, native radio groups, dropdowns, checkboxes, date pickers and configurable hour/minute/second time or duration controls) directly in chat, which submit straight back into the conversation. Clarification and plan choices can offer both suggested answers and “Write my own”; Submit Reply sends the active answer as a message in the same conversation so the assistant can continue. All fields support editable defaults from known information or reasonable assumptions. Invalid defaults are ignored; cleared answers stay cleared, and prefilling never submits or authorizes an action. Reopening an unsubmitted form restores its original defaults; unsubmitted edits last only in the currently opened conversation. Unsubmitted forms remain available after later messages and reopening history. Submission saves the selected answers and makes the form read-only with a disabled submit button, including after history is reopened. Controls reuse the Settings components; date selection uses the calendar from the event creation dialog. Form strings tolerate invalid backslash escapes (such as `\[...\]`) while preserving the original history text.
-  - **Proactive Web Verification**: Instructions require searching before answering about changing public information, product recommendations and comparisons, software/API usage, or uncertain facts, with source links. Failed searches must be disclosed, and requests not to browse are respected. The search tool retries up to twice when keyword coverage is incomplete, prioritizes results covering missing terms, reports remaining gaps, and filters clearly unrelated pages.
-  - **Local Memory & Context**: Stores user preferences and context in local Markdown files with automatic context compaction and web search.
-  - **Web Source Previews**: Web sources are grouped into a source-name tag with a +N count at the end of each paragraph. Hover or click to expand a list of source names, titles, and available publication dates; click a row to open the original. Tags and card rows show an arrow cursor on hover. Cards are 300 pt wide with 12 pt horizontal and 10 pt vertical padding; longer lists scroll within the card.
-  - **Native LaTeX Rendering**: Renders inline and block LaTeX formulas (`$…$`, `$$…$$`) locally.
-  - **Smart Travel & Calendar Planning**: Built-in MapKit support to compare driving, transit, and walking times, suggesting arrival-buffered departure times for your day.
-
-- 🧩 **System Integration & Extensibility**
-  - **Everyday Action Approval**: In Auto Review mode, explicit requests to create or append notes, create or update a single calendar event, or create reminders execute after target and argument validation without another confirmation. Event deletion and shortcut execution still require confirmation. Full Access skips approval for the in-app Agent; external MCP writes always require confirmation.
-  - **macOS Native Access**: Authorized access to system Calendars, Reminders, Notes, and Contacts.
-  - **Message Drafts**: Explicit requests with a valid recipient and body open a draft in Messages without a second execution confirmation. The user reviews and sends it manually; external MCP calls still require native confirmation.
-  - **MCP Protocol**: Built-in Model Context Protocol bridge for broad compatibility with external tooling ecosystems.
-  - **Trusted Plugin System**: Install plugins from GitHub on demand. Settings separates AI and function plugins into tabs, with search across categories, names, and commands. Plugins can provide launcher commands and dynamic search results without AI, with copy and open-link actions; see the [plugin guide](docs/plugins.md). Official integrations include [Feishu](https://github.com/Niall-Young/asky-plugin-lark) and [Orca](https://github.com/Niall-Young/asky-plugin-orca).
-
-- 🎨 **Pure macOS Native Experience & Privacy First**
-  - **Modern Interface**: Built with AppKit Regular Liquid Glass. Once expanded, the panel keeps a fixed height as results change. Clearing root search collapses it to the single input row; an empty query inside a search mode stays expanded. Supports smooth expansion and Reduce Motion.
-  - **Background Interaction**: Clicking outside the launcher dismisses it while delivering the original click to the background app. Background scrolling and dragging remain available.
-  - **Privacy First**: Zero telemetry sent to author servers. Sensitive credentials and API keys are stored securely in the macOS Keychain. See [Privacy Policy](PRIVACY.md).
-
----
-
-### ⌨️ Shortcuts & Key Entries
-
-| Feature | Trigger / Shortcut | Description |
-| :--- | :--- | :--- |
-| **Quick Search** | Menu bar icon / Global hotkey | Type keywords, navigate with arrow keys, press `Return` to open |
-| **Clipboard History** | `Ctrl + Shift + C` | Browse history, `Return` to paste, `⌘ Return` to copy |
-| **New AI Chat** | `Ctrl + Shift + /` | Open the on-demand AI conversation panel |
-| **Category Search** | `file ` / `app ` / `ql ` / `sc ` | Filter results by category (files/apps/quick links/shortcuts); `Esc` to exit |
-| **Folder Browse** | Select folder + `Tab` | Browse or search folder contents directly in launcher |
-| **Window Search** | `sw ` or `sw` + Return | Find and focus application windows exposed through Accessibility; `⌘K` offers Close Window, always last; with multiple displays, Move to Previous/Next Display (`⇧ ←` / `⇧ →`) cycles left to right for horizontal layouts and top to bottom for vertical layouts; both actions are hidden with a single display or when the selected window is in native full screen; display shortcuts are configurable in Settings › Shortcuts › Launcher |
-| **Color Picker** | `co` + Return | Open screen color sampler and copy hex value to clipboard |
-| **Calculation History** | `calc` + Return | View last 200 calculations and restore expressions |
-| **Web Commands** | `go keyword`, `yt keyword`, etc. | Press Space or Return after a command to enter it, then type a query and press Return to search |
-| **Terminal** | `> pwd` | Execute shell commands directly from the search bar |
-| **Action Menu** | `⌘K` | Open context menu (Show Get Info `⌘I`, Copy filename `⌘⇧.`, etc.) |
-| **Settings** | `⌘,` (when window is focused) | Open Asky Settings |
-
-Customize trigger words in Settings › Commands. If a default trigger is already used by another command or alias, restoring it keeps the current configuration and displays a conflict message.
-
-*See the [User Guide](https://asky.niallspace.workers.dev/docs) for advanced configuration and full shortcut listings.*
-
----
-
-### 📦 Installation & Setup
-
-#### Homebrew
+Requires **macOS 14+ and Apple Silicon**.
 
 ```sh
 brew tap niall-young/asky https://github.com/Niall-Young/Asky.git
 brew install --cask niall-young/asky/asky
 ```
 
-Requires macOS 14+ and Apple Silicon. Homebrew uses the same official package as the manual download. In-app automatic updates are enabled by default. You can also run `brew update && brew upgrade --cask --greedy niall-young/asky/asky` to update, or `brew uninstall --cask niall-young/asky/asky` to uninstall the app. Uninstalling preserves personal data and settings.
+Or download the DMG from [Releases](https://github.com/Niall-Young/Asky/releases) and drag `Asky.app` into Applications. In-app automatic updates are enabled by default; manage them in Settings › About Asky › Software Update.
 
-#### Download & Install
-- Download the latest DMG release from [GitHub Releases](https://github.com/Niall-Young/Asky/releases) or the [Official Website](https://asky.niallspace.workers.dev/) (macOS 14+, Apple Silicon).
-- Open the DMG and drag `Asky.app` into Applications. The Agent runs natively in Swift; the app no longer bundles Node.js or Pi. The Orca and Lark plugin runners and the Text Tools launcher example use native Swift API v2 executables without Node; users supply the CLI environment. Legacy JavaScript plugins require local Node.js 22+.
-- In-app automatic updates are enabled by default; configure in Settings › About Asky › Software Update.
+- **Permissions**: Automatic pasting and window search require Accessibility access. Calendar, Notes, and other system integrations request authorization on first use.
+- **AI setup**: Enter your API key or an OpenAI-compatible Base URL and model name in Settings › AI Settings › Model Configuration.
+- **Runtime**: The Agent requires neither Node.js nor Pi. Legacy JavaScript plugins need local Node.js 22+; see the [plugin guide](docs/plugins.md).
 
-#### Permissions & AI Configuration
-- **Permissions**: Automatic pasting and window search require macOS **Accessibility** access. Calendar and Notes access require user authorization on first use.
-- **Model Setup**: Go to Settings › AI Settings › Model Configuration to configure your API Key or custom OpenAI-compatible endpoint. Keys are stored safely in the macOS Keychain. The AI Settings group contains Model Configuration, MCP, Data Management, and Data Sources; Data Management brings conversation history and memory settings together.
+### Common Shortcuts
 
----
+| Feature | Trigger / Shortcut |
+| --- | --- |
+| Quick search | Menu bar icon / custom global hotkey; `Return` to open a result |
+| Clipboard history | `Ctrl + Shift + C`; `Return` to paste, `⌘ Return` to copy |
+| AI conversation | `Ctrl + Shift + /` |
+| Category search | `app ` / `file ` / `ql ` / `sc ` (apps / files / quick links / shortcuts) |
+| Folder browsing | Select a folder and press `Tab` |
+| Window search / color picker / calculation history | `sw` / `co` / `calc`, then Return |
+| Web search / terminal command | `go keyword`, `yt keyword` / `> pwd` |
+| Action menu / Settings | `⌘K` / `⌘,` (when the window is focused) |
 
-### 🛠️ Development & Building
+Customize triggers in Settings › Commands. See the [User Guide](https://asky.niallspace.workers.dev/docs) for more actions and configuration.
 
-Current source targets macOS 14 with the same features and native background blur as macOS 15; macOS 26+ can use Liquid Glass. Settings use a native grouped form on 14 and retain custom cards on 15+. Testing on macOS 14/15 hardware is still pending. Official packages and the Homebrew Cask support macOS 14 starting with 0.2.10.
+### Development
 
-Launch at login reflects the actual macOS status. If approval is required, choose “Open Login Items Settings…” in Settings › General; the status refreshes when you return. Existing installations preserve the system choice and do not automatically re-enable a disabled login item.
-
-#### Prerequisites
-- Target runtime: macOS 14+ (Apple Silicon)
-- Xcode 16+ / Swift 6.2+
-- [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`)
-
-The app icon source is `App/Branding/AskyNative.icon`, edited with Icon Composer bundled with Xcode. After changes, synchronize the exported `AppIcon.appiconset`, `AskyLogo.imageset`, and PNG / ICNS compatibility assets in `App/Branding`.
-
-#### Build & Run
-Run from the repository root:
+Requires Xcode with **Swift 6.2+** and [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`). Run from the repository root:
 
 ```sh
-# 1. Generate Xcode project
 xcodegen generate
-
-# 2. Build and launch Debug app
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project Asky.xcodeproj -scheme Asky -configuration Debug -derivedDataPath build/DerivedData build
 open build/DerivedData/Build/Products/Debug/Asky.app
-# Open the AI window directly without sending a request
-open -n build/DerivedData/Build/Products/Debug/Asky.app --args --show-agent
 ```
 
-#### Running Tests
+Core checks:
+
 ```sh
-# Core test suites
 (cd MCPBridge && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift build)
 (cd Packages/KulaCore && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test)
-python3 App/Tests/run-settings-regression.py --command-reset
-python3 App/Tests/run-settings-regression.py --plugin-tabs
-# Bubble conversation and waiting-state regression (build Debug first)
-python3 App/Tests/run-agent-reply-regression.py --reply-activity-preview
-python3 App/Tests/run-agent-reply-regression.py --window-presentation
-python3 App/Tests/run-agent-reply-regression.py --bubble-width-preview
-python3 App/Tests/run-agent-reply-regression.py --user-bubble-hover
-python3 App/Tests/run-agent-reply-regression.py --approval-menu-hover
-python3 App/Tests/run-agent-reply-regression.py --reading-scroll
-python3 App/Tests/run-agent-reply-regression.py --scroll-stability
-python3 App/Tests/run-agent-reply-regression.py --reply-navigation
-python3 App/Tests/run-agent-reply-regression.py --paging
-python3 App/Tests/run-agent-reply-regression.py --bottom-push
-python3 App/Tests/run-agent-reply-regression.py --restored-transcript
-python3 App/Tests/run-agent-reply-regression.py --restored-transcript --restored-long-reply
-python3 App/Tests/run-agent-reply-regression.py --forms-preview --custom-preview
-python3 App/Tests/run-agent-reply-regression.py --latex-form-preview
-python3 App/Tests/run-agent-reply-regression.py --prefill-preview
-python3 App/Tests/run-agent-reply-regression.py --sources-preview
-python3 App/Tests/run-agent-reply-regression.py --math-preview
-python3 App/Tests/run-agent-reply-regression.py --selection-preview
-# The cursor regression briefly moves the pointer; leave the mouse idle while it runs
-python3 App/Tests/run-agent-reply-regression.py --action-cursor-preview
-# Every cursor event over text behind the header must retain the arrow (including compatibility mode)
-python3 App/Tests/run-agent-reply-regression.py --header-cursor-preview
-python3 App/Tests/run-agent-reply-regression.py --header-cursor-preview --preview-macos14
-python3 App/Tests/run-agent-reply-regression.py --continuous-selection-preview
-python3 App/Tests/run-agent-reply-regression.py --avatar-preview
-python3 App/Tests/run-agent-reply-regression.py --reactions-preview
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun swiftc App/Sources/ChatForm.swift App/Tests/ChatFormParserRegression.swift -o build/chat-form-parser-regression
-build/chat-form-parser-regression
 ```
 
-The launcher presentation diagnostic uses isolated data and records first and repeat presentation in separate Debug processes. Screen Recording access is required. Outputs stay in `build/`; the installed app and everyday data are untouched:
-
-```sh
-python3 App/Tests/run-launcher-presentation-diagnostic.py --output build/launcher-presentation/current
-```
-
-Recording requests 60 fps; inspect the output files and logs for delivered cadence. Testing a copied Debug bundle is not production update-installation verification. See the [development guide](docs/development.md) for coverage.
-
-> [!NOTE]
-> For UI automation regression scripts, Debug interactive preview arguments, and Developer ID code-signing and packaging, see the [Development and Release Guide](docs/development.md).
-
----
-
-### 📂 Codebase & Docs
+See the [Development and Release Guide](docs/development.md) for UI regressions, Debug previews, and signing and packaging with `scripts/package-release.py`. Testing on macOS 14/15 hardware is still pending; consult the [validation records](docs/validation/) for test coverage.
 
 | Directory | Responsibility |
-| :--- | :--- |
-| `App/` | Native macOS user interface and interactions (SwiftUI & AppKit) |
-| `Packages/KulaCore/` | Core business logic and unified system access through `ToolService` |
-| `PluginSupport/` | Legacy JavaScript plugin shim; the native Agent lives in KulaCore AgentHost |
-| `MCPBridge/` | Native Model Context Protocol bridge |
+| --- | --- |
+| `App/` | SwiftUI / AppKit interface and interactions |
+| `Packages/KulaCore/` | Core logic, native Agent, and unified system access through `ToolService` |
+| `MCPBridge/` | Native MCP bridge |
+| `PluginSupport/` | Legacy JavaScript plugin compatibility scripts |
 
-- [Docs Index](docs/README.md) · [Product Requirements (PRD)](docs/PRD.md) · [Architecture](docs/framework.md) · [Design System](docs/design-system.md) · [Plugins](docs/plugins.md) · [Privacy](PRIVACY.md)
+[Docs index](docs/README.md) · [Product requirements](docs/PRD.md) · [Architecture](docs/framework.md) · [Design system](docs/design-system.md) · [Plugins](docs/plugins.md)
 
----
-
-### 📄 License
+### License
 
 Distributed under the [MIT License](LICENSE). Third-party dependencies retain their respective licenses.
 
