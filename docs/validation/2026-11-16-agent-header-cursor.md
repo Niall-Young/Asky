@@ -1,5 +1,25 @@
 # 对话顶部拖动区域光标
 
+## 闪烁问题的后续修复
+
+用户确认首版仍会在移动鼠标时于箭头和 I-beam 之间闪烁。下方首版记录仅说明当时执行的检查，不能作为问题已解决的证据。
+
+原因：`ActionArrowCursor` 原来在主队列异步设置箭头；被覆盖的 `ChatSelectableTextView` / `ChatSourceTextView` 仍在当前 `cursorUpdate` / `mouseMoved` 事件中先设置 I-beam。等待后检查最终光标会漏掉这个瞬态。
+
+后续实现让原生正文处理光标事件前同步查询同一窗口的可见箭头区域；命中时直接设置箭头并跳过 NSTextView 的正文光标处理。被覆盖的来源标签也不会启动悬停预览。正文未被覆盖时仍走原生处理，现有拖动手势及按钮事件不变。
+
+新增 `--header-cursor-preview` 使用真实 `AgentWindowController` 和长回复，将正文滚到顶部下方，逐次直接派发 120 组 `cursorUpdate` / `mouseMoved`，在同一调用栈中检查光标，再检查未被覆盖的正文恢复 I-beam。
+
+- 修改正文处理前，该检查在 `cursorUpdate` 的瞬态 I-beam 断言失败，复现首版缺陷：`build/header-cursor-before.log`。
+- 修改后通过：`build/header-cursor-after.log`。
+- 同一编译产物加 `--preview-macos14` 通过：`build/header-cursor-macos14.log`。这是当前系统上的兼容代码路径，不是真实 macOS 14 机器。
+- 原有 `--action-cursor-preview` 通过：`build/header-cursor-flicker-actions.log`，覆盖正文恢复、操作按钮点击、选择菜单与来源悬停。
+- `xcodegen generate`、README 的 Debug `xcodebuild`、KulaCore `swift test` 均通过：`build/header-cursor-flicker-build.log`、`build/header-cursor-flicker-core.log`。
+- 通过 CUA 退出旧 Debug 并重新打开新构建，查看实际聊天窗口。截图不含光标，因此不将截图视为连续鼠标移动无闪烁的视觉验证；本次证据为能让旧代码失败、新代码通过的同步事件回归。
+- README: updated，中英文同步增加顶部光标回归及兼容分支命令；本地构建和日志继续由既有 `build/` 规则忽略。
+
+## 首版记录（未解决闪烁）
+
 ## 修改
 
 - `AgentView.header` 在现有拖动手势之后应用 `actionArrowCursor()`，让顶部 64 pt 区域覆盖下层可选正文的 I-beam 光标。

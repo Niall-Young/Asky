@@ -122,11 +122,17 @@ struct GlassPressObserverStyle: ButtonStyle {
     }
 }
 
-/// Native text and SwiftUI may both update the cursor during one mouse event.
-/// Resolve the visible action after AppKit finishes dispatching that event.
-private struct ActionArrowCursor: NSViewRepresentable {
+/// Native text consults these regions before handling cursor events, so covered
+/// text never briefly installs an I-beam before the deferred SwiftUI refresh.
+struct ActionArrowCursor: NSViewRepresentable {
     func makeNSView(context: Context) -> CursorView { CursorView() }
     func updateNSView(_ view: CursorView, context: Context) {}
+
+    static func applyIfCovered(_ event: NSEvent, in window: NSWindow?) -> Bool {
+        guard let window, CursorView.contains(event.locationInWindow, in: window) else { return false }
+        NSCursor.arrow.set()
+        return true
+    }
 
     final class CursorView: NSView {
         private struct Entry { weak var view: CursorView? }
@@ -161,6 +167,15 @@ private struct ActionArrowCursor: NSViewRepresentable {
         override func mouseMoved(with event: NSEvent) { Self.refreshCursor() }
         override func mouseExited(with event: NSEvent) { Self.refreshCursor() }
 
+        static func contains(_ location: NSPoint, in window: NSWindow) -> Bool {
+            regions.removeAll { $0.view == nil }
+            return regions.contains { entry in
+                guard let view = entry.view, view.window === window,
+                      !view.isHiddenOrHasHiddenAncestor else { return false }
+                return view.bounds.intersection(view.visibleRect).contains(view.convert(location, from: nil))
+            }
+        }
+
         private static func refreshCursor() {
             guard !refreshPending else { return }
             refreshPending = true
@@ -171,12 +186,7 @@ private struct ActionArrowCursor: NSViewRepresentable {
                 guard let window = NSApp.window(withWindowNumber: number),
                       let content = window.contentView else { return }
                 let location = window.convertPoint(fromScreen: point)
-                regions.removeAll { $0.view == nil }
-                if regions.contains(where: { entry in
-                    guard let view = entry.view, view.window === window,
-                          !view.isHiddenOrHasHiddenAncestor else { return false }
-                    return view.bounds.intersection(view.visibleRect).contains(view.convert(location, from: nil))
-                }) {
+                if contains(location, in: window) {
                     NSCursor.arrow.set()
                 } else if let target = content.hitTest(location),
                           let event = NSEvent.enterExitEvent(with: .cursorUpdate, location: location, modifierFlags: [],

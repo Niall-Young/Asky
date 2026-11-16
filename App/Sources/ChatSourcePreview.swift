@@ -129,6 +129,12 @@ final class ChatSourceTextView: ChatSelectableTextView, NSTextViewDelegate {
     }
 
     override func mouseMoved(with event: NSEvent) {
+        // Tracking areas also receive moves while this text sits behind the
+        // header or an action. Do not set a text cursor or open covered sources.
+        if ActionArrowCursor.applyIfCovered(event, in: window) {
+            cancelPendingHover()
+            return
+        }
         super.mouseMoved(with: event)
         cursorUpdate(with: event)
         guard let (index, sources) = source(at: event.locationInWindow), let url = sources.first else {

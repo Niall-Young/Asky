@@ -1741,14 +1741,74 @@ enum AgentReplyRegression {
         print("Action cursor passed: overlays, selection actions, source tags/cards and return to text")
     }
 
+    /// Check synchronous cursor updates, not only the settled cursor after a run-loop delay.
+    static func headerCursorPreview() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: "Asky-header-cursor-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let app = try AppModel(root: root)
+        let store = ConversationStore(app.store)
+        let cid = try store.create(title: "Header cursor")
+        try store.append(conversationID: cid, role: "user", text: "顶部光标回归")
+        try store.append(conversationID: cid, role: "assistant",
+            text: String(repeating: "这段正文需要滚动到顶部拖动区域下方，鼠标移动时仍应保持箭头。\n\n", count: 30))
+        let model = AgentModel(app: app)
+        model.open(cid)
+        let controller = AgentWindowController(model: model, presentation: WindowPresentation())
+        controller.show()
+        let window = NSApp.windows.first { $0.title == "Asky AI" }!
+        defer { window.orderOut(nil) }
+        func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
+        try await Task.sleep(for: .milliseconds(600))
+        let content = window.contentView!
+        let scroll = descendants(content).compactMap { $0 as? NSScrollView }.first {
+            ($0.documentView?.frame.height ?? 0) > $0.contentView.bounds.height + 300
+        }!
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: scroll.contentView.bounds.minY + 180))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        try await Task.sleep(for: .milliseconds(250))
+        content.layoutSubtreeIfNeeded()
+        let headerRect = NSRect(x: 90, y: window.frame.height - 60, width: 300, height: 48)
+        let texts = descendants(content).compactMap { $0 as? ChatSelectableTextView }
+        guard let text = texts.first(where: { $0.convert($0.visibleRect, to: nil).intersects(headerRect) }) else {
+            preconditionFailure("Fixture must have selectable text underneath the real chat header")
+        }
+        let overlap = text.convert(text.visibleRect, to: nil).intersection(headerRect)
+        for step in 0..<120 {
+            let point = NSPoint(x: overlap.minX + overlap.width * (CGFloat(step % 20) + 0.5) / 20,
+                                y: overlap.midY)
+            let cursorEvent = NSEvent.enterExitEvent(with: .cursorUpdate, location: point, modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                context: nil, eventNumber: step, trackingNumber: 0, userData: nil)!
+            let moveEvent = NSEvent.mouseEvent(with: .mouseMoved, location: point, modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                context: nil, eventNumber: step, clickCount: 0, pressure: 0)!
+            NSCursor.arrow.set()
+            text.cursorUpdate(with: cursorEvent)
+            precondition(NSCursor.current == .arrow, "Covered text must never transiently set the I-beam in cursorUpdate")
+            text.mouseMoved(with: moveEvent)
+            precondition(NSCursor.current == .arrow, "Covered text must never transiently set the I-beam in mouseMoved")
+        }
+        let bodyRect = NSRect(x: 90, y: 200, width: 300, height: window.frame.height - 280)
+        let body = texts.first { $0.convert($0.visibleRect, to: nil).intersects(bodyRect) }!
+        let bodyOverlap = body.convert(body.visibleRect, to: nil).intersection(bodyRect)
+        let bodyEvent = NSEvent.enterExitEvent(with: .cursorUpdate,
+            location: NSPoint(x: bodyOverlap.midX, y: bodyOverlap.midY), modifierFlags: [],
+            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+            context: nil, eventNumber: 0, trackingNumber: 0, userData: nil)!
+        body.cursorUpdate(with: bodyEvent)
+        precondition(NSCursor.current == .iBeam, "Uncovered body must retain its native text cursor")
+        print("Header cursor passed: 120 synchronous cursor/move pairs over real scrolled chat text, return to body")
+    }
+
     static func main() async throws {
         let application = NSApplication.shared
         application.setActivationPolicy(.accessory)
-        if CommandLine.arguments.contains("--action-cursor-preview") || CommandLine.arguments.contains("--user-bubble-hover") || CommandLine.arguments.contains("--approval-menu-hover") {
+        if CommandLine.arguments.contains("--header-cursor-preview") || CommandLine.arguments.contains("--action-cursor-preview") || CommandLine.arguments.contains("--user-bubble-hover") || CommandLine.arguments.contains("--approval-menu-hover") {
             var completed = false
             Task { @MainActor in
                 do {
-                    if CommandLine.arguments.contains("--action-cursor-preview") { try await actionCursorPreview() }
+                    if CommandLine.arguments.contains("--header-cursor-preview") { try await headerCursorPreview() }
+                    else if CommandLine.arguments.contains("--action-cursor-preview") { try await actionCursorPreview() }
                     else if CommandLine.arguments.contains("--approval-menu-hover") { try await approvalMenuHoverRegression() }
                     else { try await userBubbleHoverRegression() }
                 } catch { preconditionFailure("User bubble hover failed: \(error)") }

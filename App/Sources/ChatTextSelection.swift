@@ -52,6 +52,16 @@ class ChatSelectableTextView: NSTextView {
 
     override func copy(_ sender: Any?) { _ = MessageClipboard.copy(selectedContent) }
 
+    override func cursorUpdate(with event: NSEvent) {
+        guard !ActionArrowCursor.applyIfCovered(event, in: window) else { return }
+        super.cursorUpdate(with: event)
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        guard !ActionArrowCursor.applyIfCovered(event, in: window) else { return }
+        super.mouseMoved(with: event)
+    }
+
     override func selectAll(_ sender: Any?) {
         if let selectionGroup { selectionGroup.selectAll(); showSelectionMenu() }
         else { super.selectAll(sender) }
