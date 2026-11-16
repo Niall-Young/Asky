@@ -24,6 +24,9 @@ private enum PluginSettingsRegression {
                         repository: String? = nil) throws -> InstalledPlugin {
         let tool: JSONValue = ["name": "run", "description": .string("\(name) actions"), "effect": "read", "confirmation": "never", "agentVisible": .bool(agentVisible), "inputSchema": ["type": "object", "properties": [:]]]
         var manifest: [String: JSONValue] = ["id": .string(id), "name": .string(name), "version": "1.0.0", "apiVersion": 1, "entry": "index.mjs", "tools": .array([tool])]
+        if id == "agent_sample" {
+            manifest["configuration"] = [["key": "endpoint", "label": "Endpoint", "type": "string"]]
+        }
         if functional { manifest["commands"] = [["name": "format", "title": "Format Text", "keyword": "fmt", "tool": "run", "mode": "action"]] }
         let record: JSONValue = ["manifest": .object(manifest), "repository": .string(repository ?? "https://github.com/example/" + id), "commit": "fixture", "enabled": .bool(id != "hybrid"), "configuration": [:]]
         return try JSONDecoder().decode(InstalledPlugin.self, from: record.canonicalData())
@@ -210,6 +213,25 @@ private enum PluginSettingsRegression {
                                      charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 53)!
         window.sendEvent(escape)
         try await until { repositoryField() == nil }
+        let configurationWindow = NSWindow(contentRect: NSRect(origin: .zero, size: SettingsWindow.initialSize),
+                                           styleMask: [.titled, .closable, .fullSizeContentView], backing: .buffered, defer: false)
+        configurationWindow.isReleasedWhenClosed = false
+        configurationWindow.contentView = NSHostingView(rootView: ConfigurationPreview(plugin: ai, manager: app.tools.plugins))
+        configurationWindow.makeKeyAndOrderFront(nil)
+        try await until { configurationWindow.contentView?.subviews.contains(where: { $0 is SettingsDialogOverlay }) == true }
+        let configurationOverlay = configurationWindow.contentView!.subviews.compactMap { $0 as? SettingsDialogOverlay }.first!
+        configurationWindow.contentView?.layoutSubtreeIfNeeded()
+        let configurationFrame = configurationOverlay.card.convert(configurationOverlay.card.bounds, to: configurationWindow.contentView)
+        try require(abs(configurationFrame.midX - configurationWindow.contentView!.bounds.midX) < 1 &&
+                    abs(configurationFrame.midY - configurationWindow.contentView!.bounds.midY) < 1,
+                    "plugin configuration must share full-window centering")
+        try capture("configuration-dialog", in: configurationWindow)
+        descendants(configurationOverlay).compactMap { $0 as? NSButton }.first {
+            $0.title == NSLocalizedString("取消", comment: "")
+        }?.performClick(nil)
+        try await until { configurationWindow.contentView?.subviews.contains(where: { $0 is SettingsDialogOverlay }) == false }
+        configurationWindow.close()
+        window.makeKeyAndOrderFront(nil)
         app.settingsTab = SettingsPage.aliases.rawValue
         try await until { descendants(window.contentView!).compactMap { $0 as? NSButton }.contains {
             $0.title == NSLocalizedString("添加别名", comment: "")
@@ -224,6 +246,7 @@ private enum PluginSettingsRegression {
         try require(abs(aliasFrame.midX - window.contentView!.bounds.midX) < 1 &&
                     abs(aliasFrame.midY - window.contentView!.bounds.midY) < 1,
                     "alias editor must share full-window centering")
+        try capture("alias-dialog")
         descendants(aliasOverlay).compactMap { $0 as? NSButton }.first {
             $0.title == NSLocalizedString("取消", comment: "")
         }?.performClick(nil)
@@ -262,5 +285,16 @@ private enum PluginSettingsRegression {
         try require(descendants(emptyWindow.contentView!).compactMap { $0 as? NSButton }.filter { $0.title == NSLocalizedString("添加", comment: "") }.count == 1,
                     "empty functional tab must retain the single add button")
 
+    }
+}
+
+private struct ConfigurationPreview: View {
+    let plugin: InstalledPlugin
+    let manager: PluginManager
+    @State private var presented = true
+    var body: some View {
+        Color.clear.settingsDialog(isPresented: presented) {
+            PluginConfigurationEditor(plugin: plugin, manager: manager, saved: {}, close: { presented = false })
+        }
     }
 }

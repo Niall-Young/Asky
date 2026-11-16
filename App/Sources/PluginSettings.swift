@@ -165,8 +165,12 @@ struct PluginSettings: View {
                 perform("安装插件", selectInstalledRepository: source) { try await manager.install(repository: source) }
             }
         }
-        .sheet(item: $editing) { plugin in
-            PluginConfigurationEditor(plugin: plugin, manager: manager) { Task { await reload() } }
+        .settingsDialog(isPresented: editing != nil) {
+            if let plugin = editing {
+                PluginConfigurationEditor(plugin: plugin, manager: manager,
+                                          saved: { Task { await reload() } }, close: { editing = nil })
+                    .id(plugin.id)
+            }
         }
     }
     private func catalogRow(_ source: String) -> some View {
@@ -258,9 +262,6 @@ struct PluginSettings: View {
                         .frame(maxWidth: .infinity)
                 }
                 .accessibilityIdentifier("plugin-repository")
-                Text(label("插件会在本机执行代码。请只安装你信任的仓库。"))
-                    .font(.system(size: 12)).foregroundStyle(ThemeColor.kTextSubtle)
-                    .fixedSize(horizontal: false, vertical: true)
                 if !repositoryError.isEmpty {
                     Text(repositoryError).font(.system(size: 12))
                         .foregroundStyle(ThemeColor.kTextNegative)
@@ -348,20 +349,29 @@ struct PluginSettings: View {
         }
     }
 }
-private struct PluginConfigurationEditor: View {
+struct PluginConfigurationEditor: View {
     let plugin: InstalledPlugin
     let manager: PluginManager
     let saved: () -> Void
-    @Environment(\.dismiss) private var dismiss
+    let close: () -> Void
     @State private var values: [String: JSONValue]
     @State private var error = ""
-    init(plugin: InstalledPlugin, manager: PluginManager, saved: @escaping () -> Void) {
-        self.plugin = plugin; self.manager = manager; self.saved = saved
+    init(plugin: InstalledPlugin, manager: PluginManager, saved: @escaping () -> Void, close: @escaping () -> Void) {
+        self.plugin = plugin; self.manager = manager; self.saved = saved; self.close = close
         _values = State(initialValue: plugin.configuration)
     }
     var body: some View {
-        VStack(alignment: .leading) {
-            Text(plugin.manifest.name).font(.headline)
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Text(plugin.manifest.name).font(.system(size: 16, weight: .semibold))
+                Spacer()
+                Button(action: close) {
+                    Image(mingCute: "xmark", size: 12)
+                        .frame(width: 28, height: 28).contentShape(.circle)
+                }
+                .buttonStyle(.plain).foregroundStyle(ThemeColor.kTextSubtle)
+                .accessibilityLabel(NSLocalizedString("关闭", comment: ""))
+            }
             SettingsForm {
                 ForEach(plugin.manifest.configuration ?? []) { field in
                     if field.type == "boolean" {
@@ -378,15 +388,19 @@ private struct PluginConfigurationEditor: View {
             if !error.isEmpty { Text(error).foregroundStyle(.red) }
             HStack {
                 Spacer()
-                SettingsButton(NSLocalizedString("取消", comment: "")) { dismiss() }.accessibilityLabel(NSLocalizedString("取消", comment: ""))
+                SettingsButton(NSLocalizedString("取消", comment: "")) { close() }.accessibilityLabel(NSLocalizedString("取消", comment: ""))
                 SettingsButton(NSLocalizedString("保存", comment: "")) {
                     Task {
-                        do { try await manager.configure(plugin.id, values: values); saved(); dismiss() }
+                        do { try await manager.configure(plugin.id, values: values); saved(); close() }
                         catch { self.error = error.localizedDescription }
                     }
                 }.accessibilityLabel(NSLocalizedString("保存", comment: "")).keyboardShortcut(.defaultAction)
             }
-        }.padding(24).frame(width: 520, height: 360)
+        }
+        .frame(height: 312)
+        .settingsDialogSurface(width: 520)
+        .onExitCommand(perform: close)
+        .accessibilityIdentifier("plugin-configuration-dialog")
     }
     private func text(_ key: String) -> Binding<String> {
         Binding(get: { values[key]?.stringValue ?? "" }, set: { values[key] = .string($0) })

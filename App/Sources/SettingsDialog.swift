@@ -15,7 +15,6 @@ extension View {
 
 private struct SettingsDialogSurface: ViewModifier {
     let width: CGFloat
-    @Environment(\.colorScheme) private var scheme
 
     func body(content: Content) -> some View {
         content
@@ -23,13 +22,7 @@ private struct SettingsDialogSurface: ViewModifier {
             .frame(width: width)
             .font(.system(size: 14))
             .foregroundStyle(ThemeColor.kText)
-            .background(SettingsPalette.surface(scheme, opaque: true),
-                        in: RoundedRectangle(cornerRadius: 16))
-            .overlay {
-                RoundedRectangle(cornerRadius: 16)
-                    .strokeBorder(SettingsPalette.separator(scheme), lineWidth: 0.5)
-            }
-            .shadow(color: .black.opacity(scheme == .dark ? 0.16 : 0.08), radius: 8, y: 3)
+            .nativeGlassBackground(in: RoundedRectangle(cornerRadius: 16))
     }
 }
 
