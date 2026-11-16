@@ -48,7 +48,6 @@ struct PluginSettings: View {
     @State private var editing: InstalledPlugin?
     @State private var icons: [String: NSImage] = [:]
     @Environment(\.colorScheme) private var scheme
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private var manager: PluginManager { app.tools.plugins }
     private func label(_ key: String) -> String { NSLocalizedString(key, comment: "") }
     private var isSearching: Bool { !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
@@ -157,10 +156,7 @@ struct PluginSettings: View {
             }
         }
         .task { await reload() }
-        .overlay {
-            if adding { addDialog }
-        }
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: adding)
+        .settingsDialog(isPresented: adding) { addDialog }
         .appDialog(label("安装可信插件"), isPresented: $confirmInstall,
                    message: label("此仓库的插件将能够在本机执行代码。安装表示你信任该来源") + "\n\n" + pendingRepository,
                    buttons: [label("安装"), label("取消")]) { response in
@@ -244,57 +240,43 @@ struct PluginSettings: View {
         }
     }
     private var addDialog: some View {
-        ZStack {
-            Color.clear.ignoresSafeArea()
-                .contentShape(Rectangle()).onTapGesture {}
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 16) {
-                HStack {
-                    Text(label("添加插件")).font(.system(size: 16))
-                    Spacer()
-                    Button { adding = false } label: {
-                        Image(mingCute: "xmark", size: 12)
-                            .frame(width: 28, height: 28).contentShape(.circle)
-                    }
-                    .buttonStyle(.plain).foregroundStyle(ThemeColor.kTextSubtle)
-                    .accessibilityLabel(label("关闭"))
+        VStack(alignment: .leading, spacing: 20) {
+            HStack {
+                Text(label("添加插件")).font(.system(size: 16, weight: .semibold))
+                Spacer()
+                Button { adding = false } label: {
+                    Image(mingCute: "xmark", size: 12)
+                        .frame(width: 28, height: 28).contentShape(.circle)
                 }
+                .buttonStyle(.plain).foregroundStyle(ThemeColor.kTextSubtle)
+                .accessibilityLabel(label("关闭"))
+            }
+            VStack(alignment: .leading, spacing: 8) {
                 VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 24) {
-                        Text(label("GitHub 仓库链接")).lineLimit(1).fixedSize()
-                        Spacer(minLength: 24)
-                        SettingsInputField(label("GitHub 仓库链接"), text: $repository)
-                            .frame(maxWidth: .infinity)
-                    }
-                    .padding(.horizontal, 16).padding(.vertical, 12)
-                    .background(SettingsPalette.card(scheme), in: RoundedRectangle(cornerRadius: 12))
-                    .accessibilityIdentifier("plugin-repository")
-                    Text(label("插件会在本机执行代码。请只安装你信任的仓库。"))
-                        .font(.system(size: 12)).foregroundStyle(ThemeColor.kTextSubtle)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if !repositoryError.isEmpty {
-                        Text(repositoryError).font(.system(size: 12))
-                            .foregroundStyle(ThemeColor.kTextNegative)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+                    Text(label("GitHub 仓库链接"))
+                    SettingsInputField(label("GitHub 仓库链接"), text: $repository)
+                        .frame(maxWidth: .infinity)
                 }
-                HStack {
-                    Spacer()
-                    SettingsButton(label("取消")) { adding = false }
-                    SettingsButton(label("安装")) { installFromDialog() }
-                        .disabled(busy || trimmedRepository.isEmpty)
+                .accessibilityIdentifier("plugin-repository")
+                Text(label("插件会在本机执行代码。请只安装你信任的仓库。"))
+                    .font(.system(size: 12)).foregroundStyle(ThemeColor.kTextSubtle)
+                    .fixedSize(horizontal: false, vertical: true)
+                if !repositoryError.isEmpty {
+                    Text(repositoryError).font(.system(size: 12))
+                        .foregroundStyle(ThemeColor.kTextNegative)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            .padding(20)
-            .frame(width: 520)
-            .font(.system(size: 14))
-            .foregroundStyle(ThemeColor.kText)
-            .nativeGlassBackground(in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-            .shadow(color: .black.opacity(scheme == .dark ? 0.4 : 0.12), radius: 24, y: 8)
-            .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.96)))
-            .onExitCommand { adding = false }
-            .accessibilityIdentifier("plugin-add-dialog")
+            HStack {
+                Spacer()
+                SettingsButton(label("取消")) { adding = false }
+                SettingsButton(label("安装")) { installFromDialog() }
+                    .disabled(busy || trimmedRepository.isEmpty)
+            }
         }
+        .settingsDialogSurface(width: 440)
+        .onExitCommand { adding = false }
+        .accessibilityIdentifier("plugin-add-dialog")
     }
     private func pluginSubtitle(_ plugin: InstalledPlugin) -> some View {
         HStack(spacing: 6) {

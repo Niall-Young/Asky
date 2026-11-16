@@ -37,23 +37,13 @@ struct AliasSettings: View {
                 Text(label("应用与快捷指令别名"))
             }
         }
-        // An in-window dialog: the system sheet draws its own opaque chrome and ignores our surfaces.
-        .overlay {
+        .settingsDialog(isPresented: editor != nil) {
             if let draft = editor {
-                ZStack {
-                    Color.clear.ignoresSafeArea()
-                        .contentShape(Rectangle()).onTapGesture {}
-                        .accessibilityHidden(true)
-                    AliasEditor(app: app, draft: draft) { editor = nil }
-                        .id(draft.id)
-                        .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.96)))
-                }
+                AliasEditor(app: app, draft: draft) { editor = nil }
+                    .id(draft.id)
             }
         }
-        .animation(.easeOut(duration: 0.15), value: editor?.id)
     }
-
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private func aliasMenu(_ item: LauncherAlias) -> some View {
         SettingsMoreMenu {
@@ -119,7 +109,7 @@ private struct AliasEditor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
-                Text(label(draft.isNew ? "添加别名" : "编辑别名")).font(.system(size: 16))
+                Text(label(draft.isNew ? "添加别名" : "编辑别名")).font(.system(size: 16, weight: .semibold))
                 Spacer()
                 Button(action: close) {
                     Image(mingCute: "xmark", size: 12)
@@ -157,13 +147,8 @@ private struct AliasEditor: View {
                 SettingsButton(label("保存")) { save() }.disabled(!canSave)
             }
         }
-        .padding(20)
-        .frame(width: 480)
-        .font(.system(size: 14))
-        .foregroundStyle(ThemeColor.kText)
         .labeledContentStyle(AliasRowStyle())
-        .nativeGlassBackground(in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .shadow(color: .black.opacity(scheme == .dark ? 0.4 : 0.12), radius: 24, y: 8)
+        .settingsDialogSurface(width: 480)
         .onExitCommand(perform: close)
         .task { await refreshShortcuts() }
     }

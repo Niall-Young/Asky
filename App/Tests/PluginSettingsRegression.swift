@@ -145,7 +145,46 @@ private enum PluginSettingsRegression {
                 == NSLocalizedString("GitHub 仓库链接", comment: "")
         } }
         try await until { repositoryField() != nil }
-        // The in-window dialog is glass; cacheDisplay does not composite it, so capture the real window.
+        guard let overlay = window.contentView?.subviews.compactMap({ $0 as? SettingsDialogOverlay }).first else {
+            throw NSError(domain: "PluginSettings", code: 4, userInfo: [NSLocalizedDescriptionKey: "Dialog must be mounted above the entire settings window"])
+        }
+        func checkDialogCenter() throws {
+            window.contentView?.layoutSubtreeIfNeeded()
+            let bounds = window.contentView!.bounds
+            let card = overlay.card.convert(overlay.card.bounds, to: window.contentView)
+            try require(abs(card.midX - bounds.midX) < 1 && abs(card.midY - bounds.midY) < 1,
+                        "dialog must center in the full window, including the sidebar")
+            try require(abs(card.width - 440) < 1, "plugin dialog must keep its compact width")
+            let sidebarPoint = NSPoint(x: 100, y: bounds.midY)
+            try require(window.contentView?.hitTest(sidebarPoint) === overlay,
+                        "dialog must intercept sidebar clicks")
+        }
+        try checkDialogCenter()
+        try await until { repositoryField()?.currentEditor() != nil }
+        repositoryField()?.currentEditor()?.insertText("https://github.com/example/plugin")
+        try await until { descendants(overlay).compactMap { $0 as? NSButton }.contains {
+            $0.title == NSLocalizedString("安装", comment: "") && $0.isEnabled
+        } }
+        for _ in 0..<overlay.keyControls.count + 1 {
+            let tab = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                                      windowNumber: window.windowNumber, context: nil, characters: "\t",
+                                      charactersIgnoringModifiers: "\t", isARepeat: false, keyCode: 48)!
+            window.sendEvent(tab)
+            let focused = (window.firstResponder as? NSTextView)?.delegate as? NSView
+                ?? window.firstResponder as? NSView
+            try require(focused?.isDescendant(of: overlay) == true, "Tab must stay inside the dialog")
+        }
+        window.makeFirstResponder(repositoryField())
+        repositoryField()?.currentEditor()?.selectAll(nil)
+        repositoryField()?.currentEditor()?.insertText("")
+        window.setContentSize(NSSize(width: 1080, height: 760))
+        try await Task.sleep(for: .milliseconds(100))
+        try checkDialogCenter()
+        window.setContentSize(SettingsWindow.minimumSize)
+        try await Task.sleep(for: .milliseconds(100))
+        try checkDialogCenter()
+        window.setContentSize(SettingsWindow.initialSize)
+        // Capture the actual composited window in both appearances.
         let language = Bundle.main.preferredLocalizations.first ?? "unknown"
         for appearance in ["light", "dark"] {
             app.preferences.appearance = appearance
@@ -161,6 +200,34 @@ private enum PluginSettingsRegression {
             cancel.performClick(nil)
         }
         try await until { repositoryField() == nil }
+        try require(window.contentView?.subviews.contains(where: { $0 is SettingsDialogOverlay }) == false,
+                    "cancel must remove the full-window blocker")
+        try require(search.currentEditor() != nil, "cancel must restore the previous search focus")
+        add.performClick(nil)
+        try await until { repositoryField()?.currentEditor() != nil }
+        let escape = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                                     windowNumber: window.windowNumber, context: nil, characters: "\u{1b}",
+                                     charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 53)!
+        window.sendEvent(escape)
+        try await until { repositoryField() == nil }
+        app.settingsTab = SettingsPage.aliases.rawValue
+        try await until { descendants(window.contentView!).compactMap { $0 as? NSButton }.contains {
+            $0.title == NSLocalizedString("添加别名", comment: "")
+        } }
+        descendants(window.contentView!).compactMap { $0 as? NSButton }.first {
+            $0.title == NSLocalizedString("添加别名", comment: "")
+        }?.performClick(nil)
+        try await until { window.contentView?.subviews.contains(where: { $0 is SettingsDialogOverlay }) == true }
+        let aliasOverlay = window.contentView!.subviews.compactMap { $0 as? SettingsDialogOverlay }.first!
+        window.contentView?.layoutSubtreeIfNeeded()
+        let aliasFrame = aliasOverlay.card.convert(aliasOverlay.card.bounds, to: window.contentView)
+        try require(abs(aliasFrame.midX - window.contentView!.bounds.midX) < 1 &&
+                    abs(aliasFrame.midY - window.contentView!.bounds.midY) < 1,
+                    "alias editor must share full-window centering")
+        descendants(aliasOverlay).compactMap { $0 as? NSButton }.first {
+            $0.title == NSLocalizedString("取消", comment: "")
+        }?.performClick(nil)
+        try await until { window.contentView?.subviews.contains(where: { $0 is SettingsDialogOverlay }) == false }
         window.close()
         let official = try fixture("official_orca", name: "Orca", functional: false, agentVisible: true,
                                    repository: PluginManager.officialRepositories[0])
