@@ -37,6 +37,8 @@ Asky 是使用 SwiftUI 与 AppKit 构建的 macOS 原生效率入口。本地搜
 
 联网检索直接调用 Parallel / Exa / Keenable 的免 Key 远程工具，返回较长摘录并支持按 URL 读取公开网页正文；不启动浏览器、不安装组件，也不使用作者的付费账号。Parallel 主用，两个备用来源轮换；故障和限流暂时退避，相同请求合并并复用 10 分钟内存缓存（最多 32 项、序列化内容与键总计 2 MiB）。免费接口有服务端限流，失败保留具体原因，不转付费。详见[网页搜索与页面读取](docs/native-tools-and-mcp.md#agent-公开网页搜索)。
 
+AI 会按图片对理解的帮助主动选择配图，例如景点、人物、动植物介绍和外观比较；从公开网页提取真实图片候选，并在回复中附来源。纯文字任务不为装饰加图，找不到匹配图片时保留文字回答。配图效果取决于模型是否遵循指令、来源是否返回图片及链接是否可加载。
+
 ### 安装与配置
 
 需要 **macOS 14+、Apple Silicon**。
@@ -117,6 +119,8 @@ Asky is a native macOS launcher built with SwiftUI and AppKit. Local search and 
 - **Native experience and privacy**: Supports system appearance and Reduce Motion, with Liquid Glass on macOS 26+. No user data is uploaded to author servers; API keys stay in Keychain. See the [Privacy Policy](PRIVACY.md) for data handling when using models or external tools.
 
 Web search calls the anonymous Parallel / Exa / Keenable remote tools, with longer excerpts and public page reading by URL. It needs no browser, extra installation, or developer-paid account. Parallel is primary, with rotating backups, failure cooldowns, duplicate-request coalescing, and a 10-minute memory cache (up to 32 entries and 2 MiB of serialized content and keys). Free endpoints have provider rate limits; failures retain diagnostics without switching to paid access. See [web search and page reading](docs/native-tools-and-mcp.md#agent-公开网页搜索).
+
+The AI is instructed to add relevant photos when they help explain places, people, animals, plants, or visual comparisons. It extracts real image candidates from public pages and links their sources. Text-only tasks need no decorative images; answers remain useful when no matching image is found. Results depend on model instruction following, provider image coverage, and image URL availability.
 
 ### Installation and Setup
 
