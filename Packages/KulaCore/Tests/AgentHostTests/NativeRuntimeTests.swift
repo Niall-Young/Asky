@@ -29,6 +29,31 @@ private func host(root: URL, script: ModelScript, tools: [ToolDefinition] = [], 
 }
 
 @Suite(.timeLimit(.minutes(1))) struct NativeRuntimeTests {
+    @Test(arguments: [true, false]) func currentImageCapabilityFollowsHistoryWithoutPersisting(hasPageReader: Bool) async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let name = hasPageReader ? "web_read_page" : "lookup"
+        let script = ModelScript([NativeCompletion(calls: [call(name)]), NativeCompletion(text: "回复")])
+        let definition = ToolDefinition(name: name, summary: "Read", source: .web, effect: .read, confirmation: .never, externallyExposable: false)
+        let agent = host(root: root, script: script, tools: [definition]) { ExecutionResult(requestID: $0.requestID, status: .completed) }
+        _ = await collect(agent, AgentRequest(sessionID: "s", text: "介绍一位演员",
+            context: [ContextSnippet(sourceID: "history", text: "此前助手错误地说不能展示图片。")]))
+        let requests = await script.requests
+        #expect(requests.count == 2)
+        for request in requests {
+            let messages = try #require(request["messages"]?.arrayValue)
+            #expect(messages.filter { $0["role"] == "system" }.count == (hasPageReader ? 2 : 1))
+            if hasPageReader {
+                #expect(messages.last?["role"] == "system")
+                #expect(messages.last?["content"]?.stringValue?.contains("includeImages:true") == true)
+            }
+        }
+        let stored = try await AgentSessionStorage(root: root).load(sessionID: "s", legacyPath: nil)
+        #expect(!stored.contains { $0["role"] == "system" })
+        #expect(stored.last?["content"] == "回复")
+        await agent.shutdown()
+    }
+
     @Test func streamsReplyAndPublishesOnlyTheFinalMessage() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

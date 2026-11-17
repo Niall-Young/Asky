@@ -37,7 +37,7 @@ Asky 是使用 SwiftUI 与 AppKit 构建的 macOS 原生效率入口。本地搜
 
 联网检索直接调用 Parallel / Exa / Keenable 的免 Key 远程工具，返回较长摘录并支持按 URL 读取公开网页正文；不启动浏览器、不安装组件，也不使用作者的付费账号。Parallel 主用，两个备用来源轮换；故障和限流暂时退避，相同请求合并并复用 10 分钟内存缓存（最多 32 项、序列化内容与键总计 2 MiB）。免费接口有服务端限流，失败保留具体原因，不转付费。详见[网页搜索与页面读取](docs/native-tools-and-mcp.md#agent-公开网页搜索)。
 
-AI 会按图片对理解的帮助主动选择配图，例如景点、人物、动植物介绍和外观比较；从公开网页提取真实图片候选，并在回复中附来源。纯文字任务不为装饰加图，找不到匹配图片时保留文字回答。配图效果取决于模型是否遵循指令、来源是否返回图片及链接是否可加载。
+AI 会按图片对理解的帮助主动选择配图，例如景点、人物、动植物介绍和外观比较；从公开网页提取真实图片候选，并在回复中附来源。纯文字任务不为装饰加图，找不到匹配图片时保留文字回答。每轮会根据实际可用工具重申当前图片能力，避免沿用历史回复中的“不能贴图”。配图效果仍取决于模型是否遵循指令、来源是否返回图片及链接是否可加载。
 
 ### 安装与配置
 
@@ -86,6 +86,8 @@ open build/DerivedData/Build/Products/Debug/Asky.app
 (cd Packages/KulaCore && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test)
 ```
 
+真实模型的主动配图检查需显式启用，方法见[主动配图回归](docs/agent-runtime.md#主动配图的真实模型回归)。
+
 UI 回归、Debug 预览、`scripts/package-release.py` 签名与打包流程见[开发与发布指南](docs/development.md)。macOS 14/15 实机验收尚待完成，具体测试范围以[验证记录](docs/validation/)为准。
 
 | 目录 | 职责 |
@@ -120,7 +122,7 @@ Asky is a native macOS launcher built with SwiftUI and AppKit. Local search and 
 
 Web search calls the anonymous Parallel / Exa / Keenable remote tools, with longer excerpts and public page reading by URL. It needs no browser, extra installation, or developer-paid account. Parallel is primary, with rotating backups, failure cooldowns, duplicate-request coalescing, and a 10-minute memory cache (up to 32 entries and 2 MiB of serialized content and keys). Free endpoints have provider rate limits; failures retain diagnostics without switching to paid access. See [web search and page reading](docs/native-tools-and-mcp.md#agent-公开网页搜索).
 
-The AI is instructed to add relevant photos when they help explain places, people, animals, plants, or visual comparisons. It extracts real image candidates from public pages and links their sources. Text-only tasks need no decorative images; answers remain useful when no matching image is found. Results depend on model instruction following, provider image coverage, and image URL availability.
+The AI is instructed to add relevant photos when they help explain places, people, animals, plants, or visual comparisons. It extracts real image candidates from public pages and links their sources. Text-only tasks need no decorative images; answers remain useful when no matching image is found. Each turn restates current image capabilities based on the available tools so obsolete refusals in history do not define them. Results still depend on model instruction following, provider image coverage, and image URL availability.
 
 ### Installation and Setup
 
@@ -168,6 +170,8 @@ Core checks:
 (cd MCPBridge && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift build)
 (cd Packages/KulaCore && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test)
 ```
+
+Real-model image reply checks are opt-in; see [image reply regression](docs/agent-runtime.md#主动配图的真实模型回归).
 
 See the [Development and Release Guide](docs/development.md) for UI regressions, Debug previews, and signing and packaging with `scripts/package-release.py`. Testing on macOS 14/15 hardware is still pending; consult the [validation records](docs/validation/) for test coverage.
 

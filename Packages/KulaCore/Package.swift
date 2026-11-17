@@ -44,7 +44,7 @@ let package = Package(
         .testTarget(name: "ResourcesTests", dependencies: ["Resources"]),
         .testTarget(name: "LocalStoreTests", dependencies: ["LocalStore"]),
         .testTarget(name: "ToolServiceTests", dependencies: ["ToolService", "LocalStore"]),
-        .testTarget(name: "AgentHostTests", dependencies: ["AgentHost"]),
+        .testTarget(name: "AgentHostTests", dependencies: ["AgentHost", "Adapters", "LocalStore"]),
         .testTarget(name: "MemoryTests", dependencies: ["Memory", "LocalStore"]),
         .testTarget(name: "SchedulerTests", dependencies: ["Scheduler", "LocalStore"]),
         .testTarget(name: "SearchTests", dependencies: ["Search"]),

@@ -133,6 +133,8 @@ private actor NativeAgentEngine {
             state(id, .running, file: file)
             let system: JSONValue = ["role": "system", "content": .string(NativeAgentPrompt.system(guidance: guidance))]
             let available = definitions(catalogue)
+            let imageCapabilities = NativeAgentPrompt.imageCapabilities(
+                hasPageReader: catalogue.contains { $0.name == "web_read_page" })
             var count = 0
             while true {
                 try Task.checkCancellation()
@@ -149,7 +151,11 @@ private actor NativeAgentEngine {
                     file = try await storage.save(sessionID: request.sessionID, messages: messages)
                     state(id, .running, file: file)
                 }
-                let response = try await client.complete(config: config, messages: [system] + (try await storage.materialize(messages)), tools: available) { [events] text in
+                var completionMessages = [system] + (try await storage.materialize(messages))
+                if let imageCapabilities {
+                    completionMessages.append(["role": "system", "content": .string(imageCapabilities)])
+                }
+                let response = try await client.complete(config: config, messages: completionMessages, tools: available) { [events] text in
                     var frame = JSONValue.object(["type": "textDelta", "taskID": .string(id), "text": .string(text)]).canonicalData()
                     frame.append(10); events.yield(frame)
                 }

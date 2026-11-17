@@ -36,6 +36,8 @@ Asky 保留 AgentHost 的任务事件和 ToolService 的原生权限边界。Nat
 
 `NativeAgentPrompt` 也定义主动配图判断：视觉识别、景点/人物/生物介绍及外观比较通常配图，日期、参数、代码、翻译与纯文字任务无需装饰性图片。模型先找准确页面，再调用 `web_read_page` 并设置 `includeImages:true`；核对候选的对象、型号和图注，使用独立 Markdown 图片段落与来源链接，通常 1–3 张。候选元数据不等于视觉验证；不得猜图链、把网页当图片或用生成图冒充真实照片。缺图时保留文字回答，遵循用户不联网或不配图的要求。
 
+每次实际对话请求在历史和工具结果之后追加简短的 system 能力提示，仅在本轮工具目录包含 `web_read_page` 时启用；明确可显示 Markdown 图片、适合配图时先取候选、尊重纯文字/不联网要求，且找图失败不等于客户端不能显示图片。已有页面无图时要求按对象名加“照片”或 portrait/photo 搜索替代来源，再检查 1–2 个新页面；不只重读旧链接后过早放弃。该提示不写入会话快照，也不用于无工具的上下文压缩请求，避免旧拒绝说法在长历史中盖过当前能力。
+
 这些是模型指令，运行时仍使用 `tool_choice: auto`，没有基于关键词强制搜索；不保证所有模型都遵循。联网开关与 ToolService 权限保持不变。
 
 ## 会话、取消与恢复
@@ -89,3 +91,16 @@ Asky 保留 AgentHost 的任务事件和 ToolService 的原生权限边界。Nat
 `asky-form` 字段可提供可选 `defaultValue`：文本、单选、日期、时刻、时长使用字符串，多选使用字符串数组。单选必须来自 `options`，仅 `allowCustom:true` 可预填自定义文本；多选不能重复或使用候选之外的值。日期为 `yyyy-MM-dd`，时刻/时长按 `components` 顺序以冒号分隔两位数字。默认值沿用答案的长度、日期、范围校验；类型或值无效时忽略默认值，保留可用字段。
 
 完整且未提交的表单仅为缺少答案的字段提供默认值，显式空字符串或空数组保留为空。提交以存储的表单为准合并默认值并再次校验，保存实际提交快照；预填不会自动提交或批准系统操作。未提交的本地编辑重开后恢复原始默认值；已提交快照原样恢复，不补填遗漏字段。旧表单没有 `defaultValue` 时行为不变。
+
+## 主动配图的真实模型回归
+
+`NativeImageLiveTests` 默认不联网。显式设置 `ASKY_LIVE_IMAGE_MODEL_CONFIG` 为仅包含 `ModelConfiguration` 的 JSON 文件路径后，测试使用其中的服务地址、模型名与 Keychain 引用，经原生 AgentHost/ToolService 运行；密钥只在内存中读取，不写入报告。测试使用临时会话目录和内存数据库，不导入用户历史，固定加入一段“不能贴图”的旧回复来复现能力误判。
+
+```sh
+cd Packages/KulaCore
+ASKY_LIVE_IMAGE_MODEL_CONFIG=/path/to/model-config.json \
+ASKY_LIVE_IMAGE_REPORT=/tmp/asky-image-live.json \
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --filter NativeImageLiveTests
+```
+
+默认问题为“钟丽缇是什么明星啊”，检查真实图片读取调用、最终 Markdown 图片及图片下载解码。可用 `ASKY_LIVE_IMAGE_QUESTION` 改问题；纯文字负例同时设置 `ASKY_LIVE_IMAGE_EXPECT_TEXT_ONLY=1`。报告包含问题、回答、工具名、图片数量和错误，不含密钥。钥匙串无法非交互读取时测试失败，不自动弹出授权或修改模型配置。此检查需要服务额度与公网可用性，单次通过不代表所有模型或所有问题都能稳定配图。
