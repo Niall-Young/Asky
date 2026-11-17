@@ -21,14 +21,98 @@ private func collect(_ host: AgentHost, _ request: AgentRequest) async -> [Agent
     for await event in await host.submit(request) { events.append(event) }
     return events
 }
-private func host(root: URL, script: ModelScript, tools: [ToolDefinition] = [], handler: @escaping AgentHost.ToolHandler = { .failure($0.requestID, .adapterFailure, "unexpected tool") }) -> AgentHost {
+private func host(root: URL, script: ModelScript, tools: [ToolDefinition] = [],
+                  handler: @escaping AgentHost.ToolHandler = { .failure($0.requestID, .adapterFailure, "unexpected tool") },
+                  imageValidator: @escaping @Sendable ([URL]) async throws -> Set<URL> = { Set($0) }) -> AgentHost {
     let storage = AgentSessionStorage(root: root)
-    return AgentHost(launcher: { NativeRuntime(storage: storage, client: NativeModelClient(transport: { request, delta in try await script.respond(request, delta: delta) })) },
+    return AgentHost(launcher: { NativeRuntime(storage: storage, client: NativeModelClient(transport: { request, delta in try await script.respond(request, delta: delta) }), imageValidator: imageValidator) },
         configProvider: { RuntimeLaunchConfig(baseURL: "https://example.test/v1", model: "mock", apiKey: "secret-not-persisted") },
         toolsProvider: { tools }, toolHandler: handler)
 }
 
 @Suite(.timeLimit(.minutes(1))) struct NativeRuntimeTests {
+    @Test func inventedImageDraftIsCorrectedOnceBeforePublication() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let bad = "![捏造](https://example.com/fake.jpg)"
+        let good = "珠峰正文\n\n![照片](https://example.com/real.jpg)"
+        let script = ModelScript([NativeCompletion(text: bad), NativeCompletion(calls: [call("web_read_page")]), NativeCompletion(text: good)])
+        let definition = ToolDefinition(name: "web_read_page", summary: "read", source: .web, effect: .read, confirmation: .never, externallyExposable: false)
+        let agent = host(root: root, script: script, tools: [definition]) { request in
+            ExecutionResult(requestID: request.requestID, status: .completed, output: ["images": [["url": "https://example.com/real.jpg"]]])
+        }
+        let events = await collect(agent, AgentRequest(sessionID: "s", text: "介绍珠峰"))
+        #expect(events.compactMap { if case .message(_, let text) = $0 { text } else { nil } } == [good])
+        #expect(!events.contains { if case .textDelta(_, let text) = $0 { text.contains("fake.jpg") } else { false } })
+        let saved = try await AgentSessionStorage(root: root).load(sessionID: "s", legacyPath: nil)
+        #expect(!saved.contains { $0["content"] == .string(bad) })
+        #expect(await script.requests.count == 3)
+        await agent.shutdown()
+    }
+
+    @Test func repeatedInventedImagesAreRemovedWithoutFurtherModelRounds() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let reply = "保留**正文**。\n\n![假的](https://example.com/fake.jpg)"
+        let script = ModelScript([NativeCompletion(text: reply), NativeCompletion(text: reply)])
+        let definition = ToolDefinition(name: "web_read_page", summary: "read", source: .web, effect: .read, confirmation: .never, externallyExposable: false)
+        let agent = host(root: root, script: script, tools: [definition], imageValidator: { urls in
+            Issue.record("Invented URLs must never be downloaded"); return Set(urls)
+        })
+        let events = await collect(agent, AgentRequest(sessionID: "s", text: "介绍"))
+        #expect(events.contains { if case .message(_, "保留**正文**。\n\n") = $0 { true } else { false } })
+        #expect(await script.requests.count == 2)
+        await agent.shutdown()
+    }
+
+    @Test func brokenSourcedImagesAreRemovedAndValidSiblingsSurvive() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let reply = "正文\n![好图](https://example.com/good.jpg)\n![坏图](https://example.com/broken.jpg)"
+        let script = ModelScript([NativeCompletion(text: reply)])
+        let agent = host(root: root, script: script, imageValidator: { urls in
+            #expect(urls.count == 2)
+            return Set(urls.filter { $0.lastPathComponent == "good.jpg" })
+        })
+        let events = await collect(agent, AgentRequest(sessionID: "s", text: "查看 https://example.com/good.jpg 和 https://example.com/broken.jpg"))
+        #expect(events.contains { if case .message(_, "正文\n![好图](https://example.com/good.jpg)\n") = $0 { true } else { false } })
+        await agent.shutdown()
+    }
+
+    @Test func terminalImageBatchAllowsOneURLCorrectionWithoutReopeningWebTools() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let good = "![山峰](https://example.com/original.jpg)"
+        let script = ModelScript([NativeCompletion(calls: [call("web_read_page", ["imagesOnly": true])]),
+            NativeCompletion(text: "![山峰](https://example.com/resized.jpg)"), NativeCompletion(text: good)])
+        let definition = ToolDefinition(name: "web_read_page", summary: "read", source: .web, effect: .read, confirmation: .never, externallyExposable: false)
+        let agent = host(root: root, script: script, tools: [definition]) { request in
+            ExecutionResult(requestID: request.requestID, status: .completed, output: ["images": [["url": "https://example.com/original.jpg"]]])
+        }
+        let events = await collect(agent, AgentRequest(sessionID: "s", text: "介绍珠峰"))
+        #expect(events.filter { if case .toolCall = $0 { true } else { false } }.count == 1)
+        #expect(events.contains { if case .message(_, good) = $0 { true } else { false } })
+        #expect(await script.requests.last?["tools"]?.arrayValue?.count == 1)
+        await agent.shutdown()
+    }
+
+    @Test func cancellingImageValidationDoesNotPublishTheDraft() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let (started, signal) = AsyncStream<Void>.makeStream()
+        let script = ModelScript([NativeCompletion(text: "![图](https://example.com/photo.jpg)")])
+        let agent = host(root: root, script: script, imageValidator: { urls in
+            signal.yield(())
+            try await Task.sleep(for: .seconds(30))
+            return Set(urls)
+        })
+        let task = Task { await collect(agent, AgentRequest(sessionID: "s", taskID: "t", text: "查看 https://example.com/photo.jpg")) }
+        for await _ in started { break }
+        await agent.cancel(taskID: "t")
+        #expect(!(await task.value).contains { if case .message = $0 { true } else { false } })
+        await agent.shutdown()
+    }
+
     @Test func imageOnlyBatchEndsWebResearchEvenWhenOptionalImagesAreMissing() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

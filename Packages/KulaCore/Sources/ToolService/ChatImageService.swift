@@ -22,6 +22,8 @@ public actor ChatImageService {
         session = URLSession(configuration: configuration)
     }
 
+    init(session: URLSession) { self.session = session }
+
     public static func supports(_ url: URL) -> Bool {
         ["https", "http"].contains(url.scheme?.lowercased() ?? "") && url.host != nil
             && url.user == nil && url.password == nil
@@ -44,6 +46,38 @@ public actor ChatImageService {
             cacheBytes += thumbnail.count
         }
         return thumbnail
+    }
+
+    /// Verify every selected illustration before publication and warm the UI's thumbnail cache.
+    /// One five-second budget covers the whole batch, with at most three concurrent reads.
+    public func availableImages(_ urls: [URL]) async throws -> Set<URL> {
+        let candidates = Array(Set(urls)).sorted { $0.absoluteString < $1.absoluteString }
+        guard !candidates.isEmpty else { return [] }
+        let available = await withTaskGroup(of: (URL?, Bool).self) { group in
+            group.addTask {
+                try? await Task.sleep(for: .seconds(5))
+                return (nil, false)
+            }
+            func enqueue(_ url: URL) {
+                group.addTask {
+                    do { return (url, !(try await self.imageData(from: url)).isEmpty) }
+                    catch { return (url, false) }
+                }
+            }
+            for url in candidates.prefix(3) { enqueue(url) }
+            var next = min(3, candidates.count), completed = 0
+            var accepted = Set<URL>()
+            for await (url, success) in group {
+                guard let url else { group.cancelAll(); break }
+                completed += 1
+                if success { accepted.insert(url) }
+                if completed == candidates.count { group.cancelAll(); break }
+                if next < candidates.count { enqueue(candidates[next]); next += 1 }
+            }
+            return accepted
+        }
+        try Task.checkCancellation()
+        return available
     }
 
     /// The explicit download action saves the original image, not the display thumbnail.

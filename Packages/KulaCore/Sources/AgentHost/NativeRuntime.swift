@@ -10,11 +10,14 @@ public final class NativeRuntime: RuntimeProcess, Sendable {
     private let commands: AsyncStream<Data>.Continuation
     private let engine: NativeAgentEngine
 
-    public init(storage: AgentSessionStorage, client: NativeModelClient = .init()) {
+    public init(storage: AgentSessionStorage, client: NativeModelClient = .init(),
+                imageValidator: @escaping @Sendable ([URL]) async throws -> Set<URL> = {
+                    try await ChatImageService.shared.availableImages($0)
+                }) {
         let (output, events) = AsyncStream<Data>.makeStream()
         let (input, commands) = AsyncStream<Data>.makeStream()
         self.output = output; self.commands = commands
-        let engine = NativeAgentEngine(storage: storage, client: client, events: events)
+        let engine = NativeAgentEngine(storage: storage, client: client, events: events, imageValidator: imageValidator)
         self.engine = engine
         Task {
             for await data in input { await engine.receive(data) }
@@ -31,6 +34,7 @@ private actor NativeAgentEngine {
     let storage: AgentSessionStorage
     let client: NativeModelClient
     let events: AsyncStream<Data>.Continuation
+    let imageValidator: @Sendable ([URL]) async throws -> Set<URL>
     var config: RuntimeLaunchConfig?
     var tools: [ToolDefinition] = []
     var guidance: [String] = []
@@ -41,8 +45,10 @@ private actor NativeAgentEngine {
     var stopped = false
     var stopping = false
 
-    init(storage: AgentSessionStorage, client: NativeModelClient, events: AsyncStream<Data>.Continuation) {
+    init(storage: AgentSessionStorage, client: NativeModelClient, events: AsyncStream<Data>.Continuation,
+         imageValidator: @escaping @Sendable ([URL]) async throws -> Set<URL>) {
         self.storage = storage; self.client = client; self.events = events
+        self.imageValidator = imageValidator
     }
     func send(_ frame: JSONValue) {
         var data = frame.canonicalData(); data.append(10); events.yield(data)
@@ -154,6 +160,7 @@ private actor NativeAgentEngine {
             var count = 0
             var webCoolingDown = false
             var illustrationsFinished = false
+            var imageCorrection: String?
             while true {
                 try Task.checkCancellation()
                 // Conservative byte budget works across CJK and tool payloads without shipping a tokenizer.
@@ -179,20 +186,49 @@ private actor NativeAgentEngine {
                 if illustrationsFinished {
                     completionMessages.append(["role": "system", "content": "本轮已完成最后一批 imagesOnly 配图查询，网页工具现已收起。立即基于已经取得的文字证据与相关图片完成回答；有几张合适图片就用几张，不为凑齐图片再搜索或编造图片。普通区别比较用一句结论、一个紧凑对比表和配图即可，不再逐项重复表格，也不额外增加行程推荐；用户明确要求详细内容时遵从。"])
                 }
+                if let imageCorrection {
+                    completionMessages.append(["role": "system", "content": .string(imageCorrection)])
+                }
                 let activeTools = webCoolingDown || illustrationsFinished ? available.filter {
                     !["web_search", "web_read_page"].contains($0["function"]?["name"]?.stringValue ?? "")
                 } : available
-                let response = try await client.complete(config: config, messages: completionMessages, tools: activeTools) { [events] text in
-                    var frame = JSONValue.object(["type": "textDelta", "taskID": .string(id), "text": .string(text)]).canonicalData()
-                    frame.append(10); events.yield(frame)
-                }
+                // The UI publishes at completion already. Keep unverified drafts out of both
+                // the final reply and the tool-narration timeline while checking illustrations.
+                let response = try await client.complete(config: config, messages: completionMessages,
+                    tools: activeTools, delta: { _ in })
                 try Task.checkCancellation()
-                messages.append(response.message)
-                file = try await storage.save(sessionID: request.sessionID, messages: messages)
                 if response.calls.isEmpty {
-                    if !response.text.isEmpty { send(["type": "message", "taskID": .string(id), "text": .string(response.text)]) }
+                    let images = Set(NativeReplyImages.images(in: response.text).map(\.url))
+                    let allowed = NativeReplyImages.allowedURLs(messages: messages, userText: request.text)
+                    let invented = images.subtracting(allowed)
+                    if !invented.isEmpty, imageCorrection == nil,
+                       catalogue.contains(where: { $0.name == "web_read_page" }), count < limit {
+                        // Reject this draft before saving or publishing it. A single correction
+                        // may obtain real candidates; it cannot restart a terminal image batch.
+                        imageCorrection = "上一份草稿使用了没有工具来源的图片链接，已被拦截且没有展示。只能原样使用工具 images 中的 url 或用户提供的直链，不得改写域名、尺寸、文件名或拼接 Wikimedia 路径。重新回答原问题，勿提及内部校验；没有真实候选就只回答文字。"
+                        if allowed.isEmpty, !webCoolingDown, !illustrationsFinished {
+                            imageCorrection! += "先用 web_read_page 从准确页面获取真实候选，需要时使用 web_search。"
+                        } else {
+                            imageCorrection! += "本轮不再联网，只从以下已有候选中选择相关图片（必须逐字复制 URL）：\n" + allowed.map(\.absoluteString).sorted().joined(separator: "\n")
+                        }
+                        continue
+                    }
+                    let sourced = images.intersection(allowed)
+                    let loaded = sourced.isEmpty ? Set<URL>() : try await imageValidator(Array(sourced))
+                    try Task.checkCancellation()
+                    let text = NativeReplyImages.removing(images.subtracting(loaded), from: response.text)
+                    messages.append(NativeCompletion(text: text).message)
+                    file = try await storage.save(sessionID: request.sessionID, messages: messages)
+                    if !text.isEmpty {
+                        send(["type": "textDelta", "taskID": .string(id), "text": .string(text)])
+                        send(["type": "message", "taskID": .string(id), "text": .string(text)])
+                    }
                     state(id, .completed, file: file); return
                 }
+                messages.append(response.message)
+                file = try await storage.save(sessionID: request.sessionID, messages: messages)
+                let narration = NativeReplyImages.removing(Set(NativeReplyImages.images(in: response.text).map(\.url)), from: response.text)
+                if !narration.isEmpty { send(["type": "textDelta", "taskID": .string(id), "text": .string(narration)]) }
                 // imagesOnly explicitly means factual research is complete. One terminal image
                 // batch prevents optional illustrations from restarting the research loop.
                 let finalImageBatch = response.calls.allSatisfy { call in

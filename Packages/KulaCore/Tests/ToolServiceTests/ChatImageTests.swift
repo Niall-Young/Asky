@@ -4,6 +4,32 @@ import Testing
 @testable import ToolService
 
 struct ChatImageTests {
+    @Test func publicationChecksDecodeAllImagesAndPopulateTheDisplayCache() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [ImageFixtureProtocol.self]
+        let service = ChatImageService(session: URLSession(configuration: configuration))
+        let root = "https://images.example/" + UUID().uuidString + "/"
+        let good = URL(string: root + "good.png")!
+        let broken = URL(string: root + "404.png")!
+        let html = URL(string: root + "html.png")!
+        #expect(try await service.availableImages([good, broken, html]) == [good])
+        #expect(!(try await service.imageData(from: good)).isEmpty)
+        #expect(ImageFixtureProtocol.counts.count(for: good) == 1, "UI reuses the decoded thumbnail")
+        #expect(ImageFixtureProtocol.counts.count(for: broken) == 1)
+        #expect(ImageFixtureProtocol.counts.count(for: html) == 1)
+    }
+
+    @Test func publicationDeadlineKeepsGoodImagesAndCancelsSlowReads() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [ImageFixtureProtocol.self]
+        let service = ChatImageService(session: URLSession(configuration: configuration))
+        let good = URL(string: "https://images.example/good.png")!
+        let slow = URL(string: "https://images.example/slow.png")!
+        let start = ContinuousClock.now
+        #expect(try await service.availableImages([good, slow]) == [good])
+        #expect(start.duration(to: .now) < .seconds(7))
+    }
+
     @Test func onlyRemoteImageURLsAreAccepted() {
         #expect(ChatImageService.supports(URL(string: "https://example.com/image.png")!))
         #expect(ChatImageService.supports(URL(string: "http://localhost/image.png")!))
@@ -43,4 +69,29 @@ struct ChatImageTests {
         #expect(try #require(NSBitmapImageRep(data: Data(contentsOf: first))).pixelsWide == 3200)
     }
 
+}
+
+private final class ImageFixtureCounts: @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [URL: Int] = [:]
+    func record(_ url: URL) { lock.withLock { values[url, default: 0] += 1 } }
+    func count(for url: URL) -> Int { lock.withLock { values[url, default: 0] } }
+}
+
+private final class ImageFixtureProtocol: URLProtocol, @unchecked Sendable {
+    static let counts = ImageFixtureCounts()
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        guard let url = request.url else { return }
+        Self.counts.record(url)
+        if url.lastPathComponent == "slow.png" { return } // URLSession cancellation must release the read.
+        let status = url.lastPathComponent == "404.png" ? 404 : 200
+        let png = Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jhV8AAAAASUVORK5CYII=")!
+        let data = url.lastPathComponent == "html.png" ? Data("<html>not an image</html>".utf8) : png
+        client?.urlProtocol(self, didReceive: HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: nil)!, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: data)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
 }

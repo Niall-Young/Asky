@@ -39,7 +39,7 @@ Asky 是使用 SwiftUI 与 AppKit 构建的 macOS 原生效率入口。本地搜
 
 AI 回复中的照片以单排方形缩略图呈现，超出宽度时横向滚动；左下可下载原图，右下链接按钮直接打开来源网页。点击缩略图打开带原生红绿灯的独立 Regular 玻璃预览窗口，完整显示图片。
 
-AI 会按图片对理解的帮助主动选择配图，例如景点、人物、动植物介绍和外观比较；从公开网页提取真实图片候选，并在回复中附来源。纯文字任务不为装饰加图，找不到匹配图片时保留文字回答。每轮会根据实际可用工具重申当前图片能力，避免沿用历史回复中的“不能贴图”。配图效果仍取决于模型是否遵循指令、来源是否返回图片及链接是否可加载。
+AI 会按图片对理解的帮助主动选择配图，例如景点、人物、动植物介绍和外观比较；从公开网页提取真实图片候选，并在回复中附来源。纯文字任务不为装饰加图，找不到匹配图片时保留文字回答。每轮会根据实际可用工具重申当前图片能力，避免沿用历史回复中的“不能贴图”。回复发出前核对图片是否来自实际工具结果或用户提供的地址，并在整批最多 5 秒、最多三个并发的预算内下载解码；成功缩略图复用于界面。编造或改写的图链最多纠正一次，仍无来源或无法加载的图片及相邻图片来源标注会被移除。图片是否合适仍取决于候选内容与模型选择。
 
 ### 安装与配置
 
@@ -128,7 +128,7 @@ Web search calls the anonymous Parallel / Exa / Keenable remote tools, with long
 
 Photos in AI replies appear in a horizontal row of square thumbnails that scrolls when it overflows. The bottom-left button downloads the original; the bottom-right link button opens the source webpage. Clicking a thumbnail opens the full image in a dedicated Regular glass window with native window controls.
 
-The AI is instructed to add relevant photos when they help explain places, people, animals, plants, or visual comparisons. It extracts real image candidates from public pages and links their sources. Text-only tasks need no decorative images; answers remain useful when no matching image is found. Each turn restates current image capabilities based on the available tools so obsolete refusals in history do not define them. Results still depend on model instruction following, provider image coverage, and image URL availability.
+The AI is instructed to add relevant photos when they help explain places, people, animals, plants, or visual comparisons. It extracts real image candidates from public pages and links their sources. Text-only tasks need no decorative images; answers remain useful when no matching image is found. Each turn restates current image capabilities based on the available tools so obsolete refusals in history do not define them. Before publishing, the runtime checks image provenance against actual tool results or user-provided URLs, then downloads and decodes selected photos with up to three concurrent reads and a five-second batch budget. The UI reuses verified thumbnails. Invented or rewritten URLs get at most one correction; unverified or unloadable photos and their adjacent photo-source labels are removed. Relevance still depends on the available candidates and model selection.
 
 ### Installation and Setup
 

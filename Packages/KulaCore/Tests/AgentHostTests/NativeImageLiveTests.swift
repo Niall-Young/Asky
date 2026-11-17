@@ -21,7 +21,12 @@ import Adapters
         let tools = ToolService(store: store, policy: { PolicySnapshot(enabledSources: [.web]) }, presenter: { _ in .rejected })
         await tools.register(WebSearchTool()); await tools.register(WebReadPageTool())
         let storage = AgentSessionStorage(root: root)
-        let host = AgentHost(launcher: { NativeRuntime(storage: storage) },
+        let checks = LiveImageChecks()
+        let host = AgentHost(launcher: { NativeRuntime(storage: storage, imageValidator: { urls in
+            let available = try await ChatImageService.shared.availableImages(urls)
+            await checks.record(urls, available: available)
+            return available
+        }) },
             configProvider: { RuntimeLaunchConfig(baseURL: config.baseURL.absoluteString, model: config.modelName, apiKey: key) },
             toolsProvider: { await tools.definitions(for: .agent(sessionID: "image-live")) },
             toolHandler: { await tools.submit($0) })
@@ -59,6 +64,9 @@ import Adapters
             "modelRounds": .number(Double(snapshot.filter { $0["role"] == "assistant" }.count)),
             "imageOnlyCalls": .number(Double(imageOnlyCalls)),
             "toolTimings": .array(timings),
+            "imageChecks": .array(await checks.rows),
+            "imageCandidates": .array(NativeReplyImages.allowedURLs(messages: snapshot, userText: question)
+                .map { .string($0.absoluteString) }),
             "projectedMessagesBytes": .number(Double(JSONValue.array(NativeWebContext.messages(snapshot)).canonicalData().count)),
             "calls": .array(calls.map(JSONValue.string)), "imageCount": .number(Double(images.count)),
             "errors": .array(errors.map(JSONValue.string))]
@@ -72,9 +80,16 @@ import Adapters
         } else {
             #expect(calls.contains("web_read_page"))
             #expect(!images.isEmpty)
-            if let image = images.first {
+            for image in images {
                 #expect(!(try await ChatImageService.shared.imageData(from: image)).isEmpty)
             }
         }
+    }
+}
+
+private actor LiveImageChecks {
+    var rows: [JSONValue] = []
+    func record(_ urls: [URL], available: Set<URL>) {
+        rows.append(contentsOf: urls.map { ["url": .string($0.absoluteString), "decoded": .bool(available.contains($0))] })
     }
 }
