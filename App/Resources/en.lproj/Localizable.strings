@@ -943,3 +943,15 @@
 /* Reply reference navigation */
 "查看原回复" = "View original reply";
 "原回复已不可用" = "Original reply is unavailable";
+
+"预览图片" = "Preview image";
+
+"图片预览" = "Image preview";
+
+"图片来源" = "Image source";
+
+"无法打开链接" = "Unable to open link";
+
+"上一张图片" = "Previous image";
+
+"下一张图片" = "Next image";

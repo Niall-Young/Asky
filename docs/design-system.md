@@ -333,3 +333,11 @@ macOS 26+ 使用原生液态玻璃；源码构建最低支持 macOS 14。SwiftUI
 | 24/400/Paragraph | 24 | fontWeightRegular | lineHeightParagraph24 | 48 |
 | 24/500/Default | 24 | fontWeightMedium | lineHeight24 | 32 |
 | 24/500/Paragraph | 24 | fontWeightMedium | lineHeightParagraph24 | 48 |
+
+### AI 回复图片
+
+图片栏与前后文案的间距统一为 14 pt；移除图片前单独的“照片”“图片”等通用小标题，保留正文与有实际含义的标题。
+
+独立照片使用单排方形缩略图，超出宽度时横向滚动，不换行，并按当前滚动位置显示左右切换箭头。缩略图为 220 × 220 pt，间距 8 pt；缩略图等比填满并以 12 pt 圆角裁剪。下载与来源分别固定在图片左下、右下，来源使用 MingCute link 图标，内缩 8 pt；按钮为 32 pt 原生 interactive Regular 玻璃圆形，MingCute 图标为 16 pt。来源只保留点击跳转入口，不显示额外文字。下载成功显示勾号 1.2 秒后恢复下载图标。
+
+点击图片打开可复用的独立预览窗口：初始 680 × 560 pt，原生红绿灯、可缩放，整窗通过 `WindowSurface.glassContentView` 使用 Regular 玻璃与原生阴影。图片等比完整显示，保留边距及顶部窗口控制区；兼容与辅助功能沿用既有表面回退。

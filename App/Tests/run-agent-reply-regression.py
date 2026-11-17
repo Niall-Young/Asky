@@ -26,9 +26,11 @@ for path in sorted(maps.glob("*.modulemap")):
 for relative in ["swift-cmark/src/include", "swift-cmark/extensions/include"]:
     command += ["-I", str(derived_data / "SourcePackages/checkouts" / relative)]
 command += [str(root / "App/Sources" / (name + ".swift")) for name in sources]
-command += [str(root / "App/Tests/AgentReplyRegression.swift")]
-command += [str(root / "App/Tests/AgentReactionRegression.swift")]
-command += [str(root / "App/Tests/ApprovalMenuRegression.swift")]
+test_source = "ChatImageGalleryRegression.swift" if "--image-gallery" in sys.argv else "AgentReplyRegression.swift"
+command += [str(root / "App/Tests" / test_source)]
+if "--image-gallery" not in sys.argv:
+    command += [str(root / "App/Tests/AgentReactionRegression.swift")]
+    command += [str(root / "App/Tests/ApprovalMenuRegression.swift")]
 command += [str(path) for path in sorted(products.glob("*.o"))]
 artifacts = derived_data / "AgentReplyRegression" if "ASKY_DERIVED_DATA" in os.environ else root / "build"
 artifacts.mkdir(parents=True, exist_ok=True)

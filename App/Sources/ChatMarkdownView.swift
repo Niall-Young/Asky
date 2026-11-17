@@ -12,7 +12,20 @@ struct ChatMarkdownView: View {
     private static let bodyStyle = TextStyle(size: 14, weight: 400, mode: .default)
 
     var body: some View {
-        Markdown(ChatMath.markdown(text))
+        let parts = ChatImageGalleryContent.parts(MarkdownContent(ChatMath.markdown(text)).renderMarkdown())
+        VStack(alignment: .leading, spacing: 14) {
+            ForEach(Array(parts.enumerated()), id: \.offset) { _, part in
+                switch part {
+                case .markdown(let content): markdown(content)
+                case .images(let images): ChatImageGallery(images: images)
+                }
+            }
+        }
+        .environment(\.chatSelectionGroup, selectionGroup)
+    }
+
+    private func markdown(_ content: String) -> some View {
+        Markdown(content)
             // The default theme is basic; setting it here would override the block styles below.
             .markdownTextStyle {
                 FontSize(Self.bodyStyle.size)
@@ -496,85 +509,7 @@ private struct ChatCodeBlock: View {
 private struct ChatImageProvider: ImageProvider {
     @ViewBuilder func makeImage(url: URL?) -> some View {
         if let formula = ChatMath.formula(url) { ChatMathBlock(formula: formula) }
-        else { ChatRemoteImage(url: url) }
-    }
-}
-
-private struct ChatRemoteImage: View {
-    let url: URL?
-    @State private var image: NSImage?
-    @State private var failed = false
-    @State private var downloading = false
-    @State private var downloaded = false
-    @State private var downloadError: String?
-
-    nonisolated init(url: URL?) { self.url = url }
-
-    var body: some View {
-        Group {
-            if let image {
-                Image(nsImage: image).resizable().scaledToFit()
-                    .frame(maxWidth: .infinity, maxHeight: 420, alignment: .leading)
-                    .overlay(alignment: .bottomTrailing) {
-                        Button {
-                            guard let url else { return }
-                            downloading = true
-                            Task {
-                                defer { downloading = false }
-                                do {
-                                    _ = try await ChatImageService.shared.download(from: url)
-                                    downloaded = true
-                                } catch { downloadError = error.localizedDescription }
-                            }
-                        } label: {
-                            Group {
-                                if downloading { ProgressView().controlSize(.small) }
-                                else { Image(mingCute: downloaded ? "checkmark" : "arrow.down.to.line", size: 14) }
-                            }
-                            .font(.system(size: 14, weight: .medium))
-                            .frame(width: 32, height: 32)
-                            .foregroundStyle(ThemeColor.kIcon)
-                            .background(ThemeColor.kBackground, in: .circle)
-                            .overlay(Circle().stroke(ThemeColor.kBorder, lineWidth: 1))
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(downloading)
-                        .help(downloaded ? LocalizedStringKey("已保存到下载文件夹") : LocalizedStringKey("下载图片"))
-                        .accessibilityLabel("下载图片")
-                        .padding(12)
-                    }
-            } else {
-                HStack(spacing: 8) {
-                    if failed { Image(mingCute: "photo") } else { ProgressView().controlSize(.small) }
-                    Text(failed ? LocalizedStringKey("图片加载失败") : LocalizedStringKey("正在加载图片…")).font(.system(size: 14))
-                    if failed {
-                        Button("重试") { failed = false }
-                            .buttonStyle(.plain).underline()
-                    }
-                }
-                .foregroundStyle(ThemeColor.kTextSubtle)
-                .padding(16).frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-        .background(ThemeColor.kBackgroundNeutral)
-        .clipShape(.rect(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(ThemeColor.kBorder, lineWidth: 1))
-        .appDialog(NSLocalizedString("图片下载失败", comment: ""), isPresented: Binding(
-            get: { downloadError != nil }, set: { if !$0 { downloadError = nil } }),
-                   message: downloadError ?? "", buttons: [NSLocalizedString("好", comment: "")])
-        .task(id: "\(url?.absoluteString ?? "")-\(failed)") {
-            guard !failed else { return }
-            image = nil
-            do {
-                guard let url else { throw URLError(.badURL) }
-                let data = try await ChatImageService.shared.imageData(from: url)
-                try Task.checkCancellation()
-                guard let decoded = NSImage(data: data) else { throw URLError(.cannotDecodeContentData) }
-                image = decoded
-            } catch {
-                if !Task.isCancelled { failed = true }
-            }
-        }
+        else if let url { ChatImageGallery(images: [ChatGalleryImage(url: url, label: "")]) }
     }
 }
 
