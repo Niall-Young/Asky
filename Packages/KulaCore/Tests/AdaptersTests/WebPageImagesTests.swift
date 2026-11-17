@@ -43,13 +43,12 @@ import ToolService
         #expect(result["attempts"]?.arrayValue?.count == 1)
     }
 
-    @Test func imageReadUsesSeparateCacheAndFallsBackWhenTextHasNoImages() async throws {
+    @Test func imageReadUsesSeparateCacheAndMetadataBeforeOtherProviders() async throws {
         let tool = WebReadPageTool(call: { provider, _, _ in
-            switch provider {
-            case .parallel: return ["structuredContent": ["results": [["full_content": "Readable text, no images"]]]]
-            case .exa: return ["content": [["type": "text", "text": "Title: Article\nURL: https://example.com/page\n![照片](https://example.com/photo.jpg)"]]]
-            case .keenable: return ["url": "https://example.com/page", "content": "![照片](https://example.com/photo.jpg)", "truncated": false]
-            }
+            #expect(provider == .parallel, "Successful text must not be fetched again from backup providers")
+            return ["structuredContent": ["results": [["full_content": "Readable text, no images"]]]]
+        }, readImages: { url in
+            [["url": "https://example.com/photo.jpg", "alt": "照片", "sourceURL": .string(url)]]
         })
         let plain = try await tool.execute(["url": "https://example.com/page"]).output
         #expect(plain["images"]?.arrayValue?.isEmpty == true)
@@ -58,6 +57,7 @@ import ToolService
         #expect(illustrated["cached"] == false)
         #expect(illustrated["images"]?.arrayValue?.count == 1)
         #expect(illustrated["attempts"]?.arrayValue?.count == 2)
+        #expect(illustrated["attempts"]?.arrayValue?.last?["provider"] == "page_metadata")
         let cached = try await tool.execute(["url": "https://example.com/page", "includeImages": true]).output
         #expect(cached["cached"] == true)
         #expect(cached["images"] == illustrated["images"])
@@ -72,7 +72,7 @@ import ToolService
         #expect(result["status"] == "read")
         #expect(result["text"] == "Useful text")
         #expect(result["imageStatus"] == "not_found_in_returned_content")
-        #expect(result["attempts"]?.arrayValue?.count == 4)
+        #expect(result["attempts"]?.arrayValue?.count == 2)
         let never = WebReadPageTool(call: { _, _, _ in Issue.record("Bad argument reached network"); throw CancellationError() })
         do {
             _ = try await never.execute(["url": "https://example.com", "includeImages": "true"])

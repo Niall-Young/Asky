@@ -40,6 +40,16 @@ import ToolService
 }
 
 @Suite struct FreeWebSearchTests {
+    @Test func photoModifiersDoNotTriggerRedundantProviderFallback() async throws {
+        let tool = WebSearchTool(call: { provider, _, _ in
+            #expect(provider == .parallel, "The subject is covered; photo wording must not force backup search")
+            return Self.result("钟丽缇 Christy Chung", "演员简介和作品", url: "https://example.com/christy")
+        })
+        let result = try await tool.execute(["query": "钟丽缇 Christy Chung 照片 人像 photo portrait"]).output
+        #expect(result["status"] == "matched")
+        #expect(result["attempts"]?.arrayValue?.count == 1)
+    }
+
     static func result(_ title: String, _ excerpt: String, url: String = "https://example.com/article") -> JSONValue {
         ["structuredContent": ["results": [["title": .string(title), "url": .string(url), "excerpts": [.string(excerpt)]]]]]
     }

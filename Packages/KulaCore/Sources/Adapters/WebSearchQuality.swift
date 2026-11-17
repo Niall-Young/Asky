@@ -127,6 +127,7 @@ struct WebSearchQuality {
         "a", "an", "the", "is", "are", "was", "were", "of", "for", "to", "in", "on", "at", "and", "or", "with", "by", "from",
         "what", "which", "how", "when", "why", "does", "do", "can", "please", "search", "find", "about", "vs", "versus",
         "introducing", "new", "latest", "comparison", "compare",
+        "photo", "photos", "picture", "pictures", "portrait", "image", "images", "照片", "图片", "人像",
         "official", "documentation", "blog", "context", "window", "id",
         "的", "了", "是", "吗", "什么", "怎么", "如何", "为什么", "请", "帮", "我", "查", "搜索", "查询", "介绍", "最新", "新", "一", "代", "新一代", "开放", "旗舰", "对比", "比较", "官方", "文档"
     ]

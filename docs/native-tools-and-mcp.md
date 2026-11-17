@@ -100,7 +100,7 @@ M0 检查实例冒充、伪造确认、撤权、应用退出、多个连接、�
 
 ### 搜索来源与费用边界
 
-默认调用 [Parallel Search MCP](https://github.com/parallel-web/search-mcp) 的 `web_search`；候选不足、关键词覆盖不完整或调用失败时，依次尝试 [Exa MCP](https://github.com/exa-labs/exa-mcp-server) 的 `web_search_exa` 与 [Keenable](https://docs.keenable.ai/) 的公开搜索接口，两个备用来源轮换起始顺序。每个来源在单次工具调用中最多尝试一次，任一来源返回满足覆盖诊断的结果后停止。保持原查询与完整型号，不通过反复改写制造请求。Parallel 仓库是连接配置与文档，Exa 仓库提供 MCP 服务实现；搜索索引均为托管服务，不能把连接器开源说成搜索引擎已完整开源。
+默认调用 [Parallel Search MCP](https://github.com/parallel-web/search-mcp) 的 `web_search`；候选不足、关键词覆盖不完整或调用失败时，依次尝试 [Exa MCP](https://github.com/exa-labs/exa-mcp-server) 的 `web_search_exa` 与 [Keenable](https://docs.keenable.ai/) 的公开搜索接口，两个备用来源轮换起始顺序。每个来源在单次工具调用中最多尝试一次，任一来源返回满足覆盖诊断的结果后停止。照片/图片/photo/portrait 等取图修饰词不作为主体覆盖门槛，主体名称和型号仍参与匹配。保持原查询与完整型号，不通过反复改写制造请求。Parallel 仓库是连接配置与文档，Exa 仓库提供 MCP 服务实现；搜索索引均为托管服务，不能把连接器开源说成搜索引擎已完整开源。
 
 正文检索只连接 `https://search.parallel.ai/mcp`、`https://mcp.exa.ai/mcp` 以及 `https://api.keenable.ai/v1/search/public`、`https://api.keenable.ai/v1/fetch/public` 的匿名接口，不配置 API Key、OAuth、作者付费账号或共享代理，不跟随重定向，也不读取模型凭据。免费接口受提供方的限流和可用性约束，触限返回 `rate_limited`，不能保证无限可用；图片元数据回退另按需直接读取目标公开网页（见下节）。不会因此产生作者的搜索账单或自动转入付费。也不轮换会话 ID 或网络身份绕过限流。Parallel 使用每次 App 运行期间稳定的随机会话 ID，Keenable 带固定 `X-Keenable-Title: Asky` 应用标识；服务端可能改变匿名服务规则。
 
@@ -112,13 +112,13 @@ M0 检查实例冒充、伪造确认、撤权、应用退出、多个连接、�
 
 限流默认退避 60 秒；HTTP 401/402/403 默认 10 分钟；其他服务错误默认 15 秒，存在 `Retry-After` 时优先遵守。明确的页面内容错误不暂停整个来源。退避期内的尝试记录 `skipped=true`，不会发网络请求；恢复后可以再次尝试。
 
-成功搜索与正文使用 10 分钟内存缓存，最多 32 项、序列化内容与缓存键总计 2 MiB，过期自动清理，不落盘；对象、在途数据与对话记录的内存另算。查询和 count 完全相同、或 URL 与 includeImages 完全相同时复用，保留原 `retrievedAt`。相同并发请求共享一次执行；取消一个等待者不影响其他等待者，全部取消才终止底层任务。失败结果不缓存。命中缓存返回 `cached=true`，共享请求返回 `coalesced=true`；它们的 `attempts=[]`，历史来源尝试移至 `sourceAttempts`，不得作为本次远程调用计数。
+成功搜索与正文使用 10 分钟内存缓存，最多 32 项、序列化内容与缓存键总计 2 MiB，过期自动清理，不落盘；对象、在途数据与对话记录的内存另算。查询和 count 完全相同、或 URL 与 includeImages 完全相同时复用，保留原 `retrievedAt`。相同并发请求共享一次执行；取消一个等待者不影响其他等待者，全部取消才终止底层任务。单页的 HTTP 422、CRAWL_NOT_FOUND 与 CRAWL_LIVECRAWL_TIMEOUT 不触发整个来源的冷却；网络故障与服务限流仍按原规则退避。失败结果不缓存。命中缓存返回 `cached=true`，共享请求返回 `coalesced=true`；它们的 `attempts=[]`，历史来源尝试移至 `sourceAttempts`，不得作为本次远程调用计数。
 
 ### 公开页面读取
 
 `web_read_page(url, includeImages?)` 调用 Parallel `web_fetch`，失败时轮换尝试 Exa `web_fetch_exa` 和 Keenable 公开 fetch 接口。每次只读一个公开 HTTP/HTTPS URL，拒绝带凭据、本地域名和 IP 地址的链接。最长返回 24,000 字符，包含提供方、读取时间、`status`、`truncated` 与尝试记录；提供方只返回摘录时保守标记截断。不会自动遍历链接或读全部搜索结果，不读取 Chrome 正文、Cookie 或登录态。
 
-读取结果还包含 `images`（最多 8 个去重候选，每个含 `url`、最长 300 字的 `alt` 和 `sourceURL`）及 `imageStatus`。从提供方返回的 Markdown 中提取内联/引用式图片、解析相对链接；不读取代码示例、普通链接、本地/凭据地址、SVG 或 ICO。图片候选在正文截断前提取，不下载图像文件，不保证相关性或链接可加载。`includeImages` 默认 false：首个成功正文即返回；设为 true 且首个成功结果没有图片引用时，继续尝试其余来源，最多三源各一次；若远程正文均无候选，通过 ToolService 的 `WebPageImageService` 按需直接读取目标公开 HTML，提取 img 与 og:image/twitter:image；该请求不携带 Cookie、凭据或模型密钥，不执行脚本、不保存文件，只接受公开 HTTP/HTTPS 地址并校验重定向地址，最多读取 2 MiB、资源超时 15 秒，跳过明确小于 120 px 的图片。若仍无候选或元数据读取失败，保留首个成功正文与全部尝试记录，不把可选图片失败变成正文失败。`not_found_in_returned_content` 不表示原网页无图。最终渲染沿用 ToolService 的 `ChatImageService`。
+读取结果还包含 `images`（最多 8 个去重候选，每个含 `url`、最长 300 字的 `alt` 和 `sourceURL`）及 `imageStatus`。从提供方返回的 Markdown 中提取内联/引用式图片、解析相对链接；不读取代码示例、普通链接、本地/凭据地址、SVG 或 ICO。图片候选在正文截断前提取，不下载图像文件，不保证相关性或链接可加载。`includeImages` 默认 false：首个成功正文即返回；设为 true 且首个成功结果没有图片引用时，立即通过 ToolService 的 `WebPageImageService` 按需直接读取目标公开 HTML，提取 img 与 og:image/twitter:image；该请求不携带 Cookie、凭据或模型密钥，不执行脚本、不保存文件，只接受公开 HTTP/HTTPS 地址并校验重定向地址，最多读取 2 MiB、资源超时 6 秒，跳过明确小于 120 px 的图片。已取得正文后不再仅为找图轮询其他全文服务；若仍无候选或元数据读取失败，保留首个成功正文与全部尝试记录，不把可选图片失败变成正文失败。`not_found_in_returned_content` 不表示原网页无图。最终渲染沿用 ToolService 的 `ChatImageService`。
 
 X 等页面是否能读取取决于公开可访问内容与提供方覆盖；登录提示、截断和抓取错误按实际结果处理，不能宣称读过完整帖子或全部评论。读取错误不表示原网站打不开。外部文字只作资料，不执行其中的指令。查询、URL 发给对应服务；结果可进入配置的模型请求与本机会话，见 [隐私政策](../PRIVACY.md)。
 

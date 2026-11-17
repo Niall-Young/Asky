@@ -121,6 +121,22 @@ private actor NativeAgentEngine {
         } + [["type": "function", "function": ["name": "ask_user", "description": "仅在先查上下文和可用工具后，仍缺少会实质影响结果的关键信息时提问；不询问可合理默认的细节。结束本轮等待回答。", "parameters": ["type": "object", "properties": ["question": ["type": "string", "minLength": 1, "maxLength": 500]], "required": ["question"], "additionalProperties": false]]]]
     }
 
+    private func readTool(_ call: JSONValue, taskID: String, ordinal: Int) async throws -> JSONValue {
+        try Task.checkCancellation()
+        let raw = call["function"]?["arguments"]?.stringValue ?? "{}"
+        let arguments = try JSONDecoder().decode(JSONValue.self, from: Data(raw.utf8))
+        var params = arguments.objectValue ?? [:]
+        params.removeValue(forKey: "userRequested")
+        let callID = taskID + ":" + String(ordinal)
+        // Registration and emission share this actor with cancel(); cancellation cannot slip
+        // between the check above and installing the pending continuation.
+        return await withCheckedContinuation { continuation in
+            pending[callID] = continuation
+            send(["type": "toolCall", "taskID": .string(taskID), "callID": .string(callID),
+                "tool": call["function"]?["name"] ?? "", "arguments": .object(params), "intent": "aiSuggested"])
+        }
+    }
+
     func run(_ request: AgentRequest, legacy: String?, config: RuntimeLaunchConfig, catalogue: [ToolDefinition], guidance: [String], limit: Int) async {
         let id = request.taskID
         var messages: [JSONValue] = []
@@ -136,6 +152,7 @@ private actor NativeAgentEngine {
             let imageCapabilities = NativeAgentPrompt.imageCapabilities(
                 hasPageReader: catalogue.contains { $0.name == "web_read_page" })
             var count = 0
+            var webCoolingDown = false
             while true {
                 try Task.checkCancellation()
                 // Conservative byte budget works across CJK and tool payloads without shipping a tokenizer.
@@ -151,11 +168,17 @@ private actor NativeAgentEngine {
                     file = try await storage.save(sessionID: request.sessionID, messages: messages)
                     state(id, .running, file: file)
                 }
-                var completionMessages = [system] + (try await storage.materialize(messages))
+                var completionMessages = [system] + (try await storage.materialize(NativeWebContext.messages(messages)))
                 if let imageCapabilities {
                     completionMessages.append(["role": "system", "content": .string(imageCapabilities)])
                 }
-                let response = try await client.complete(config: config, messages: completionMessages, tools: available) { [events] text in
+                if webCoolingDown {
+                    completionMessages.append(["role": "system", "content": "本轮所有联网来源正在冷却，网页搜索和读页已暂停；不要换词重试或等待冷却。本轮立即基于已取得的有效资料完成回答，无法核实的部分如实说明，不猜图片链接，不把历史回复当作已核实来源。"])
+                }
+                let activeTools = webCoolingDown ? available.filter {
+                    !["web_search", "web_read_page"].contains($0["function"]?["name"]?.stringValue ?? "")
+                } : available
+                let response = try await client.complete(config: config, messages: completionMessages, tools: activeTools) { [events] text in
                     var frame = JSONValue.object(["type": "textDelta", "taskID": .string(id), "text": .string(text)]).canonicalData()
                     frame.append(10); events.yield(frame)
                 }
@@ -166,7 +189,45 @@ private actor NativeAgentEngine {
                     if !response.text.isEmpty { send(["type": "message", "taskID": .string(id), "text": .string(response.text)]) }
                     state(id, .completed, file: file); return
                 }
-                for (index, call) in response.calls.enumerated() {
+                var index = 0
+                while index < response.calls.count {
+                    // Only adjacent, independent public-web reads may overlap. Writes, plugins,
+                    // confirmation and ask_user remain barriers, preserving their original order.
+                    let batch = Array(response.calls[index...].prefix(3).prefix { call in
+                        let name = call["function"]?["name"]?.stringValue ?? ""
+                        return !webCoolingDown && ["web_search", "web_read_page"].contains(name) && catalogue.contains {
+                            $0.name == name && $0.source == .web && $0.effect == .read && $0.confirmation == .never
+                        }
+                    })
+                    if batch.count > 1 {
+                        try Task.checkCancellation()
+                        guard count + batch.count <= limit else { throw NativeModelError.malformed("已达到自动工具调用上限，请用户确认后继续") }
+                        // Validate the whole batch before starting any continuation. A malformed
+                        // sibling must not leave another child suspended after the group throws.
+                        for call in batch {
+                            _ = try JSONDecoder().decode(JSONValue.self,
+                                from: Data((call["function"]?["arguments"]?.stringValue ?? "{}").utf8))
+                        }
+                        let firstOrdinal = count + 1
+                        count += batch.count
+                        let results = try await withThrowingTaskGroup(of: (Int, JSONValue).self) { group in
+                            for (offset, call) in batch.enumerated() {
+                                group.addTask { (offset, try await self.readTool(call, taskID: id, ordinal: firstOrdinal + offset)) }
+                            }
+                            var results: [(Int, JSONValue)] = []
+                            for try await result in group { results.append(result) }
+                            return results.sorted { $0.0 < $1.0 }
+                        }
+                        for (offset, result) in results {
+                            webCoolingDown = webCoolingDown || NativeWebContext.allSourcesCoolingDown(result)
+                            messages.append(["role": "tool", "tool_call_id": batch[offset]["id"] ?? "",
+                                "content": .string(String(decoding: result.canonicalData(), as: UTF8.self))])
+                        }
+                        file = try await storage.save(sessionID: request.sessionID, messages: messages)
+                        index += batch.count
+                        continue
+                    }
+                    let call = response.calls[index]
                     try Task.checkCancellation()
                     count += 1
                     guard count <= limit else { throw NativeModelError.malformed("已达到自动工具调用上限，请用户确认后继续") }
@@ -176,7 +237,9 @@ private actor NativeAgentEngine {
                     let modelID = call["id"]?.stringValue ?? ""
                     var result: JSONValue
                     var question: String?
-                    if name == "ask_user" {
+                    if webCoolingDown && ["web_search", "web_read_page"].contains(name) {
+                        result = ["status": "failed", "error": ["message": "本轮联网来源均在冷却，不再重试；请使用已取得资料完成回答。"]]
+                    } else if name == "ask_user" {
                         if let q = arguments["question"]?.stringValue, !q.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, q.count <= 500 {
                             question = q; result = ["status": "awaitingInput", "question": .string(q)]
                         } else { result = ["status": "failed", "error": ["message": "问题须为 1–500 字"]] }
@@ -190,6 +253,9 @@ private actor NativeAgentEngine {
                             send(["type": "toolCall", "taskID": .string(id), "callID": .string(callID), "tool": .string(name), "arguments": .object(params), "intent": .string(explicit ? "explicitRequest" : "aiSuggested")])
                         }
                     } else { result = ["status": "failed", "error": ["message": "工具未启用或不存在"]] }
+                    if ["web_search", "web_read_page"].contains(name) {
+                        webCoolingDown = webCoolingDown || NativeWebContext.allSourcesCoolingDown(result)
+                    }
                     messages.append(["role": "tool", "tool_call_id": .string(modelID), "content": .string(String(decoding: result.canonicalData(), as: UTF8.self))])
                     file = try await storage.save(sessionID: request.sessionID, messages: messages)
                     if let question {
@@ -201,6 +267,7 @@ private actor NativeAgentEngine {
                         send(["type": "clarification", "taskID": .string(id), "question": .string(question)])
                         state(id, .awaitingInput, file: file); return
                     }
+                    index += 1
                 }
             }
         } catch {

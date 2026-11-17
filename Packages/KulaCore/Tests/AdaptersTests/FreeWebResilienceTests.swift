@@ -6,6 +6,16 @@ import ToolService
 @testable import Adapters
 
 @Suite struct FreeWebResilienceTests {
+    @Test func pageFailuresDoNotDisableProviderButRateLimitsStillDo() async {
+        let pool = FreeWebCoordinator()
+        await pool.record(FreeWebFailure(status: "unavailable", message: "content_not_extracted", stage: "fetch", httpStatus: 422), provider: .keenable)
+        await pool.record(FreeWebFailure(status: "unavailable", message: "CRAWL_LIVECRAWL_TIMEOUT", stage: "web_fetch_exa", httpStatus: 200), provider: .exa)
+        #expect(await pool.skip(.keenable) == nil)
+        #expect(await pool.skip(.exa) == nil)
+        await pool.record(FreeWebFailure(status: "rate_limited", message: "quota", stage: "fetch", httpStatus: 429), provider: .keenable)
+        #expect(await pool.skip(.keenable) != nil)
+    }
+
     @Test func actualTransportRetainsDiagnosticsAndDoesNotWaitForSSEClose() async throws {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [WebFixtureProtocol.self]

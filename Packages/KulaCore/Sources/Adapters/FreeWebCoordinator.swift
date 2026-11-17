@@ -56,6 +56,12 @@ actor FreeWebCoordinator {
 
     func record(_ error: Error, provider: FreeWebProvider) {
         guard let failure = error as? FreeWebFailure, failure.stage != "page" else { return }
+        // A crawler rejecting one URL does not make the provider's search or other pages
+        // unavailable. Only service/network failures and rate limits cool down the provider.
+        let pageFailure = failure.httpStatus == 422 || failure.message.range(
+            of: "CRAWL_NOT_FOUND|CRAWL_LIVECRAWL_TIMEOUT|content_not_extracted|No content for requested URL",
+            options: [.regularExpression, .caseInsensitive]) != nil
+        if failure.status != "rate_limited" && pageFailure { return }
         // Preserve Retry-After; do not create a new identity to bypass a provider's limit.
         let delay = failure.retryAfter ?? (failure.status == "rate_limited" ? 60 :
             [401, 402, 403].contains(failure.httpStatus ?? 0) ? 600 : 15)

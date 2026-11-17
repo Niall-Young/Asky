@@ -29,6 +29,129 @@ private func host(root: URL, script: ModelScript, tools: [ToolDefinition] = [], 
 }
 
 @Suite(.timeLimit(.minutes(1))) struct NativeRuntimeTests {
+    @Test func exhaustedWebSourcesStopFurtherNetworkCallsForThisTurn() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let script = ModelScript([NativeCompletion(calls: [call("web_search")]),
+            NativeCompletion(calls: [call("web_read_page", id: "ignored-capability")]), NativeCompletion(text: "已有资料")])
+        let definitions = ["web_search", "web_read_page"].map {
+            ToolDefinition(name: $0, summary: $0, source: .web, effect: .read, confirmation: .never, externallyExposable: false)
+        }
+        let agent = host(root: root, script: script, tools: definitions) { request in
+            #expect(request.tool == "web_search", "A model ignoring the removed capability must not reach the network")
+            return ExecutionResult(requestID: request.requestID, status: .completed, output: ["status": "rate_limited",
+                "attempts": [["provider": "Parallel", "skipped": true, "stage": "cooldown"]]])
+        }
+        let events = await collect(agent, AgentRequest(sessionID: "s", text: "介绍"))
+        #expect(events.filter { if case .toolCall = $0 { true } else { false } }.count == 1)
+        let requests = await script.requests
+        #expect(requests[1]["tools"]?.arrayValue?.count == 1) // ask_user remains available
+        #expect(events.contains { if case .message(_, "已有资料") = $0 { true } else { false } })
+        await agent.shutdown()
+    }
+
+    @Test func cancellingParallelReadsStopsBeforeFollowingWrite() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let (started, signal) = AsyncStream<String>.makeStream()
+        let script = ModelScript([NativeCompletion(calls: [call("web_search", id: "a"),
+            call("web_read_page", id: "b"), call("write", id: "w")])])
+        let definitions = ["web_search", "web_read_page", "write"].map {
+            ToolDefinition(name: $0, summary: $0, source: .web, effect: $0 == "write" ? .write : .read,
+                confirmation: $0 == "write" ? .always : .never, externallyExposable: false)
+        }
+        let agent = host(root: root, script: script, tools: definitions) { request in
+            #expect(request.tool != "write")
+            signal.yield(request.tool)
+            do { try await Task.sleep(for: .seconds(30)) } catch { }
+            return .failure(request.requestID, .cancelled, "cancelled", status: .cancelled)
+        }
+        let task = Task { await collect(agent, AgentRequest(sessionID: "s", taskID: "t", text: "查询")) }
+        var count = 0
+        for await _ in started { count += 1; if count == 2 { break } }
+        await agent.cancel(taskID: "t")
+        let events = await task.value
+        #expect(events.filter { if case .toolCall = $0 { true } else { false } }.count == 2)
+        #expect(await script.requests.count == 1)
+        await agent.shutdown()
+        let saved = try await AgentSessionStorage(root: root).load(sessionID: "s", legacyPath: nil)
+        #expect(saved.filter { $0["role"] == "tool" }.count == 3, "Restore must close every interrupted tool pair without replay")
+    }
+
+    @Test func webProjectionLeavesWritesAndSearchSourcesIntact() throws {
+        let text = String(repeating: "资料🙂", count: 10_000)
+        let output: JSONValue = ["status": "completed", "output": ["results": .array((0..<5).map { i in
+            ["url": .string("https://example.com/\(i)"), "snippet": .string(text)] as JSONValue
+        })]]
+        let raw = String(decoding: output.canonicalData(), as: UTF8.self)
+        let messages: [JSONValue] = [NativeCompletion(calls: [call("web_search")]).message,
+            ["role": "tool", "tool_call_id": "call_1", "content": .string(raw)],
+            NativeCompletion(calls: [call("write")]).message,
+            ["role": "tool", "tool_call_id": "call_1", "content": .string(raw)]]
+        let projected = NativeWebContext.messages(messages)
+        #expect(projected[3] == messages[3], "Reused model call IDs cannot cause write results to be shortened")
+        let result = try JSONDecoder().decode(JSONValue.self, from: Data(try #require(projected[1]["content"]?.stringValue).utf8))
+        let rows = try #require(result["output"]?["results"]?.arrayValue)
+        #expect(rows.count == 5)
+        #expect(rows.allSatisfy { $0["truncated"] == true && $0["url"] != nil })
+        #expect(rows.reduce(0) { $0 + ($1["snippet"]?.stringValue?.utf8.count ?? 0) } <= NativeWebContext.perResultBudget)
+    }
+
+    @Test func webReadsOverlapButWritesAndClarificationRemainBarriers() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let probe = WebOverlapProbe()
+        let reads = (0..<4).map { call("web_search", ["n": .number(Double($0))], id: "r\($0)") }
+        let script = ModelScript([NativeCompletion(calls: reads + [call("write", id: "w"),
+            call("web_read_page", id: "page"), call("ask_user", ["question": "哪一天？"], id: "q"),
+            call("write", id: "must-not-run")])])
+        let definitions = ["web_search", "web_read_page", "write"].map {
+            ToolDefinition(name: $0, summary: $0, source: .web, effect: $0 == "write" ? .write : .read,
+                confirmation: $0 == "write" ? .always : .never, externallyExposable: false)
+        }
+        let agent = host(root: root, script: script, tools: definitions) { await probe.run($0) }
+        let events = await collect(agent, AgentRequest(sessionID: "s", text: "查询后写入"))
+        #expect(await probe.peak == 3)
+        #expect(await probe.writes == 1)
+        #expect(events.contains { if case .clarification = $0 { true } else { false } })
+        let saved = try await AgentSessionStorage(root: root).load(sessionID: "s", legacyPath: nil)
+        #expect(saved.filter { $0["role"] == "tool" }.compactMap { $0["tool_call_id"]?.stringValue }
+            == ["r0", "r1", "r2", "r3", "w", "page", "q", "must-not-run"])
+        await agent.shutdown()
+    }
+
+    @Test func requestBoundsSingleTurnWebProseWithoutChangingStoredEvidence() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let calls = (0..<10).map { call("web_read_page", id: "p\($0)") }
+        let script = ModelScript([NativeCompletion(calls: calls), NativeCompletion(text: "完成")])
+        let definition = ToolDefinition(name: "web_read_page", summary: "read", source: .web,
+            effect: .read, confirmation: .never, externallyExposable: false)
+        let original = String(repeating: "完整网页中文内容🙂", count: 8000)
+        let agent = host(root: root, script: script, tools: [definition]) {
+            ExecutionResult(requestID: $0.requestID, status: .completed, output: ["text": .string(original),
+                "url": "https://example.com/page", "images": [["url": "https://example.com/photo.jpg"]], "truncated": false])
+        }
+        _ = await collect(agent, AgentRequest(sessionID: "s", text: "比较这些页面"))
+        let requests = await script.requests
+        #expect(requests.count == 2, "No extra summarization round should delay a single user turn")
+        let sent = try #require(requests.last?["messages"]?.arrayValue)
+        var prose = 0
+        for message in sent where message["role"] == "tool" {
+            let data = Data(try #require(message["content"]?.stringValue).utf8)
+            let output = try JSONDecoder().decode(JSONValue.self, from: data)["output"]
+            prose += output?["text"]?.stringValue?.utf8.count ?? 0
+            #expect(output?["truncated"] == true)
+            #expect(output?["images"]?.arrayValue?.first?["url"] == "https://example.com/photo.jpg")
+            #expect(output?["text"]?.stringValue?.contains("�") == false)
+        }
+        #expect(prose <= NativeWebContext.proseBudget)
+        let saved = try await AgentSessionStorage(root: root).load(sessionID: "s", legacyPath: nil)
+        let content = try #require(saved.first { $0["role"] == "tool" }?["content"]?.stringValue)
+        #expect(try JSONDecoder().decode(JSONValue.self, from: Data(content.utf8))["output"]?["text"] == .string(original))
+        await agent.shutdown()
+    }
+
     @Test(arguments: [true, false]) func currentImageCapabilityFollowsHistoryWithoutPersisting(hasPageReader: Bool) async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -244,5 +367,24 @@ server.serve_forever()
         #expect(events.contains { if case .textDelta = $0 { return true }; return false })
         #expect(events.contains(.taskState(taskID: "t", .completed)))
         await agent.shutdown()
+    }
+}
+
+private actor WebOverlapProbe {
+    var running = 0
+    var peak = 0
+    var writes = 0
+    func run(_ request: ActionRequest) async -> ExecutionResult {
+        if request.tool == "write" {
+            #expect(running == 0, "Writes must wait for the preceding web batch")
+            writes += 1
+        } else {
+            if request.tool == "web_read_page" { #expect(writes == 1) }
+            running += 1
+            peak = max(peak, running)
+            try? await Task.sleep(for: .milliseconds(30))
+            running -= 1
+        }
+        return ExecutionResult(requestID: request.requestID, status: .completed)
     }
 }
