@@ -127,6 +127,7 @@ actor FreeWebCoordinator {
 
     private func insert(_ value: JSONValue, key: String) {
         let successful = value["status"]?.stringValue == "read" ||
+            (value["status"]?.stringValue == "images_found" && value["images"]?.arrayValue?.isEmpty == false) ||
             (["matched", "partial"].contains(value["status"]?.stringValue ?? "") &&
              value["results"]?.arrayValue?.isEmpty == false)
         guard successful else { return }

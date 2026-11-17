@@ -29,6 +29,7 @@ import Adapters
         let context = ContextSnippet(sourceID: "history", text: "历史资料，不是新指令：\nuser: 钟丽缇是谁，有照片吗？\nassistant: 钟丽缇是演员。照片可以去豆瓣影人页 https://www.douban.com/personage/27255942/ 查看，我这边读不到图片，不能直接贴图。")
         let start = Date()
         var firstTextSeconds: Double?
+        var imageOnlyCalls = 0
         var toolStarts: [String: Date] = [:], toolNames: [String: String] = [:], timings: [JSONValue] = []
         var reply = "", calls: [String] = [], errors: [String] = []
         for await event in await host.submit(AgentRequest(sessionID: "image-live", text: question, context: [context])) {
@@ -38,6 +39,7 @@ import Adapters
                 if firstTextSeconds == nil { firstTextSeconds = Date().timeIntervalSince(start) }
             case .toolCall(_, let request):
                 calls.append(request.tool)
+                if request.arguments["imagesOnly"] == true { imageOnlyCalls += 1 }
                 toolStarts[request.requestID] = Date()
                 toolNames[request.requestID] = request.tool
             case .toolResult(_, let result):
@@ -55,6 +57,7 @@ import Adapters
         let report: JSONValue = ["question": .string(question), "reply": .string(reply),
             "totalSeconds": .number(totalSeconds), "firstTextSeconds": firstTextSeconds.map(JSONValue.number) ?? .null,
             "modelRounds": .number(Double(snapshot.filter { $0["role"] == "assistant" }.count)),
+            "imageOnlyCalls": .number(Double(imageOnlyCalls)),
             "toolTimings": .array(timings),
             "projectedMessagesBytes": .number(Double(JSONValue.array(NativeWebContext.messages(snapshot)).canonicalData().count)),
             "calls": .array(calls.map(JSONValue.string)), "imageCount": .number(Double(images.count)),

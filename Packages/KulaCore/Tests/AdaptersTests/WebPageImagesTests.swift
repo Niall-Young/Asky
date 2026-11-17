@@ -6,6 +6,39 @@ import ToolService
 @testable import Adapters
 
 @Suite struct WebPageImagesTests {
+    @Test func imagesOnlySkipsFullTextAndCachesWithoutClaimingPageRead() async throws {
+        let tool = WebReadPageTool(call: { _, _, _ in
+            Issue.record("Image-only lookup must not call a full-text provider")
+            throw CancellationError()
+        }, readImages: { url in
+            [["url": "https://example.com/photo.jpg", "alt": "景点", "sourceURL": .string(url)]]
+        })
+        let args: JSONValue = ["url": "https://example.com/page", "imagesOnly": true]
+        let result = try await tool.execute(args).output
+        #expect(result["status"] == "images_found")
+        #expect(result["contentType"] == "image_metadata")
+        #expect(result["text"] == nil)
+        #expect(result["images"]?.arrayValue?.count == 1)
+        #expect(try await tool.execute(args).output["cached"] == true)
+    }
+
+    @Test func imagesOnlyFailureAndCancellationDoNotFallBackToFullText() async throws {
+        let unused: FreeWebMCP.Call = { _, _, _ in Issue.record("Unexpected provider request"); throw CancellationError() }
+        let failed = WebReadPageTool(call: unused, readImages: { _ in throw URLError(.timedOut) })
+        let result = try await failed.execute(["url": "https://example.com/page", "imagesOnly": true]).output
+        #expect(result["status"] == "images_unavailable")
+        #expect(result["text"] == nil)
+        let cancelled = WebReadPageTool(call: unused, readImages: { _ in throw CancellationError() })
+        do {
+            _ = try await cancelled.execute(["url": "https://example.com/page", "imagesOnly": true])
+            Issue.record("Cancellation swallowed")
+        } catch is CancellationError { }
+        do {
+            _ = try await failed.execute(["url": "https://example.com/page", "imagesOnly": "yes"])
+            Issue.record("Accepted a string flag")
+        } catch let error as ToolError { #expect(error.code == .invalidArguments) }
+    }
+
     @Test func resolvesReferencesAndExcludesCodeLinksAndUnsupportedURLs() {
         let markdown = """
         ![水豚](../photos/capybara.jpg)

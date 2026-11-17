@@ -153,6 +153,7 @@ private actor NativeAgentEngine {
                 hasPageReader: catalogue.contains { $0.name == "web_read_page" })
             var count = 0
             var webCoolingDown = false
+            var illustrationsFinished = false
             while true {
                 try Task.checkCancellation()
                 // Conservative byte budget works across CJK and tool payloads without shipping a tokenizer.
@@ -175,7 +176,10 @@ private actor NativeAgentEngine {
                 if webCoolingDown {
                     completionMessages.append(["role": "system", "content": "本轮所有联网来源正在冷却，网页搜索和读页已暂停；不要换词重试或等待冷却。本轮立即基于已取得的有效资料完成回答，无法核实的部分如实说明，不猜图片链接，不把历史回复当作已核实来源。"])
                 }
-                let activeTools = webCoolingDown ? available.filter {
+                if illustrationsFinished {
+                    completionMessages.append(["role": "system", "content": "本轮已完成最后一批 imagesOnly 配图查询，网页工具现已收起。立即基于已经取得的文字证据与相关图片完成回答；有几张合适图片就用几张，不为凑齐图片再搜索或编造图片。普通区别比较用一句结论、一个紧凑对比表和配图即可，不再逐项重复表格，也不额外增加行程推荐；用户明确要求详细内容时遵从。"])
+                }
+                let activeTools = webCoolingDown || illustrationsFinished ? available.filter {
                     !["web_search", "web_read_page"].contains($0["function"]?["name"]?.stringValue ?? "")
                 } : available
                 let response = try await client.complete(config: config, messages: completionMessages, tools: activeTools) { [events] text in
@@ -189,13 +193,21 @@ private actor NativeAgentEngine {
                     if !response.text.isEmpty { send(["type": "message", "taskID": .string(id), "text": .string(response.text)]) }
                     state(id, .completed, file: file); return
                 }
+                // imagesOnly explicitly means factual research is complete. One terminal image
+                // batch prevents optional illustrations from restarting the research loop.
+                let finalImageBatch = response.calls.allSatisfy { call in
+                    guard call["function"]?["name"] == "web_read_page",
+                          let raw = call["function"]?["arguments"]?.stringValue,
+                          let args = try? JSONDecoder().decode(JSONValue.self, from: Data(raw.utf8)) else { return false }
+                    return args["imagesOnly"] == true
+                }
                 var index = 0
                 while index < response.calls.count {
                     // Only adjacent, independent public-web reads may overlap. Writes, plugins,
                     // confirmation and ask_user remain barriers, preserving their original order.
-                    let batch = Array(response.calls[index...].prefix(3).prefix { call in
+                    let batch = Array(response.calls[index...].prefix { call in
                         let name = call["function"]?["name"]?.stringValue ?? ""
-                        return !webCoolingDown && ["web_search", "web_read_page"].contains(name) && catalogue.contains {
+                        return !webCoolingDown && !illustrationsFinished && ["web_search", "web_read_page"].contains(name) && catalogue.contains {
                             $0.name == name && $0.source == .web && $0.effect == .read && $0.confirmation == .never
                         }
                     })
@@ -211,11 +223,19 @@ private actor NativeAgentEngine {
                         let firstOrdinal = count + 1
                         count += batch.count
                         let results = try await withThrowingTaskGroup(of: (Int, JSONValue).self) { group in
-                            for (offset, call) in batch.enumerated() {
+                            for (offset, call) in batch.prefix(3).enumerated() {
                                 group.addTask { (offset, try await self.readTool(call, taskID: id, ordinal: firstOrdinal + offset)) }
                             }
+                            var next = min(3, batch.count)
                             var results: [(Int, JSONValue)] = []
-                            for try await result in group { results.append(result) }
+                            for try await result in group {
+                                results.append(result)
+                                if next < batch.count {
+                                    let offset = next, call = batch[next]
+                                    next += 1
+                                    group.addTask { (offset, try await self.readTool(call, taskID: id, ordinal: firstOrdinal + offset)) }
+                                }
+                            }
                             return results.sorted { $0.0 < $1.0 }
                         }
                         for (offset, result) in results {
@@ -237,8 +257,8 @@ private actor NativeAgentEngine {
                     let modelID = call["id"]?.stringValue ?? ""
                     var result: JSONValue
                     var question: String?
-                    if webCoolingDown && ["web_search", "web_read_page"].contains(name) {
-                        result = ["status": "failed", "error": ["message": "本轮联网来源均在冷却，不再重试；请使用已取得资料完成回答。"]]
+                    if (webCoolingDown || illustrationsFinished) && ["web_search", "web_read_page"].contains(name) {
+                        result = ["status": "failed", "error": ["message": "本轮网页查询已结束；请使用已取得资料完成回答，不再追加搜索。"]]
                     } else if name == "ask_user" {
                         if let q = arguments["question"]?.stringValue, !q.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, q.count <= 500 {
                             question = q; result = ["status": "awaitingInput", "question": .string(q)]
@@ -269,6 +289,7 @@ private actor NativeAgentEngine {
                     }
                     index += 1
                 }
+                illustrationsFinished = illustrationsFinished || finalImageBatch
             }
         } catch {
             if Task.isCancelled { state(id, .cancelled, file: file) }

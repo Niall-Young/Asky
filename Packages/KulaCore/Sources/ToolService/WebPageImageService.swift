@@ -14,10 +14,10 @@ public enum WebPageImageService {
         configuration.httpCookieStorage = nil
         configuration.urlCredentialStorage = nil
         configuration.urlCache = nil
-        configuration.timeoutIntervalForResource = 6
+        configuration.timeoutIntervalForResource = 3
         let session = URLSession(configuration: configuration, delegate: PublicPageRedirects(), delegateQueue: nil)
         defer { session.invalidateAndCancel() }
-        var request = URLRequest(url: url, timeoutInterval: 6)
+        var request = URLRequest(url: url, timeoutInterval: 3)
         request.setValue("text/html,application/xhtml+xml", forHTTPHeaderField: "Accept")
         request.setValue("Asky/1.0", forHTTPHeaderField: "User-Agent")
         let (bytes, response) = try await session.bytes(for: request)

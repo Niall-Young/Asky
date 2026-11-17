@@ -40,6 +40,17 @@ import ToolService
 }
 
 @Suite struct FreeWebSearchTests {
+    @Test func comparisonIntentWordsDoNotForceFallbackWhenSubjectsAreCovered() async throws {
+        let tool = WebSearchTool(call: { provider, _, _ in
+            #expect(provider == .parallel)
+            return Self.result("京都四景点：清水寺 金阁寺 伏见稻荷大社 岚山竹林", "木造舞台、金色楼阁、朱红鸟居与竹林小径")
+        })
+        let result = try await tool.execute(["query": "京都 清水寺 金阁寺 伏见稻荷大社 岚山竹林 区别 特点 比较"]).output
+        #expect(result["status"] == "matched")
+        #expect(result["attempts"]?.arrayValue?.count == 1)
+        #expect(!WebSearchQuality(query: "Kimi K3.1 特点").relevant(["title": "Kimi K2.5"]), "Subject/version coverage remains required")
+    }
+
     @Test func photoModifiersDoNotTriggerRedundantProviderFallback() async throws {
         let tool = WebSearchTool(call: { provider, _, _ in
             #expect(provider == .parallel, "The subject is covered; photo wording must not force backup search")

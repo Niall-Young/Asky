@@ -29,6 +29,45 @@ private func host(root: URL, script: ModelScript, tools: [ToolDefinition] = [], 
 }
 
 @Suite(.timeLimit(.minutes(1))) struct NativeRuntimeTests {
+    @Test func imageOnlyBatchEndsWebResearchEvenWhenOptionalImagesAreMissing() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let script = ModelScript([
+            NativeCompletion(calls: [call("web_read_page", ["imagesOnly": true], id: "photo-a"),
+                call("web_read_page", ["imagesOnly": true], id: "photo-b")]),
+            NativeCompletion(calls: [call("web_search", id: "unnecessary-research")]),
+            NativeCompletion(text: "文字资料支持的区别")])
+        let definitions = ["web_read_page", "web_search"].map {
+            ToolDefinition(name: $0, summary: $0, source: .web, effect: .read, confirmation: .never, externallyExposable: false)
+        }
+        let agent = host(root: root, script: script, tools: definitions) { request in
+            #expect(request.tool == "web_read_page")
+            return ExecutionResult(requestID: request.requestID, status: .completed,
+                output: ["status": "images_not_found", "images": [], "contentType": "image_metadata"])
+        }
+        let events = await collect(agent, AgentRequest(sessionID: "s", text: "比较这些景点"))
+        #expect(events.filter { if case .toolCall = $0 { true } else { false } }.count == 2)
+        let requests = await script.requests
+        #expect(requests[1]["tools"]?.arrayValue?.count == 1) // only ask_user remains
+        #expect(events.contains { if case .message(_, "文字资料支持的区别") = $0 { true } else { false } })
+        await agent.shutdown()
+    }
+
+    @Test func pendingWebReadDoesNotHoldBackNextIndependentRead() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let probe = RollingWebProbe()
+        let script = ModelScript([NativeCompletion(calls: (0..<4).map {
+            call("web_search", ["n": .number(Double($0))], id: "read-\($0)")
+        }), NativeCompletion(text: "完成")])
+        let definition = ToolDefinition(name: "web_search", summary: "read", source: .web,
+            effect: .read, confirmation: .never, externallyExposable: false)
+        let agent = host(root: root, script: script, tools: [definition]) { await probe.run($0) }
+        _ = await collect(agent, AgentRequest(sessionID: "s", text: "查询四个对象"))
+        #expect(await probe.fourthStartedBeforeSlowReadFinished)
+        await agent.shutdown()
+    }
+
     @Test func exhaustedWebSourcesStopFurtherNetworkCallsForThisTurn() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -384,6 +423,21 @@ private actor WebOverlapProbe {
             peak = max(peak, running)
             try? await Task.sleep(for: .milliseconds(30))
             running -= 1
+        }
+        return ExecutionResult(requestID: request.requestID, status: .completed)
+    }
+}
+
+private actor RollingWebProbe {
+    var slowReadFinished = false
+    var fourthStartedBeforeSlowReadFinished = false
+    func run(_ request: ActionRequest) async -> ExecutionResult {
+        let n = request.arguments["n"]?.numberValue ?? -1
+        if n == 0 {
+            try? await Task.sleep(for: .milliseconds(150))
+            slowReadFinished = true
+        } else if n == 3 {
+            fourthStartedBeforeSlowReadFinished = !slowReadFinished
         }
         return ExecutionResult(requestID: request.requestID, status: .completed)
     }
