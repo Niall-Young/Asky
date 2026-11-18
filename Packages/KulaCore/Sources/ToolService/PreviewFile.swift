@@ -19,6 +19,10 @@ public enum PreviewFile: Sendable {
         }
     }
 
+    public var isRegularFile: Bool {
+        (try? url.resolvingSymlinksInPath().resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
+    }
+
     public init?(url: URL) {
         guard url.isFileURL else { return nil }
         let ext = url.pathExtension.lowercased()

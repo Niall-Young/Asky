@@ -72,7 +72,7 @@ brew install --cask niall-young/asky/asky
 
 触发词可在“设置 › 指令”中自定义。更多操作与配置见[使用教程](https://asky.niallspace.workers.dev/docs)。
 
-在快速搜索中，支持预览的文件会把“快速预览”放在“更多”（`⌘K`）菜单首项。
+在快速搜索和剪贴板历史中，选中支持预览的项目时，“快速预览”会出现在“更多”（`⌘K`）菜单首项，并显示当前快捷键。
 
 如果 macOS 已将 `Ctrl + 空格` 用于切换输入法，Asky 可用已有的辅助功能权限在预览时优先处理这组按键。也可在“设置 › 触发快捷键”中为“文件与应用”和“剪贴板历史”各自修改“快速预览”快捷键。
 
@@ -166,7 +166,7 @@ Or download the DMG from [Releases](https://github.com/Niall-Young/Asky/releases
 
 Customize triggers in Settings › Commands. See the [User Guide](https://asky.niallspace.workers.dev/docs) for more actions and configuration.
 
-For supported files, Quick Preview is the first item in Quick Search’s More menu (`⌘K`).
+Select a supported item in Quick Search or Clipboard History to see Quick Preview and its current shortcut at the top of the More menu (`⌘K`).
 
 If macOS uses `Ctrl + Space` to switch input sources, Asky can use existing Accessibility access to handle the shortcut first when a preview is available. You can also change Quick Preview under Files and Applications and Clipboard History in Settings › Keyboard Shortcuts.
 

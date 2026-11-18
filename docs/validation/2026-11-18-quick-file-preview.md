@@ -21,3 +21,10 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer python3 App/Tests/run-a
 - Debug 构建和 KulaCore 测试通过。用 `python3 App/Tests/run-launcher-window-regression.py --file-preview --capture` 通过浅色与深色原生窗口回归。
 - 确认图片和 Markdown 将「快速预览」列为首项，普通文本和名称以 `.md` 结尾的目录不显示该项。在菜单首项按回车打开原有预览，快捷键标签随设置更新。
 - 额外的系统按键注入检查通过了启动器步骤，随后在剪贴板步骤出现失败。本次菜单入口通过常规原生窗口回归验收。
+
+## 剪贴板历史的「更多」菜单
+
+- Debug 构建和 KulaCore 测试通过。用 `python3 App/Tests/run-launcher-window-regression.py --file-preview --clipboard-only --capture` 通过浅色与深色剪贴板原生回归并核对截图。
+- 图片和单个 Markdown 文件将「快速预览」列为首项，右侧随设置更新快捷键。普通文本、多文件记录和名称以 `.md` 结尾的目录不显示该项。
+- 在首项按回车打开图片，点击首项打开 Markdown。原生回归还验证了预览快捷键的打开、关闭和重新绑定。
+- 组合回归在启动器焦点步骤中断，本轮以剪贴板专项回归验收。

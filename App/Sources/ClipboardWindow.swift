@@ -48,10 +48,11 @@ private final class ClipboardPanel: NSPanel {
 }
 
 enum ClipboardHistoryAction {
-    case copy, pasteKeepingOpen, delete, clearAll
+    case preview, copy, pasteKeepingOpen, delete, clearAll
 
     var title: String {
         switch self {
+        case .preview: "快速预览"
         case .copy: "复制到剪贴板"
         case .pasteKeepingOpen: "粘贴并保持窗口开启"
         case .delete: "删除记录"
@@ -61,10 +62,20 @@ enum ClipboardHistoryAction {
 
     var icon: String {
         switch self {
+        case .preview: "eye"
         case .copy: "doc.on.clipboard"
         case .pasteKeepingOpen: "cursor_3"
         case .delete: "trash"
         case .clearAll: "trash"
+        }
+    }
+
+    var shortcut: LocalShortcutAction? {
+        switch self {
+        case .preview: .clipboardPreview
+        case .copy: .clipboardCopy
+        case .delete: .delete
+        case .pasteKeepingOpen, .clearAll: nil
         }
     }
 }
@@ -89,8 +100,12 @@ final class ClipboardController {
     private var toastDismissTask: Task<Void, Never>?
     var actionsMenuFrame: CGRect = .zero
     var actionSelection = 0
+    private var presentedActionKinds: [ClipboardHistoryAction]?
     var isActionsMenuPresented = false {
-        didSet { updateOutsideClickDismissal() }
+        didSet {
+            presentedActionKinds = isActionsMenuPresented ? availableActionKinds : nil
+            updateOutsideClickDismissal()
+        }
     }
     private var isConfirmingClearAll = false
     private var hiding = false
@@ -99,7 +114,13 @@ final class ClipboardController {
     private var keepingOpenForPaste = false
     private let pasteTargetProvider: @MainActor () -> ClipboardPasteTarget
     private(set) var hasPasteTarget = false
-    var actionKinds: [ClipboardHistoryAction] { hasPasteTarget ? [.copy, .pasteKeepingOpen, .delete, .clearAll] : [.copy, .delete, .clearAll] }
+    var actionKinds: [ClipboardHistoryAction] { presentedActionKinds ?? availableActionKinds }
+
+    private var availableActionKinds: [ClipboardHistoryAction] {
+        var actions: [ClipboardHistoryAction] = hasPasteTarget ? [.copy, .pasteKeepingOpen, .delete, .clearAll] : [.copy, .delete, .clearAll]
+        if selectedPreviewFile?.isRegularFile == true { actions.insert(.preview, at: 0) }
+        return actions
+    }
     var isDragging: Bool { dragSource.active }
 
     func updateLayout() {
@@ -318,9 +339,12 @@ final class ClipboardController {
 
     func performSelectedAction(_ index: Int) {
         guard let item = selectedItem else { isActionsMenuPresented = false; return }
+        let actions = actionKinds
         isActionsMenuPresented = false
-        guard actionKinds.indices.contains(index) else { return }
-        switch actionKinds[index] {
+        guard actions.indices.contains(index) else { return }
+        switch actions[index] {
+        case .preview:
+            if let file = PreviewFile(clipboardItem: item) { showPreview(file, for: item) }
         case .copy: copy(item)
         case .pasteKeepingOpen: pasteSelection(keepingOpen: true)
         case .delete: delete(item)
@@ -328,11 +352,20 @@ final class ClipboardController {
         }
     }
 
+    private var selectedPreviewFile: PreviewFile? {
+        selectedItem.flatMap(PreviewFile.init(clipboardItem:))
+    }
+
     private func previewFile(for event: NSEvent) -> PreviewFile? {
         guard app.preferences.shortcut(.clipboardPreview).matches(event),
-              (panel.firstResponder as? NSTextView)?.hasMarkedText() != true,
-              let item = selectedItem else { return nil }
-        return PreviewFile(clipboardItem: item)
+              (panel.firstResponder as? NSTextView)?.hasMarkedText() != true else { return nil }
+        return selectedPreviewFile
+    }
+
+    private func showPreview(_ file: PreviewFile, for item: ClipboardItem) {
+        let label = item.kind == .image ? item.imageTitle : file.url.lastPathComponent
+        ContentPreviewWindow.quick.show(file: file, label: label, from: panel,
+            shortcut: app.preferences.shortcut(.clipboardPreview), onBlur: { [weak self] in self?.handleBlur() })
     }
 
     func handleActionKey(_ event: NSEvent) -> Bool {
@@ -342,9 +375,7 @@ final class ClipboardController {
         if let item = selectedItem, let file = previewFile(for: event) {
             if !event.isARepeat {
                 isActionsMenuPresented = false
-                let label = item.kind == .image ? item.imageTitle : file.url.lastPathComponent
-                ContentPreviewWindow.quick.show(file: file, label: label, from: panel,
-                    shortcut: app.preferences.shortcut(.clipboardPreview), onBlur: { [weak self] in self?.handleBlur() })
+                showPreview(file, for: item)
             }
             return true
         }
@@ -813,17 +844,14 @@ private struct ClipboardActionsMenu: View {
 
     var body: some View {
         VStack(spacing: 4) {
-            ForEach(controller.actionKinds.indices, id: \.self) { index in
+            ForEach(Array(controller.actionKinds.enumerated()), id: \.offset) { index, kind in
                 Button { controller.performSelectedAction(index) } label: {
                     HStack(spacing: 10) {
-                        let kind = controller.actionKinds[index]
                         Text(NSLocalizedString(kind.title, tableName: "Clipboard", comment: "Clipboard action"))
                             .foregroundStyle(kind == .delete || kind == .clearAll ? ThemeColor.kTextNegative : ThemeColor.kText)
                         Spacer(minLength: 8)
-                        if kind == .copy {
-                            LauncherActionKeyCap(value: controller.shortcutPreferences.shortcut(.clipboardCopy).label)
-                        } else if kind == .delete {
-                            LauncherActionKeyCap(value: controller.shortcutPreferences.shortcut(.delete).label)
+                        if let shortcut = kind.shortcut {
+                            LauncherActionKeyCap(value: controller.shortcutPreferences.shortcut(shortcut).label)
                         }
                     }
                     .font(.system(size: 13))

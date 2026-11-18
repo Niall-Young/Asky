@@ -150,26 +150,6 @@ enum LauncherWindowRegression {
         let embedded = await PreviewFile.loadMarkdownImage(at: image, in: root, maxPixelSize: 320)
         try require(embedded?.width == 320, "resolve local images inside the Markdown directory")
 
-        let results = [markdown, image, other, folder].map { url in
-            SearchResult(source: .file, target: TargetRef(kind: "file", identifier: url.path),
-                         title: url.lastPathComponent, actions: [.open, .revealInFinder], score: 100)
-        }
-        let model = LauncherModel(app: app, searchProviders: [CompactProvider(source: .file, results: results)])
-        let launcher = LauncherController(model: model)
-        NSApp.activate(ignoringOtherApps: true)
-        model.query = "Preview"
-        launcher.show()
-        defer { launcher.hide() }
-        for _ in 0..<80 {
-            if model.results.filter({ $0.source == .file }).count == results.count { break }
-            try await Task.sleep(for: .milliseconds(50))
-        }
-        guard let launcherPanel = NSApp.windows.first(where: { $0 is LauncherPanel && $0.isVisible }),
-              model.results.filter({ $0.source == .file }).count == results.count else {
-            throw NSError(domain: "AskyFilePreview", code: 1,
-                          userInfo: [NSLocalizedDescriptionKey: "Launcher and file fixtures must be visible before testing"])
-        }
-
         func key(_ code: UInt16, _ modifiers: NSEvent.ModifierFlags, in window: NSWindow, repeatKey: Bool = false) {
             let character = switch code {
             case 36: "\r"
@@ -233,50 +213,82 @@ enum LauncherWindowRegression {
             return preview
         }
 
-        for url in [markdown, image] {
-            model.selection = model.results.firstIndex { $0.target.identifier == url.path }!
-            try require(model.secondaryActions.first?.title == "快速预览" &&
-                        model.secondaryActions.first?.shortcut == "⌃ Space",
-                        "supported files show Quick Preview first with its shortcut")
-            let preview = try await open(url.lastPathComponent, from: launcherPanel)
-            key(53, [], in: preview)
+        func checkLauncherPreview() async throws {
+            let results = [markdown, image, other, folder].map { url in
+                SearchResult(source: .file, target: TargetRef(kind: "file", identifier: url.path),
+                             title: url.lastPathComponent, actions: [.open, .revealInFinder], score: 100)
+            }
+            let model = LauncherModel(app: app, searchProviders: [CompactProvider(source: .file, results: results)])
+            let launcher = LauncherController(model: model)
+            model.query = "Preview"
+            launcher.show()
+            defer { launcher.hide() }
+            guard let launcherPanel = NSApp.windows.first(where: { $0 is LauncherPanel }) as? LauncherPanel else {
+                throw NSError(domain: "AskyFilePreview", code: 1)
+            }
+            for _ in 0..<80 {
+                if model.results.filter({ $0.source == .file }).count == results.count { break }
+                try await Task.sleep(for: .milliseconds(50))
+            }
+            try require(launcherPanel.isVisible && model.results.filter({ $0.source == .file }).count == results.count,
+                        "launcher and file fixtures must be visible before testing")
+            func selectLauncherFile(_ url: URL) throws {
+                guard let index = model.results.firstIndex(where: { $0.target.identifier == url.path }) else {
+                    throw NSError(domain: "AskyFilePreview", code: 4,
+                                  userInfo: [NSLocalizedDescriptionKey: "Missing launcher fixture \(url.lastPathComponent)"])
+                }
+                model.selection = index
+            }
+
+            for url in [markdown, image] {
+                try selectLauncherFile(url)
+                try require(model.secondaryActions.first?.title == "快速预览" &&
+                            model.secondaryActions.first?.shortcut == "⌃ Space",
+                            "supported files show Quick Preview first with its shortcut")
+                let preview = try await open(url.lastPathComponent, from: launcherPanel)
+                key(53, [], in: preview)
+                try await Task.sleep(for: .milliseconds(100))
+                try require(!preview.isVisible && launcherPanel.isKeyWindow, "Escape restores the search field")
+                try require(model.query == "Preview" && model.selectedActionResult?.target.identifier == url.path,
+                            "closing a preview preserves the search and selected result")
+            }
+            try selectLauncherFile(markdown)
+            key(40, .command, in: launcherPanel)
+            try require(model.isActionsMenuPresented && model.actionSelection == 0 &&
+                        model.secondaryActions.first?.title == "快速预览",
+                        "More opens with Quick Preview highlighted")
+            try await capture("launcher-more", window: launcherPanel)
+            try require(app.preferences.setShortcut(.launcherPreview, .init(code: 35, modifiers: 4608, label: "⌃⇧ P")),
+                        "launcher preview shortcut can be remapped")
+            try require(model.secondaryActions.first?.shortcut == "⌃⇧ P", "More shows the configured shortcut")
+            key(36, [], in: launcherPanel)
+            guard let menuPreview = ContentPreviewWindow.quick.window else {
+                throw NSError(domain: "AskyFilePreview", code: 3)
+            }
+            try require(menuPreview.isKeyWindow && menuPreview.title == markdown.lastPathComponent && !model.isActionsMenuPresented,
+                        "Return on the first menu item opens the file preview")
+            key(53, [], in: menuPreview)
             try await Task.sleep(for: .milliseconds(100))
-            try require(!preview.isVisible && launcherPanel.isKeyWindow, "Escape restores the search field")
-            try require(model.query == "Preview" && model.selectedActionResult?.target.identifier == url.path,
-                        "closing a preview preserves the search and selected result")
+            try selectLauncherFile(other)
+            key(35, [.control, .shift], in: launcherPanel)
+            try require(ContentPreviewWindow.quick.window?.isVisible == false, "plain files have no preview")
+            for url in [other, folder] {
+                try selectLauncherFile(url)
+                try require(!model.secondaryActions.contains { $0.title == "快速预览" },
+                            "unsupported files and folders omit Quick Preview")
+            }
         }
-        model.selection = model.results.firstIndex { $0.target.identifier == markdown.path }!
-        key(40, .command, in: launcherPanel)
-        try require(model.isActionsMenuPresented && model.actionSelection == 0 &&
-                    model.secondaryActions.first?.title == "快速预览",
-                    "More opens with Quick Preview highlighted")
-        try await capture("launcher-more", window: launcherPanel)
-        try require(app.preferences.setShortcut(.launcherPreview, .init(code: 35, modifiers: 4608, label: "⌃⇧ P")),
-                    "launcher preview shortcut can be remapped")
-        try require(model.secondaryActions.first?.shortcut == "⌃⇧ P", "More shows the configured shortcut")
-        key(36, [], in: launcherPanel)
-        guard let menuPreview = ContentPreviewWindow.quick.window else {
-            throw NSError(domain: "AskyFilePreview", code: 3)
-        }
-        try require(menuPreview.isKeyWindow && menuPreview.title == markdown.lastPathComponent && !model.isActionsMenuPresented,
-                    "Return on the first menu item opens the file preview")
-        key(53, [], in: menuPreview)
-        try await Task.sleep(for: .milliseconds(100))
-        model.selection = model.results.firstIndex { $0.target.identifier == other.path }!
-        key(35, [.control, .shift], in: launcherPanel)
-        try require(ContentPreviewWindow.quick.window?.isVisible == false, "plain files have no preview")
-        for url in [other, folder] {
-            model.selection = model.results.firstIndex { $0.target.identifier == url.path }!
-            try require(!model.secondaryActions.contains { $0.title == "快速预览" },
-                        "unsupported files and folders omit Quick Preview")
-        }
-        launcher.hide()
+
+        NSApp.activate(ignoringOtherApps: true)
+        if !CommandLine.arguments.contains("--clipboard-only") { try await checkLauncherPreview() }
 
         let store = ClipboardStore(app.store)
         let entries = [
             ClipboardItem(kind: .image, filePath: clipboardImage.path, byteSize: png.count, contentHash: "image"),
             ClipboardItem(kind: .file, text: markdown.lastPathComponent, filePaths: [markdown.path], byteSize: 1, contentHash: "markdown"),
-            ClipboardItem(kind: .file, text: "Multiple", filePaths: [image.path, markdown.path], byteSize: 1, contentHash: "multi")
+            ClipboardItem(kind: .file, text: "Multiple", filePaths: [image.path, markdown.path], byteSize: 1, contentHash: "multi"),
+            ClipboardItem(kind: .text, text: "Clipboard text", byteSize: 14, contentHash: "text"),
+            ClipboardItem(kind: .file, text: folder.lastPathComponent, filePaths: [folder.path], byteSize: 1, contentHash: "folder")
         ]
         for item in entries { try store.insert(item) }
         let clipboard = ClipboardController(app: app, pasteTargetProvider: { .unavailable })
@@ -294,6 +306,8 @@ enum LauncherWindowRegression {
         }
         for (item, title) in zip(entries, [entries[0].imageTitle, markdown.lastPathComponent]) {
             clipboard.select(item)
+            try require(clipboard.actionKinds == [.preview, .copy, .delete, .clearAll],
+                        "clipboard images and Markdown show Quick Preview first")
             let preview = try await open(title, from: clipboardPanel)
             try await previewShortcut(49, .control, in: preview)
             try await Task.sleep(for: .milliseconds(100))
@@ -303,9 +317,44 @@ enum LauncherWindowRegression {
         clipboard.select(entries[2])
         key(49, .control, in: clipboardPanel)
         try require(ContentPreviewWindow.quick.window?.isVisible == false, "a batch of files has no single-file preview")
+        for item in entries.dropFirst(2) {
+            clipboard.select(item)
+            try require(clipboard.actionKinds == [.copy, .delete, .clearAll],
+                        "clipboard multi-file records, text and folders omit Quick Preview")
+        }
+        clipboard.select(entries[0])
+        key(40, .command, in: clipboardPanel)
+        try require(clipboard.isActionsMenuPresented && clipboard.actionSelection == 0,
+                    "Clipboard More opens with Quick Preview highlighted")
+        try await capture("clipboard-more", window: clipboardPanel)
+        key(36, [], in: clipboardPanel)
+        try require(ContentPreviewWindow.quick.window?.isKeyWindow == true &&
+                    ContentPreviewWindow.quick.window?.title == entries[0].imageTitle && !clipboard.isActionsMenuPresented,
+                    "Return on the first clipboard menu item opens the original image")
+        if let preview = ContentPreviewWindow.quick.window { key(53, [], in: preview) }
+        try await Task.sleep(for: .milliseconds(100))
         clipboard.select(entries[1])
         try require(app.preferences.setShortcut(.clipboardPreview, .init(code: 35, modifiers: 4608, label: "⌃⇧ P")),
                     "an unused shortcut can replace the clipboard default")
+        try require(clipboard.actionKinds.first?.shortcut.map { clipboard.shortcutPreferences.shortcut($0).label } == "⌃⇧ P",
+                    "the Clipboard More row follows the configured preview shortcut")
+        key(40, .command, in: clipboardPanel)
+        try await Task.sleep(for: .milliseconds(250))
+        let menuFrame = clipboard.actionsMenuFrame
+        try require(clipboard.isActionsMenuPresented && !menuFrame.isEmpty, "the clipboard menu is laid out before clicking")
+        let previewRow = NSPoint(x: menuFrame.midX, y: menuFrame.maxY - 26)
+        for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+            let click = NSEvent.mouseEvent(with: type, location: previewRow, modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: clipboardPanel.windowNumber,
+                context: nil, eventNumber: 0, clickCount: 1, pressure: type == .leftMouseDown ? 1 : 0)!
+            NSApp.postEvent(click, atStart: false)
+        }
+        try await Task.sleep(for: .milliseconds(150))
+        try require(ContentPreviewWindow.quick.window?.isKeyWindow == true &&
+                    ContentPreviewWindow.quick.window?.title == markdown.lastPathComponent && !clipboard.isActionsMenuPresented,
+                    "clicking the first clipboard menu row opens the Markdown preview")
+        if let preview = ContentPreviewWindow.quick.window { key(53, [], in: preview) }
+        try await Task.sleep(for: .milliseconds(100))
         key(49, .control, in: clipboardPanel)
         try require(ContentPreviewWindow.quick.window?.isVisible == false, "the old shortcut is released on remap")
         let preview = try await open(markdown.lastPathComponent, from: clipboardPanel, code: 35, modifiers: [.control, .shift])
