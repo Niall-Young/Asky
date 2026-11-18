@@ -1,5 +1,6 @@
 import Foundation
 import Contracts
+import ToolService
 
 public struct NativeCompletion: Sendable {
     public var text: String
@@ -32,11 +33,12 @@ public enum NativeModelError: LocalizedError {
 struct NativeCompletionDecoder {
     var text = ""
     var calls: [Int: [String: String]] = [:]
+    var lastCallIndex = 0
     var finish: String?
     var bytes = 0
     var reasoning = ""
     mutating func consume(_ value: JSONValue) throws -> String? {
-        if value["error"] != nil { throw NativeModelError.malformed("提供方返回错误") }
+        if value["error"] != nil { throw NativeModelError.malformed(CoreLocalization.text("提供方返回错误")) }
         guard let choice = value["choices"]?.arrayValue?.first else { return nil } // usage / heartbeat
         if let reason = choice["finish_reason"]?.stringValue { finish = reason }
         let delta = choice["delta"] ?? choice["message"] ?? [:]
@@ -46,9 +48,11 @@ struct NativeCompletionDecoder {
             reasoning += fragment; bytes += fragment.utf8.count
         }
         for call in delta["tool_calls"]?.arrayValue ?? [] {
-            let rawIndex = call["index"]?.numberValue ?? Double(calls.count)
+            let nextIndex = call["id"] == nil ? lastCallIndex : (calls.keys.max().map { $0 + 1 } ?? 0)
+            let rawIndex = call["index"]?.numberValue ?? Double(nextIndex)
             guard rawIndex.isFinite, rawIndex.rounded() == rawIndex, rawIndex >= 0, rawIndex < 128 else { throw NativeModelError.limit }
             let index = Int(rawIndex)
+            lastCallIndex = index
             var current = calls[index] ?? ["id": "", "name": "", "arguments": ""]
             for (key, fragment) in [("id", call["id"]), ("name", call["function"]?["name"]), ("arguments", call["function"]?["arguments"])] {
                 if let fragment = fragment?.stringValue { current[key, default: ""] += fragment; bytes += fragment.utf8.count }
@@ -60,15 +64,17 @@ struct NativeCompletionDecoder {
     }
 
     func result() throws -> NativeCompletion {
-        guard finish == "stop" || finish == "tool_calls" else { throw NativeModelError.malformed("输出中断或达到生成上限") }
+        guard finish == "stop" || finish == "tool_calls" else { throw NativeModelError.malformed(CoreLocalization.text("输出中断或达到生成上限")) }
         var ids = Set<String>()
         let tools: [JSONValue] = try calls.keys.sorted().map { index in
             let call = calls[index]!
+            let arguments = call["arguments"] ?? ""
+            let raw = arguments.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "{}" : arguments
             guard let id = call["id"], !id.isEmpty, ids.insert(id).inserted,
                   let name = call["name"], !name.isEmpty,
-                  let raw = call["arguments"], let data = raw.data(using: .utf8),
+                  let data = raw.data(using: .utf8),
                   let args = try? JSONDecoder().decode(JSONValue.self, from: data), args.objectValue != nil else {
-                throw NativeModelError.malformed("工具参数或调用标识无效")
+                throw NativeModelError.malformed(CoreLocalization.text("工具参数或调用标识无效"))
             }
             return ["id": .string(id), "type": "function", "function": ["name": .string(name), "arguments": .string(raw)]]
         }
@@ -82,7 +88,7 @@ public struct NativeModelClient: Sendable {
     public init(transport: Transport? = nil) {
         if let transport { self.transport = transport }
         else {
-            let connection = NativeHTTPConnection()
+            let connection = ModelHTTPConnection()
             self.transport = { request, delta in
                 try await Self.send(request, session: connection.session, delta: delta)
             }
@@ -91,12 +97,7 @@ public struct NativeModelClient: Sendable {
 
     func complete(config: RuntimeLaunchConfig, messages: [JSONValue], tools: [JSONValue],
                   delta: @escaping @Sendable (String) -> Void) async throws -> NativeCompletion {
-        guard var url = URLComponents(string: config.baseURL), let host = url.host,
-              url.scheme == "https" || (url.scheme == "http" && ["127.0.0.1", "localhost", "::1"].contains(host)),
-              url.user == nil, url.password == nil, url.query == nil, url.fragment == nil else { throw NativeModelError.invalidURL }
-        let path = url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        url.path = "/" + (path.hasSuffix("chat/completions") ? path : (path.isEmpty ? "chat/completions" : path + "/chat/completions"))
-        guard let endpoint = url.url else { throw NativeModelError.invalidURL }
+        guard let endpoint = try? ModelHTTPConnection.endpoint(config.baseURL) else { throw NativeModelError.invalidURL }
         var request = URLRequest(url: endpoint, timeoutInterval: 120)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -104,7 +105,7 @@ public struct NativeModelClient: Sendable {
         request.setValue("Bearer " + config.apiKey, forHTTPHeaderField: "Authorization")
         var body: [String: JSONValue] = ["model": .string(config.model), "messages": .array(messages), "stream": true, "max_tokens": 8192]
         // Matches the former runtime's thinkingLevel=off. Custom endpoints are not given vendor flags.
-        if host == "api.deepseek.com" { body["thinking"] = ["type": "disabled"] }
+        if endpoint.host?.lowercased() == "api.deepseek.com" { body["thinking"] = ["type": "disabled"] }
         if !tools.isEmpty { body["tools"] = .array(tools); body["tool_choice"] = "auto" }
         request.httpBody = try JSONEncoder().encode(JSONValue.object(body))
         return try await transport(request, delta)
@@ -116,7 +117,7 @@ public struct NativeModelClient: Sendable {
         for attempt in 0...1 {
             do {
                 let (stream, response) = try await session.bytes(for: request)
-                guard let http = response as? HTTPURLResponse else { throw NativeModelError.malformed("不是 HTTP 响应") }
+                guard let http = response as? HTTPURLResponse else { throw NativeModelError.malformed(CoreLocalization.text("不是 HTTP 响应")) }
                 guard (200..<300).contains(http.statusCode) else {
                     if attempt == 0 && (http.statusCode == 429 || (500...599).contains(http.statusCode)) {
                         try await Task.sleep(for: .seconds(1)); continue
@@ -163,24 +164,6 @@ public struct NativeModelClient: Sendable {
                 try await Task.sleep(for: .seconds(1))
             }
         }
-        throw NativeModelError.malformed("请求未完成")
+        throw NativeModelError.malformed(CoreLocalization.text("请求未完成"))
     }
-}
-
-/// Reuse HTTP connections across tool rounds; release sockets with the idle runtime.
-private final class NativeHTTPConnection: Sendable {
-    let session: URLSession
-    init() {
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.httpCookieStorage = nil; configuration.urlCredentialStorage = nil; configuration.urlCache = nil
-        configuration.timeoutIntervalForRequest = 120
-        configuration.timeoutIntervalForResource = 120
-        session = URLSession(configuration: configuration, delegate: NoModelRedirects(), delegateQueue: nil)
-    }
-    deinit { session.invalidateAndCancel() }
-}
-
-private final class NoModelRedirects: NSObject, URLSessionTaskDelegate {
-    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
-                    newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) { completionHandler(nil) }
 }

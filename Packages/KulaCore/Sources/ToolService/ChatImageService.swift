@@ -19,7 +19,7 @@ public actor ChatImageService {
         configuration.httpCookieStorage = nil
         configuration.urlCredentialStorage = nil
         configuration.urlCache = nil
-        session = URLSession(configuration: configuration)
+        session = URLSession(configuration: configuration, delegate: PublicPageRedirects(), delegateQueue: nil)
     }
 
     init(session: URLSession) { self.session = session }
@@ -91,6 +91,7 @@ public actor ChatImageService {
     private func remoteData(from url: URL) async throws -> Data {
         guard Self.supports(url) else { throw URLError(.unsupportedURL) }
         var request = URLRequest(url: url)
+        request.setValue("Asky/1.0", forHTTPHeaderField: "User-Agent")
         request.setValue("image/*", forHTTPHeaderField: "Accept")
         let (bytes, response) = try await session.bytes(for: request)
         guard let response = response as? HTTPURLResponse,

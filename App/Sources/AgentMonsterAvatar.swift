@@ -241,6 +241,12 @@ struct AgentAvatarPicker: View {
         .frame(width: showing ? 260 : 36, height: showing ? 340 : 36, alignment: .topLeading)
         .animation(reduceMotion ? nil : .spring(response: 0.28, dampingFraction: 0.58), value: showing)
         .onChange(of: showing) { _, value in value ? startMonitoring() : stopMonitoring() }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { event in
+            if let owner = menuAnchor.view?.window, event.object as? NSWindow === owner { showing = false; stopMonitoring() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { event in
+            if let owner = menuAnchor.view?.window, event.object as? NSWindow === owner { showing = false; stopMonitoring() }
+        }
         .onDisappear { showing = false; stopMonitoring() }
     }
 
@@ -311,8 +317,9 @@ struct AgentAvatarPicker: View {
                 }
                 if let view = menuAnchor.view, event.window === view.window,
                    view.bounds.contains(view.convert(event.locationInWindow, from: nil)) { return false }
+                let sameWindow = event.window != nil && event.window === menuAnchor.view?.window
                 showing = false
-                return true
+                return sameWindow
             }
             return consumed ? nil : event
         }

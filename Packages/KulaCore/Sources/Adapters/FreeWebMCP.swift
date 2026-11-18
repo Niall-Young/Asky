@@ -276,7 +276,7 @@ enum FreeWebMCP {
 
     static func publicURL(_ value: String) -> URL? {
         guard let url = URL(string: value), ["http", "https"].contains(url.scheme?.lowercased() ?? ""),
-              url.user == nil, url.password == nil, let host = url.host?.lowercased(), host.contains("."),
+              url.user == nil, url.password == nil, let host = url.host?.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: ".")), host.contains("."),
               !host.contains(":"), !host.allSatisfy({ $0.isNumber || $0 == "." }),
               !["localhost", "local", "internal", "test", "invalid"].contains(where: { host == $0 || host.hasSuffix("." + $0) }) else { return nil }
         return url

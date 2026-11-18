@@ -751,7 +751,7 @@ private struct MemorySettings: View {
             ))
             Button {
                 try? app.memory.ensureExists()
-                NSWorkspace.shared.activateFileViewerSelecting([app.memory.indexURL])
+                ToolService.revealInFinder(app.memory.indexURL)
             } label: {
                 LabeledContent {
                     Image(mingCute: "arrow.up.forward.app").foregroundStyle(.secondary)
@@ -789,8 +789,7 @@ private struct MCPSettings: View {
                     .font(.system(size: 11, design: .monospaced)).textSelection(.enabled)
                 HStack(spacing: 12) {
                     SettingsButton(NSLocalizedString("复制配置", comment: "")) {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(Self.configSnippet(credential: issued.credential), forType: .string)
+                        ClipboardAccess.copyConcealed(Self.configSnippet(credential: issued.credential))
                     }
                     SettingsButton(NSLocalizedString("我已保存", comment: "")) { self.issued = nil }
                     Spacer()

@@ -47,7 +47,9 @@ enum PluginWorker {
                                       args.allSatisfy({ $0.stringValue != nil }) else { throw ToolError(.invalidArguments, CoreLocalization.text("CLI 参数无效")) }
                                 let cwd = frame["cwd"]?.stringValue.map { URL(filePath: $0) } ?? directory
                                 let timeout = min(120, max(1, frame["timeoutSeconds"]?.numberValue ?? 20))
-                                value = try PluginProcess.commandSync(executable, args.compactMap(\.stringValue), cwd: cwd, seconds: timeout, control: control).json
+                                value = try control.withChild { child in
+                                    try PluginProcess.commandSync(executable, args.compactMap(\.stringValue), cwd: cwd, seconds: timeout, control: child).json
+                                }
                             default: throw ToolError(.protocolError, CoreLocalization.text("未知插件宿主调用"))
                             }
                             try send(["id": id, "value": value])

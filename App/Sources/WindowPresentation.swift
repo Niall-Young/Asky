@@ -18,9 +18,9 @@ final class WindowPresentation: NSObject {
         }
     }
 
-    func show(_ window: NSWindow, afterActivation: Bool = false) {
+    func show(_ window: NSWindow, afterActivation: Bool = false, level: NSWindow.Level = .normal) {
         if pendingWindow !== window { cancelPending() }
-        window.level = .normal
+        window.level = level
         window.hidesOnDeactivate = false
         if window.isMiniaturized { window.deminiaturize(nil) }
         pendingWindow = window

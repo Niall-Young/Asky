@@ -1,19 +1,8 @@
 import Foundation
 import Contracts
+import ToolService
 
-/// Minimal snapshot of an incomplete Reminders item.
-public struct TaskSnapshot: Sendable, Hashable {
-    public var id: String
-    public var title: String
-    public var due: Date?
-    public var list: String
-    public init(id: String, title: String, due: Date? = nil, list: String = "") {
-        self.id = id
-        self.title = title
-        self.due = due
-        self.list = list
-    }
-}
+public typealias TaskSnapshot = Contracts.TaskSnapshot
 
 /// Everything the advisor may look at. Callers pass only sources the user allowed for AI use.
 public struct AdvisorInput: Sendable {
@@ -301,15 +290,17 @@ public struct ChatCompletionClient: Sendable {
     }
 
     public func complete(system: String, user: String) async throws -> String {
-        var req = URLRequest(url: baseURL.appending(path: "chat/completions"), timeoutInterval: 60)
+        var req = URLRequest(url: try ModelHTTPConnection.endpoint(baseURL.absoluteString), timeoutInterval: 60)
         req.httpMethod = "POST"
         req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.httpBody = try JSONSerialization.data(withJSONObject: [
+        var body: [String: Any] = [
             "model": model, "temperature": 0.2, "max_tokens": 1200,
             "messages": [["role": "system", "content": system], ["role": "user", "content": user]],
-        ])
-        let (data, resp) = try await URLSession.shared.data(for: req)
+        ]
+        if baseURL.host?.lowercased() == "api.deepseek.com" { body["thinking"] = ["type": "disabled"] }
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, resp) = try await ModelHTTPConnection.data(for: req)
         guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw URLError(.badServerResponse)
         }

@@ -81,7 +81,8 @@ with tempfile.TemporaryDirectory(prefix='asky-dmg-') as temp:
             raise RuntimeError('Finder did not persist the installer layout')
         subprocess.run(['sync'], check=True)
     finally:
-        subprocess.run(['hdiutil', 'detach', str(mount)], check=True)
+        if subprocess.run(['hdiutil', 'detach', str(mount)]).returncode:
+            subprocess.run(['hdiutil', 'detach', '-force', str(mount)], check=True)
     subprocess.run(['hdiutil', 'convert', str(writable), '-format', 'UDZO', '-o', str(dmg)], check=True)
     subprocess.run(['codesign', '--force', '--sign', args.signing_identity,
                     '--timestamp', str(dmg)], check=True)

@@ -19,11 +19,19 @@ import Foundation
         #expect(Calculator.evaluate(input) == expected)
     }
 
-    @Test(arguments: ["hello", "1/0", "-5", "42", "2+", "system(\"ls\")", "1+2;rm",
+    @Test(arguments: ["hello", "1/0", "+8613800138000", "- 5", "1e-5", "-5", "42", "2+", "system(\"ls\")", "1+2;rm",
                       "（12－1", "（12－1）÷0", "１２", "−５", "（12－1）×", "１＋２；rm", "[1+2)", "【1+2", "{[1+2}]", "2 3+4",
                       "1e+2.3", "sqrt(-1)", "√-9", "sqrt(9", "10%0", "2^^3"])
     func rejects(_ input: String) {
         #expect(Calculator.evaluate(input) == nil)
+    }
+
+    @Test func inchAbbreviationAndSmallConversions() throws {
+        for input in ["10 in to cm", "10 in cm", "10 in in cm"] {
+            #expect(try #require(UnitConverter.convert(input)).formattedValue == "25.4")
+        }
+        let tiny = try #require(UnitConverter.convert("0.1 mm to km"))
+        #expect(Double(tiny.formattedValue) == 1e-7)
     }
 
     @Test func boundedRecursion() {

@@ -87,18 +87,18 @@ public final class MCPLinkServer: Sendable {
         let dir = (path as NSString).deletingLastPathComponent
         try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true,
                                                 attributes: [.posixPermissions: 0o700])
+        if path == MCPLink.defaultSocketPath() {
+            try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: dir)
+        }
         unlink(path)
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { throw POSIXError(.EMFILE) }
-        let old = umask(0o077)
         let rc = withUnixAddress(path) { bind(fd, $0, $1) }
-        umask(old)
-        guard rc == 0, listen(fd, 8) == 0 else {
+        guard rc == 0, chmod(path, 0o600) == 0, listen(fd, 8) == 0 else {
             let e = errno
             close(fd)
             throw POSIXError(POSIXErrorCode(rawValue: e) ?? .EADDRINUSE)
         }
-        chmod(path, 0o600)
         _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
         let src = DispatchSource.makeReadSource(fileDescriptor: fd, queue: queue)
         src.setEventHandler { [weak self] in self?.acceptPending(fd) }
@@ -175,40 +175,42 @@ private final class Connection: @unchecked Sendable {
     }
 
     func start() {
-        let fd = fd
-        let frames = AsyncStream<Data>(bufferingPolicy: .bufferingOldest(16)) { cont in
-            let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: false)
-            let framer = FramerBox()
-            handle.readabilityHandler = { h in
-                let d = h.availableData
-                if d.isEmpty {
-                    h.readabilityHandler = nil
-                    cont.finish()
-                    return
+        let source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: DispatchQueue(label: "asky.mcp.connection"))
+        let framer = ConnectionFramer()
+        source.setCancelHandler { [fd, onClose] in close(fd); onClose() }
+        source.setEventHandler { [self] in
+            var bytes = [UInt8](repeating: 0, count: 64 * 1024)
+            let n = Darwin.read(fd, &bytes, bytes.count)
+            if n < 0, errno == EINTR { return }
+            guard n > 0 else { source.cancel(); return }
+            var oversized = false
+            let lines = framer.value.push(Data(bytes[..<n])) { oversized = true }
+            guard !oversized else { source.cancel(); return }
+            guard !lines.isEmpty else { return }
+            // Pause reads while the batch is handled. The socket supplies backpressure.
+            source.suspend()
+            Task {
+                defer { source.resume() }
+                for line in lines {
+                    onActivity(true)
+                    let keep = await handle(line)
+                    onActivity(false)
+                    if !keep { source.cancel(); return }
                 }
-                var oversized = false
-                for f in framer.push(d, onOversize: { oversized = true }) { cont.yield(f) }
-                if oversized { h.readabilityHandler = nil; cont.finish() }
             }
-            cont.onTermination = { _ in handle.readabilityHandler = nil }
         }
-        Task {
-            for await frame in frames {
-                onActivity(true)
-                let keep = await handle(frame)
-                onActivity(false)
-                guard keep else { break }
-            }
-            close(fd)
-            onClose()
-        }
+        source.activate()
     }
+
+    // Confined to the serial read-source queue.
+    private final class ConnectionFramer: @unchecked Sendable { var value = LineFramer() }
 
     /// Returns false to drop the connection.
     private func handle(_ line: Data) async -> Bool {
         guard let frame = try? JSONDecoder().decode(MCPLink.ClientFrame.self, from: line) else { return false }
         switch frame {
         case .hello(let version, let cred):
+            guard credential == nil else { return false }
             guard version == MCPLink.version else { return reply(.denied(message: CoreLocalization.text("协议版本不匹配"))) && false }
             guard let inst = gateway.authenticate(cred), inst.enabled else {
                 return reply(.denied(message: CoreLocalization.text("凭据无效或实例未启用"))) && false
@@ -229,20 +231,14 @@ private final class Connection: @unchecked Sendable {
 
     private func reply(_ f: MCPLink.ServerFrame) -> Bool {
         guard let d = try? MCPLink.encode(f) else { return false }
-        return writeAll(fd, d)
-    }
-}
-
-/// Readability handlers run serially; the lock only satisfies Sendable checking.
-private final class FramerBox: Sendable {
-    private let framer = OSAllocatedUnfairLock(initialState: LineFramer())
-    func push(_ d: Data, onOversize: () -> Void) -> [Data] {
-        let (out, over) = framer.withLock { state in
-            var over = false
-            let out = state.push(d) { over = true }
-            return (out, over)
+        if d.count - 1 > MCPLink.maxFrameBytes {
+            let id: Int
+            switch f {
+            case .result(let request, _), .tools(let request, _): id = request
+            default: return false
+            }
+            return reply(.failure(id: id, message: CoreLocalization.text("模型响应超过大小上限")))
         }
-        if over { onOversize() }
-        return out
+        return writeAll(fd, d)
     }
 }

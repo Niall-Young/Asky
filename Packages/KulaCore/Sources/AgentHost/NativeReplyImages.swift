@@ -56,10 +56,23 @@ enum NativeReplyImages {
             } else if end < text.endIndex, text[end] == "[", let close = closing(end, open: "[", close: "]") {
                 end = text.index(after: close)
             }
+            if end == text.index(after: labelEnd), text[next..<labelEnd].contains("![") {
+                // An unresolved outer label may contain independent rendered images.
+                // Scan those individually to keep valid siblings and surrounding prose.
+                index = text.index(after: next)
+                continue
+            }
             let fragment = String(text[index..<end]) + "\n\n" + definitions
-            if let parsed = try? AttributedString(markdown: fragment),
-               let url = parsed.runs.compactMap(\.imageURL).first {
-                result.append(Image(url: url, range: index..<end))
+            if let parsed = try? AttributedString(markdown: fragment) {
+                var range = index..<end
+                if index > text.startIndex, text[text.index(before: index)] == "[",
+                   text[end...].hasPrefix("]("),
+                   let close = closing(text.index(after: end), open: "(", close: ")") {
+                    range = text.index(before: index)..<text.index(after: close)
+                }
+                for url in Set(parsed.runs.compactMap(\.imageURL)) {
+                    result.append(Image(url: url, range: range))
+                }
             }
             index = end
         }
@@ -67,7 +80,8 @@ enum NativeReplyImages {
     }
 
     static func removing(_ rejected: Set<URL>, from text: String) -> String {
-        var output = text
+        var output = ""
+        var cursor = text.startIndex
         var ranges: [Range<String.Index>] = []
         for image in images(in: text) where rejected.contains(image.url) {
             ranges.append(image.range)
@@ -77,14 +91,16 @@ enum NativeReplyImages {
                   text[image.range.upperBound..<lineEnd].trimmingCharacters(in: .whitespaces).isEmpty,
                   let sourceStart = text[lineEnd...].firstIndex(where: { !$0.isWhitespace }) else { continue }
             let sourceEnd = text[sourceStart...].firstIndex(of: "\n") ?? text.endIndex
-            if text[sourceStart..<sourceEnd].range(of: #"^(?:(?:图片来源|来源|图源|Source)\s*[:：]?\s*)?\[(?:图片来源|来源|图源|Source|Photo source|Image source)\]\([^\n]+\)\s*$"#,
+            if text[sourceStart..<sourceEnd].range(of: #"^(?:(?:图片来源|来源|图源|Source)\s*[:：]?\s*)?\[(?:图片来源|来源|图源|Source|Photo source|Image source)\]\((?:[^()\s]|\([^()\s]*\))+\)[ \t]*$"#,
                 options: [.regularExpression, .caseInsensitive]) != nil {
                 ranges.append(sourceStart..<sourceEnd)
             }
         }
-        for range in ranges.sorted(by: { $0.lowerBound > $1.lowerBound }) {
-            output.removeSubrange(range)
+        for range in ranges.sorted(by: { $0.lowerBound < $1.lowerBound }) {
+            if cursor < range.lowerBound { output += text[cursor..<range.lowerBound] }
+            cursor = max(cursor, range.upperBound)
         }
+        output += text[cursor...]
         return output
     }
 

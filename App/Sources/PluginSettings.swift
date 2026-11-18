@@ -238,7 +238,7 @@ struct PluginSettings: View {
             adding = false
             repository = ""
             repositoryError = ""
-            perform("安装插件", selectInstalledRepository: source) { try await manager.install(repository: source) }
+            requestInstall(source)
         } catch {
             repositoryError = error.localizedDescription
         }
@@ -300,7 +300,7 @@ struct PluginSettings: View {
             Button(label("回退")) { perform("回退插件") { try await manager.rollback(plugin.id) } }
                 .disabled(plugin.previousCommit == nil)
             if let url = URL(string: plugin.repository) {
-                Button(label("在 GitHub 查看项目")) { NSWorkspace.shared.open(url) }
+                Button(label("在 GitHub 查看项目")) { _ = ToolService.openLauncherURL(url) }
             }
             Divider()
             Button(label("卸载"), role: .destructive) { perform("卸载插件") { try await manager.uninstall(plugin.id) } }

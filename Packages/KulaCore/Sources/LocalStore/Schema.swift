@@ -126,6 +126,11 @@ public final class LocalStore: Sendable {
 
     public init(root: URL) throws {
         self.root = root
+        if root.standardizedFileURL.path == Self.defaultRoot.standardizedFileURL.path {
+            let attributes: [FileAttributeKey: Any] = [.posixPermissions: 0o700]
+            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true, attributes: attributes)
+            try FileManager.default.setAttributes(attributes, ofItemAtPath: root.path)
+        }
         db = try Database(path: root.appendingPathComponent("kulahere.sqlite").path)
         try Schema.migrate(db)
         for d in [attachmentsDirectory, clipboardDirectory, outputDirectory] {

@@ -11,12 +11,23 @@ const cancellation = new AbortController();
 process.on("SIGTERM", () => { cancellation.abort(); setTimeout(() => process.exit(143), 100).unref(); });
 const input = createInterface({ input: process.stdin });
 let started = false;
+let disconnected = false;
 let seq = 0;
 const pending = new Map();
 function rpc(method, body) {
+  if (disconnected) {
+    process.exitCode = 1;
+    return Promise.reject(new Error("Plugin host disconnected"));
+  }
   const id = ++seq;
-  return new Promise((resolve, reject) => { pending.set(id, { resolve, reject }); emit({ type: "rpc", id, method, ...body }); });
+  return new Promise((resolve, reject) => { pending.set(id, { resolve, reject }); emit({ ...body, type: "rpc", id, method }); });
 }
+input.on("close", () => {
+  disconnected = true;
+  if (pending.size) process.exitCode = 1;
+  for (const waiter of pending.values()) waiter.reject(new Error("Plugin host disconnected"));
+  pending.clear();
+});
 input.on("line", (line) => {
   if (Buffer.byteLength(line) > 1 << 20) { emit({ type: "result", error: "Plugin frame too large" }); process.exit(1); }
   let frame;
@@ -38,13 +49,13 @@ input.on("line", (line) => {
       async saveState(value) { await rpc("state", { value }); this.state = value; },
       exec(executable, args, options = {}) {
         if (cancellation.signal.aborted) return Promise.reject(new Error("Plugin call cancelled"));
-        return rpc("exec", { executable, arguments: args, ...options });
+        return rpc("exec", { cwd: options.cwd, timeoutSeconds: options.timeoutSeconds, executable, arguments: args });
       },
     };
     const value = frame.readback ? (typeof tool.readback === "function" ? await tool.readback(frame.arguments, context, frame.output) : null)
                                 : await tool.execute(frame.arguments, context);
     emit({ type: "result", value: value ?? null });
-  })().catch(error => emit({ type: "result", error: String(error?.stack ?? error), errorCode: error instanceof ArgumentError ? "invalidArguments" : "adapterFailure" })).finally(() => { input.close(); process.stdout.write("", () => process.exit(0)); });
+  })().catch(error => emit({ type: "result", error: String(error?.stack ?? error), errorCode: error instanceof ArgumentError ? "invalidArguments" : "adapterFailure" })).finally(() => { input.close(); process.stdout.write("", () => process.exit(process.exitCode ?? 0)); });
 });
 
 function validate(value, schema, path = "arguments") {

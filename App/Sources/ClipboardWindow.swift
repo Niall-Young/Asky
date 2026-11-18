@@ -118,7 +118,7 @@ final class ClipboardController {
 
     private var availableActionKinds: [ClipboardHistoryAction] {
         var actions: [ClipboardHistoryAction] = hasPasteTarget ? [.copy, .pasteKeepingOpen, .delete, .clearAll] : [.copy, .delete, .clearAll]
-        if selectedPreviewFile?.isRegularFile == true { actions.insert(.preview, at: 0) }
+        if selectedPreviewFile != nil { actions.insert(.preview, at: 0) }
         return actions
     }
     var isDragging: Bool { dragSource.active }
@@ -353,7 +353,8 @@ final class ClipboardController {
     }
 
     private var selectedPreviewFile: PreviewFile? {
-        selectedItem.flatMap(PreviewFile.init(clipboardItem:))
+        guard let file = selectedItem.flatMap(PreviewFile.init(clipboardItem:)), file.isRegularFile else { return nil }
+        return file
     }
 
     private func previewFile(for event: NSEvent) -> PreviewFile? {
@@ -396,9 +397,6 @@ final class ClipboardController {
             if isActionsMenuPresented { actionSelection = min(max(0, actionSelection + delta), actionKinds.count - 1) }
             else { moveSelection(delta) }
             return true
-        }
-        if matches(.clipboardLeft) || matches(.clipboardRight) {
-            moveSelection(matches(.clipboardLeft) ? -1 : 1); return true
         }
         if matches(.paste) {
             if !event.isARepeat {
@@ -678,7 +676,6 @@ private struct ClipboardHistoryView: View {
                                     placeholder: NSLocalizedString("搜索剪贴板内容", comment: ""),
                                     placeholderColor: NSColor(ThemeColor.kTextSubtlest.color(for: scheme)),
                                     backspaceOnEmpty: { false }, move: controller.moveSelection,
-                                    moveHorizontal: controller.moveSelection,
                                     submit: { controller.submitSelection(copyOnly: $0) },
                                     shortcuts: controller.shortcutPreferences, shortcutScope: "clipboard")
                     .frame(maxWidth: .infinity)
@@ -972,6 +969,7 @@ private struct ClipboardListView: View {
 }
 
 private struct ClipboardHistoryRow: View {
+    @State private var image: CGImage?
     let item: ClipboardItem
     let controller: ClipboardController
     @State private var hovering = false
@@ -984,8 +982,8 @@ private struct ClipboardHistoryRow: View {
     var body: some View {
         HStack(spacing: 12) {
             Group {
-                if item.kind == .image, let path = item.thumbPath ?? item.filePath, let image = NSImage(contentsOfFile: path) {
-                    Image(nsImage: image).resizable().scaledToFill()
+                if item.kind == .image, let image {
+                    Image(decorative: image, scale: 1).resizable().scaledToFill()
                 } else if let value = ClipboardColor(item: item) {
                     Circle().fill(value.color)
                         .overlay { Circle().strokeBorder(ThemeColor.kBorderIntense, lineWidth: 1) }
@@ -1025,16 +1023,23 @@ private struct ClipboardHistoryRow: View {
         .accessibilityAddTraits(selected ? [.isSelected, .isButton] : [.isButton])
         .accessibilityAction { controller.select(item) }
         .accessibilityAction(named: NSLocalizedString("复制", comment: "")) { controller.copy(item) }
+        .task(id: item.id) {
+            image = nil
+            guard item.kind == .image, let path = item.thumbPath ?? item.filePath else { return }
+            let thumbnail = await ClipboardAccess.thumbnail(at: path, maxPixelSize: 160)
+            if !Task.isCancelled { image = thumbnail }
+        }
     }
 }
 
 private struct ClipboardListDetail: View {
+    @State private var image: CGImage?
     let item: ClipboardItem
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Group {
-                if item.kind == .image, let path = item.filePath, let image = NSImage(contentsOfFile: path) {
-                    Image(nsImage: image).resizable().scaledToFit()
+                if item.kind == .image, let image {
+                    Image(decorative: image, scale: 1).resizable().scaledToFit()
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .clipShape(RoundedRectangle(cornerRadius: 16))
                         .padding(.horizontal, 24)
@@ -1068,6 +1073,12 @@ private struct ClipboardListDetail: View {
         }
         // Inset the content, not the scroll viewport, so the native scroller stays at the pane edge.
         .padding(.vertical, 24).frame(maxWidth: .infinity, maxHeight: .infinity)
+        .task(id: item.id) {
+            image = nil
+            guard item.kind == .image, let path = item.filePath else { return }
+            let thumbnail = await ClipboardAccess.thumbnail(at: path, maxPixelSize: 1600)
+            if !Task.isCancelled { image = thumbnail }
+        }
     }
 }
 

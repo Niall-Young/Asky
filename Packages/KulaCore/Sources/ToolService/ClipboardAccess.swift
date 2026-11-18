@@ -3,10 +3,55 @@ import LocalStore
 import UniformTypeIdentifiers
 import ImageIO
 import os
+import Resources
 
 /// Native clipboard boundary. History never requires an agent or paste permission.
 @MainActor
 public enum ClipboardAccess {
+    @discardableResult
+    public static func copyConcealed(_ text: String, to pasteboard: NSPasteboard = .general) -> Bool {
+        let item = NSPasteboardItem()
+        guard item.setString(text, forType: .string),
+              item.setData(Data(), forType: .init("org.nspasteboard.ConcealedType")),
+              item.setData(Data(), forType: .init("org.nspasteboard.TransientType")) else { return false }
+        pasteboard.clearContents()
+        return pasteboard.writeObjects([item])
+    }
+
+    private static let thumbnails = ThumbnailService()
+    public static func thumbnail(at path: String, maxPixelSize: Int) async -> CGImage? {
+        await thumbnails.thumbnail(for: URL(fileURLWithPath: path), maxPixelSize: maxPixelSize)
+    }
+
+    public nonisolated static func storeImage(_ data: Data, in dir: URL, store: ClipboardStore,
+                                               sourceApp: String?, sourceBundleID: String?, contentHash: String) {
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let id = UUID().uuidString
+        let file = dir.appending(path: "\(id).img")
+        let thumb = dir.appending(path: "\(id)-thumb.png")
+        guard (try? data.write(to: file)) != nil else { return }
+        let hasThumb = ThumbnailService.writeThumbnail(from: file, to: thumb, maxPixelSize: 160)
+        try? store.insert(ClipboardItem(id: id, kind: .image, filePath: file.path, thumbPath: hasThumb ? thumb.path : nil,
+                                        byteSize: data.count, sourceApp: sourceApp, sourceBundleID: sourceBundleID,
+                                        contentHash: contentHash))
+    }
+
+    public nonisolated static func removeFiles(_ paths: [String]) {
+        for path in paths { try? FileManager.default.removeItem(atPath: path) }
+    }
+
+    public static func cleanExpiredDragFiles(now: Date) {
+        let directory = FileManager.default.temporaryDirectory.appending(path: "AskyDrag")
+        let keys: Set<URLResourceKey> = [.contentModificationDateKey, .isRegularFileKey]
+        guard let urls = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: Array(keys)) else { return }
+        for url in urls where url.pathExtension == "png" {
+            if let values = try? url.resourceValues(forKeys: keys), values.isRegularFile == true,
+               let date = values.contentModificationDate, now.timeIntervalSince(date) > 86400 {
+                try? FileManager.default.removeItem(at: url)
+            }
+        }
+    }
+
     public struct Snapshot {
         public let changeCount: Int
         public let text: String?
@@ -274,7 +319,7 @@ public enum ClipboardAccess {
         let file = exportDirectory.appending(path: "\(item.id).png")
         do {
             try FileManager.default.createDirectory(at: exportDirectory, withIntermediateDirectories: true)
-            if !FileManager.default.fileExists(atPath: file.path) { try png.write(to: file) }
+            try png.write(to: file, options: .atomic)
         } catch { return nil }
         pbItem.setString(file.absoluteString, forType: .fileURL)
         pbItem.setData(png, forType: .png)

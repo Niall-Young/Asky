@@ -149,8 +149,10 @@ public actor AgentHost {
         do {
             let p = try await ensureRunning()
             guard tasks[request.taskID] != nil else { return }
+            let resources = HostMessage.resources(tools: await toolsProvider(), pluginGuidance: await guidanceProvider())
+            guard tasks[request.taskID] != nil else { return }
             state = .busy
-            try p.write(HostMessage.resources(tools: await toolsProvider(), pluginGuidance: await guidanceProvider()).encoded())
+            try p.write(resources.encoded())
             try p.write(HostMessage.prompt(request, sessionFile: sessionFiles[request.sessionID]).encoded())
         } catch {
             emit(request.taskID, .error(taskID: request.taskID, String(format: CoreLocalization.text("无法启动 AI 运行时：%@"), error.localizedDescription)))
@@ -295,7 +297,19 @@ public actor AgentHost {
             emit(taskID, .confirmationRequired(taskID: taskID, c))
         }
         emit(taskID, .toolResult(taskID: taskID, result))
-        try? p.write(HostMessage.toolResult(callID: callID, result).encoded())
+        do {
+            let frame: Data
+            do {
+                frame = try HostMessage.toolResult(callID: callID, result).encoded()
+            } catch {
+                let failure = ExecutionResult.failure(callID, .protocolError, error.localizedDescription,
+                    status: result.readback == nil && !((tasks[taskID]?.hadWrite) ?? false) ? .failed : .pendingVerification)
+                frame = try HostMessage.toolResult(callID: callID, failure).encoded()
+            }
+            try p.write(frame)
+        } catch {
+            p.terminate(force: true)
+        }
     }
 
     private func emit(_ taskID: String, _ e: AgentEvent) {

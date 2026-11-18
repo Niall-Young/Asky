@@ -1,5 +1,6 @@
 import Foundation
 import Contracts
+import os
 
 public enum ShortcutRunState: Sendable, Equatable {
     case started
@@ -54,19 +55,41 @@ public enum ShortcutsService {
     struct ToolResult { var status: Int32; var stdout: String; var stderr: String }
 
     static func runTool(_ args: [String]) async throws -> ToolResult {
-        try await withCheckedThrowingContinuation { cont in
-            let p = Process()
-            p.executableURL = tool
-            p.arguments = args
-            let out = Pipe(), err = Pipe()
-            p.standardOutput = out
-            p.standardError = err
-            p.terminationHandler = { proc in
-                let o = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-                let e = String(decoding: err.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-                cont.resume(returning: ToolResult(status: proc.terminationStatus, stdout: o, stderr: e))
+        let p = Process(), out = Pipe(), err = Pipe()
+        p.executableURL = tool
+        p.arguments = args
+        p.standardOutput = out
+        p.standardError = err
+        let cancelled = OSAllocatedUnfairLock(initialState: false)
+        return try await withTaskCancellationHandler {
+            try cancelled.withLock { stopped in
+                guard !stopped else { throw CancellationError() }
+                try p.run()
             }
-            do { try p.run() } catch { cont.resume(throwing: error) }
+            let stdout = Task.detached { try drain(out.fileHandleForReading) }
+            let stderr = Task.detached { try drain(err.fileHandleForReading) }
+            await Task.detached { p.waitUntilExit() }.value
+            let result = try await ToolResult(status: p.terminationStatus, stdout: stdout.value, stderr: stderr.value)
+            try Task.checkCancellation()
+            return result
+        } onCancel: {
+            cancelled.withLock { stopped in
+                stopped = true
+                if p.isRunning {
+                    p.terminate()
+                    DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) {
+                        if p.isRunning { kill(p.processIdentifier, SIGKILL) }
+                    }
+                }
+            }
         }
+    }
+
+    private static func drain(_ handle: FileHandle) throws -> String {
+        var data = Data()
+        while let chunk = try handle.read(upToCount: 16384), !chunk.isEmpty {
+            data.append(chunk.prefix(min(chunk.count, 1024 * 1024 - data.count)))
+        }
+        return String(decoding: data, as: UTF8.self)
     }
 }

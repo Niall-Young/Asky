@@ -53,7 +53,7 @@ private func scheduler() throws -> ContextScheduler {
 
     @Test func deliveryWindow() {
         #expect(utc.component(.hour, from: rules.fitToWindow(at(-2))) == 9)          // 06:00 → 09:00
-        #expect(utc.component(.hour, from: rules.fitToWindow(at(14))) == 20)         // 22:00 → 20:59
+        #expect(utc.component(.hour, from: rules.fitToWindow(at(14))) == 20)         // 22:00 → next morning
         #expect(rules.fitToWindow(at(3)) == at(3))
     }
 
@@ -97,7 +97,7 @@ private func scheduler() throws -> ContextScheduler {
         let s = try scheduler()
         let e = EventSnapshot(id: "e", title: "会议", start: at(6), end: at(7), location: "国贸")
         let id = try #require(try s.reconcile(events: [e], travelEnabled: true, now: base).schedule.first?.id)
-        let when = try s.snooze(id, by: 14 * 3600, now: base)  // 22:00 → 20:59
-        #expect(utc.component(.hour, from: when) == 20)
+        let when = try s.snooze(id, by: 14 * 3600, now: base)  // 22:00 → next morning
+        #expect(when == utc.date(byAdding: .hour, value: 25, to: base))
     }
 }

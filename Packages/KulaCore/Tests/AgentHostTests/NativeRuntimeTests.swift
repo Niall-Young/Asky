@@ -376,14 +376,36 @@ private func host(root: URL, script: ModelScript, tools: [ToolDefinition] = [],
         await agent.shutdown()
     }
 
+    @Test func oversizedToolResultCompletesTheRoundAndEscapedReplyFailsExplicitly() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let script = ModelScript([NativeCompletion(calls: [call("lookup")]), NativeCompletion(text: "done"),
+                                  NativeCompletion(text: String(repeating: "\\", count: 550_000))])
+        let definition = ToolDefinition(name: "lookup", summary: "read", source: .web, effect: .read, confirmation: .never, externallyExposable: false)
+        let agent = host(root: root, script: script, tools: [definition]) { request in
+            ExecutionResult(requestID: request.requestID, status: .completed, output: .string(String(repeating: "x", count: 1 << 20)))
+        }
+        let first = await collect(agent, AgentRequest(sessionID: "s", text: "lookup"))
+        #expect(first.contains { if case .message(_, "done") = $0 { true } else { false } })
+        let tool = try #require(await script.requests.last?["messages"]?.arrayValue?.last { $0["role"] == "tool" })
+        #expect(tool["content"]?.stringValue?.contains("protocolError") == true)
+        let second = await collect(agent, AgentRequest(sessionID: "s", text: "again"))
+        #expect(second.contains { if case .taskState(_, .failed) = $0 { true } else { false } })
+        await agent.shutdown()
+    }
+
     @Test func fragmentedToolArgumentsAndInterruptedStreams() throws {
         var decoder = NativeCompletionDecoder()
         _ = try decoder.consume(["choices": [["delta": ["tool_calls": [["index": 0, "id": "c", "function": ["name": "lookup", "arguments": "{\"text\":"]]]]]]])
-        _ = try decoder.consume(["choices": [["delta": ["tool_calls": [["index": 0, "function": ["arguments": "\"中文\"}"]]]], "finish_reason": "tool_calls"]]])
+        _ = try decoder.consume(["choices": [["delta": ["tool_calls": [["function": ["arguments": "\"中文\"}"]]]], "finish_reason": "tool_calls"]]])
         #expect(try decoder.result().calls.first?["function"]?["arguments"] == "{\"text\":\"中文\"}")
         var truncated = NativeCompletionDecoder()
         _ = try truncated.consume(["choices": [["delta": ["content": "partial"]]]])
         #expect(throws: Error.self) { try truncated.result() }
+        var empty = NativeCompletionDecoder()
+        _ = try empty.consume(["choices": [["message": ["tool_calls": [["id": "a", "function": ["name": "lookup", "arguments": " "]]]], "finish_reason": "tool_calls"]]])
+        #expect(try empty.result().calls.first?["function"]?["arguments"] == "{}")
+
         var invalid = NativeCompletionDecoder()
         _ = try invalid.consume(["choices": [["delta": ["tool_calls": [["index": 0, "id": "c", "function": ["name": "write", "arguments": "{"]]]], "finish_reason": "tool_calls"]]])
         #expect(throws: Error.self) { try invalid.result() }

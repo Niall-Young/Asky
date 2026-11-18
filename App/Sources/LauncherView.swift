@@ -562,7 +562,7 @@ struct LauncherView: View {
                     ConversionValueCard(title: conversion.fromSymbol, amount: Calculator.format(conversion.input))
                 } destination: {
                     ConversionValueCard(title: conversion.toSymbol,
-                                        amount: Calculator.format((conversion.value * 1e6).rounded() / 1e6))
+                                        amount: conversion.formattedValue)
                 }
                 .frame(height: LauncherLayout.currencyCardHeight)
             } else if case .converted(let value, _, _, _, let query) = model.currencyConversion {

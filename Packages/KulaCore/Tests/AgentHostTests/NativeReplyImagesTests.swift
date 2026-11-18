@@ -27,6 +27,15 @@ import Contracts
         #expect(NativeReplyImages.images(in: removed).isEmpty)
     }
 
+    @Test func filteringKeepsSiblingContentAndRemovesEmptyLinkWrappers() {
+        let a = URL(string: "https://example.com/a")!, b = URL(string: "https://example.com/b")!
+        let text = "![a](\(a))\n[来源](https://example.com/source) [![b](\(b))](https://example.com/link)"
+        #expect(NativeReplyImages.removing([a,b], from: text) == "\n[来源](https://example.com/source) ")
+        let nested = "![outer ![first](\(a)) ![second](\(b))]"
+        #expect(Set(NativeReplyImages.images(in: nested).map(\.url)) == [a,b])
+        #expect(NativeReplyImages.removing([b], from: nested) == "![outer ![first](\(a)) ]")
+    }
+
     @Test func onlySuccessfulImageEvidenceAndExplicitUserURLsAreAllowed() {
         func tool(_ value: JSONValue) -> JSONValue {
             ["role": "tool", "content": .string(String(decoding: value.canonicalData(), as: UTF8.self))]

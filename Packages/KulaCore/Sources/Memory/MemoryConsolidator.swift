@@ -22,7 +22,6 @@ public struct MemoryConsolidator: Sendable {
 
     static let dirtyKey = "memory.consolidate.dirty"
     static let lastRunKey = "memory.consolidate.last"
-    static let backupDirectory = ".previous"
     /// The whole folder is sent to the model; beyond this the pass is skipped rather than truncating what it rewrites.
     static let maxInputCharacters = 40000
 
@@ -47,7 +46,7 @@ public struct MemoryConsolidator: Sendable {
         store.setSetting(Self.lastRunKey, String(now.timeIntervalSince1970))
         guard let reply = try? await complete(Self.systemPrompt, "当前记忆文件：\n\n" + input),
               let result = Self.parse(reply) else { return false }
-        do { try apply(result, previous: files) } catch { return false }
+        do { try memory.replaceAll(result.files, ifMatching: Dictionary(uniqueKeysWithValues: files)) } catch { return false }
         store.setSetting(Self.dirtyKey, nil)
         return true
     }
@@ -74,17 +73,6 @@ public struct MemoryConsolidator: Sendable {
         // Every topic file kept must be listed in the index, otherwise nothing would ever read it.
         for name in files.keys where name != MemoryFolder.indexName && !index.contains("(\(name))") { return nil }
         return Result(files: files)
-    }
-
-    func apply(_ result: Result, previous: [(String, String)]) throws {
-        let fm = FileManager.default
-        let backup = memory.root.appendingPathComponent(Self.backupDirectory, isDirectory: true)
-        try? fm.removeItem(at: backup)
-        try fm.createDirectory(at: backup, withIntermediateDirectories: true)
-        for (name, text) in previous where !text.isEmpty {
-            try text.write(to: backup.appendingPathComponent(name), atomically: true, encoding: .utf8)
-        }
-        try memory.replaceAll(result.files)
     }
 
     static let systemPrompt = """

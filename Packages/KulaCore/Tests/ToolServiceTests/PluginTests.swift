@@ -124,7 +124,14 @@ private func installer(version: String = "1", dependency: Bool = false, failure:
         try await Task.sleep(for: .milliseconds(100)); task.cancel()
         await #expect(throws: Error.self) { _ = try await task.value }
         #expect(start.duration(to: .now) < .seconds(3))
-        await #expect(throws: Error.self) { _ = try await PluginProcess.command("/usr/bin/yes", [], seconds: 3) }
+        await #expect(throws: ToolError.self) { _ = try await PluginProcess.command("/usr/bin/yes", [], seconds: 3) }
+        let parent = PluginProcessControl()
+        #expect(throws: ToolError.self) {
+            try parent.withChild { child in
+                _ = try PluginProcess.commandSync("/bin/sleep", ["10"], cwd: nil, seconds: 0.05, control: child)
+            }
+        }
+        try parent.check()
     }
     @Test func updateWaitsForExecutionLeaseAndDisableBlocksNewCalls() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)

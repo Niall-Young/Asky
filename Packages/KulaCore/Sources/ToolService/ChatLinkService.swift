@@ -51,9 +51,10 @@ public actor ChatLinkService {
         configuration.timeoutIntervalForResource = 12
         configuration.httpCookieStorage = nil
         configuration.urlCredentialStorage = nil
-        let session = URLSession(configuration: configuration)
+        let session = URLSession(configuration: configuration, delegate: PublicPageRedirects(), delegateQueue: nil)
         defer { session.invalidateAndCancel() }
         var request = URLRequest(url: url)
+        request.setValue("Asky/1.0", forHTTPHeaderField: "User-Agent")
         request.setValue("text/html", forHTTPHeaderField: "Accept")
         let (bytes, response) = try await session.bytes(for: request)
         guard let response = response as? HTTPURLResponse, (200..<300).contains(response.statusCode),

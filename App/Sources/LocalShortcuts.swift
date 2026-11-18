@@ -3,12 +3,12 @@ import SwiftUI
 
 /// Stored by stable action ID; missing IDs retain their defaults on older installations.
 enum LocalShortcutAction: String, CaseIterable, Identifiable {
-    case windowPreviousDisplay, windowNextDisplay, reveal, copyPath, copyFile, copyName, fileInfo, execute, askAI, launcherPreview, launcherMore, launcherUp, launcherDown, enterFolder, back, launcherEscape, settings, paste, clipboardCopy, delete, clipboardPreview, clipboardMore, clipboardUp, clipboardDown, clipboardLeft, clipboardRight, clipboardEscape, send, newline, newChat, closeChat, agentEscape
+    case windowPreviousDisplay, windowNextDisplay, reveal, copyPath, copyFile, copyName, fileInfo, execute, askAI, launcherPreview, launcherMore, launcherUp, launcherDown, enterFolder, back, launcherEscape, settings, paste, clipboardCopy, delete, clipboardPreview, clipboardMore, clipboardUp, clipboardDown, clipboardEscape, send, newline, newChat, closeChat, agentEscape
     var id: String { rawValue }
     var isConfigurable: Bool {
         switch self {
         case .execute, .launcherUp, .launcherDown, .enterFolder, .back, .launcherEscape,
-             .paste, .clipboardUp, .clipboardDown, .clipboardLeft, .clipboardRight, .clipboardEscape,
+             .paste, .clipboardUp, .clipboardDown, .clipboardEscape,
              .send, .newline, .agentEscape: false
         default: true
         }
@@ -38,8 +38,6 @@ enum LocalShortcutAction: String, CaseIterable, Identifiable {
         case .clipboardMore: "更多（列表布局）"
         case .clipboardUp: "选择上一项"
         case .clipboardDown: "选择下一项"
-        case .clipboardLeft: "选择左侧记录"
-        case .clipboardRight: "选择右侧记录"
         case .clipboardEscape: "关闭菜单或剪贴板"
         case .send: "发送消息"
         case .newline: "输入换行"
@@ -73,8 +71,6 @@ enum LocalShortcutAction: String, CaseIterable, Identifiable {
         case .clipboardMore: "clipboard"
         case .clipboardUp: "clipboard"
         case .clipboardDown: "clipboard"
-        case .clipboardLeft: "clipboard"
-        case .clipboardRight: "clipboard"
         case .clipboardEscape: "clipboard"
         case .send: "agent"
         case .newline: "agent"
@@ -108,8 +104,6 @@ enum LocalShortcutAction: String, CaseIterable, Identifiable {
         case .clipboardMore: .init(code: 40, modifiers: 256, label: "⌘ K")
         case .clipboardUp: .init(code: 126, modifiers: 0, label: "↑")
         case .clipboardDown: .init(code: 125, modifiers: 0, label: "↓")
-        case .clipboardLeft: .init(code: 123, modifiers: 0, label: "←")
-        case .clipboardRight: .init(code: 124, modifiers: 0, label: "→")
         case .clipboardEscape: .init(code: 53, modifiers: 0, label: "Esc")
         case .send: .init(code: 36, modifiers: 0, label: "↵")
         case .newline: .init(code: 36, modifiers: 512, label: "⇧ ↵")

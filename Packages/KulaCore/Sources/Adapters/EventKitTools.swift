@@ -217,6 +217,10 @@ public struct CalendarUpdateTool: ToolAdapter {
         try ek.requireCalendar()
         let e = try ek.event(try Args.requiredString(a, "id"))
         guard e.calendar?.allowsContentModifications == true else { throw ToolError(.targetReadOnly, CoreLocalization.text("该日程所在日历只读")) }
+        for key in ["start", "end"] where a[key] != nil { _ = try Args.requiredDate(a, key) }
+        guard (Args.date(a["end"]) ?? e.endDate) > (Args.date(a["start"]) ?? e.startDate) else {
+            throw ToolError(.invalidArguments, CoreLocalization.text("结束时间必须晚于开始时间"))
+        }
         var changes: [String] = []
         if let t = a["title"]?.stringValue { changes.append("标题：\(e.title ?? "") → \(t)") }
         if let s = Args.date(a["start"]) { changes.append("开始：\(Args.iso(e.startDate)) → \(Args.iso(s))") }
@@ -242,11 +246,13 @@ public struct CalendarUpdateTool: ToolAdapter {
     }
 
     public func readback(_ a: JSONValue, output: AdapterOutput?) async -> JSONValue? {
-        guard let id = a["id"]?.stringValue, let e = ek.store.event(withIdentifier: id) else { return nil }
         ek.store.refreshSourcesIfNecessary()
+        guard let id = a["id"]?.stringValue, let e = ek.store.event(withIdentifier: id) else { return nil }
         // Only report "completed" when the stored event really carries the requested values.
         if let t = a["title"]?.stringValue, e.title != t { return nil }
         if let s = Args.date(a["start"]), e.startDate != s { return nil }
+        if let end = Args.date(a["end"]), e.endDate != end { return nil }
+        if let location = a["location"]?.stringValue, (e.location ?? "") != location { return nil }
         return ek.eventJSON(e)
     }
 }

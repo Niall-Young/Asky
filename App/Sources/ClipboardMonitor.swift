@@ -37,6 +37,7 @@ final class ClipboardMonitor {
         let now = Date()
         if now.timeIntervalSince(lastCleanup) >= 60 {
             Self.cleanup(app.clipboardStore)
+            ClipboardAccess.cleanExpiredDragFiles(now: now)
             lastCleanup = now
         }
         guard ClipboardAccess.changeCount != lastChange else { return }
@@ -66,15 +67,8 @@ final class ClipboardMonitor {
         } else if let data = snapshot.image, data.count <= Self.maxImageBytes {
             // Disk I/O and thumbnailing off the main thread.
             Task.detached(priority: .utility) {
-                try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-                let id = UUID().uuidString
-                let file = dir.appending(path: "\(id).img")
-                let thumb = dir.appending(path: "\(id)-thumb.png")
-                guard (try? data.write(to: file)) != nil else { return }
-                let hasThumb = ThumbnailService.writeThumbnail(from: file, to: thumb, maxPixelSize: 160)
-                try? store.insert(ClipboardItem(id: id, kind: .image, filePath: file.path, thumbPath: hasThumb ? thumb.path : nil,
-                                                byteSize: data.count, sourceApp: sourceApp, sourceBundleID: sourceBundleID,
-                                                contentHash: Self.hash(data)))
+                ClipboardAccess.storeImage(data, in: dir, store: store, sourceApp: sourceApp,
+                    sourceBundleID: sourceBundleID, contentHash: Self.hash(data))
             }
         }
     }
@@ -89,6 +83,6 @@ final class ClipboardMonitor {
     }
 
     static func removeFiles(_ paths: [String]) {
-        for p in paths { try? FileManager.default.removeItem(atPath: p) }
+        ClipboardAccess.removeFiles(paths)
     }
 }

@@ -228,6 +228,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var isQuietForUpdate: Bool {
         !launcher.isVisible && !clipboardWindow.isVisible && !agentWindow.isVisible && !agentWindow.model.isRunning
             && settingsWindow?.isVisible != true && model.confirmations.queue.isEmpty
+            && !ContentPreviewWindow.shared.isVisible && !ContentPreviewWindow.quick.isVisible
+            && PermissionAuthorizationWindow.shared.window?.isVisible != true
             && !model.terminal.isRunning && !model.isMCPBusy
     }
 

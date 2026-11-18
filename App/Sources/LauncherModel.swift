@@ -928,8 +928,7 @@ final class LauncherModel {
     func copySelectedPath() -> Bool {
         guard currencyConversion == nil, unitConversion == nil, results.indices.contains(selection),
               results[selection].actions.contains(.revealInFinder) else { return false }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(results[selection].target.identifier, forType: .string)
+        guard ToolService.copyPluginText(results[selection].target.identifier) else { return false }
         showToast(NSLocalizedString("已拷贝路径", comment: ""))
         return true
     }
@@ -1105,10 +1104,10 @@ final class LauncherModel {
                 return
             }
             let url = URL(filePath: r.target.identifier)
-            NSWorkspace.shared.open(url)
+            _ = ToolService.openLauncherURL(url)
             onHide()
         case .revealInFinder:
-            NSWorkspace.shared.activateFileViewerSelecting([URL(filePath: r.target.identifier)])
+            ToolService.revealInFinder(URL(filePath: r.target.identifier))
             onHide()
         case .switchTo:
             if r.target.kind == "application-window", let snapshot = windowSnapshot {
@@ -1188,7 +1187,7 @@ final class LauncherModel {
         let expected = r.subtitle
         Task {
             do {
-                _ = try await ChromeBridge().activate(windowID: parts[0], tabID: parts[1], expectedURL: expected)
+                _ = try await LauncherChromeBridge().activate(windowID: parts[0], tabID: parts[1], expectedURL: expected)
                 onHide()
             } catch {
                 status = NSLocalizedString("标签已变化或已关闭，请重新搜索。", comment: "")
@@ -1326,7 +1325,8 @@ extension LauncherModel {
 
     private var selectedPreviewFile: PreviewFile? {
         guard let result = selectedActionResult, result.source == .file else { return nil }
-        return PreviewFile(url: URL(filePath: result.target.identifier))
+        guard !canEnterSelectedFolder, let file = PreviewFile(url: URL(filePath: result.target.identifier)), file.isRegularFile else { return nil }
+        return file
     }
 
     var previewLauncherAction: LauncherAction? {

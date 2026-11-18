@@ -17,7 +17,7 @@ public final class PreviewShortcutCapture {
         guard let port = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap,
             options: .defaultTap, eventsOfInterest: mask, callback: { _, type, event, context in
                 guard let context else { return Unmanaged.passUnretained(event) }
-                if type == .tapDisabledByTimeout {
+                if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
                     let capture = Unmanaged<PreviewShortcutCapture>.fromOpaque(context).takeUnretainedValue()
                     MainActor.assumeIsolated { capture.setEnabled(capture.enabled) }
                     return nil

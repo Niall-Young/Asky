@@ -50,7 +50,7 @@ brew tap niall-young/asky https://github.com/Niall-Young/Asky.git
 brew install --cask niall-young/asky/asky
 ```
 
-也可从 [Releases](https://github.com/Niall-Young/Asky/releases) 下载 DMG，将 `Asky.app` 拖入“应用程序”。应用内自动更新默认开启，可在“设置 › 关于 Asky › 软件更新”中管理。
+也可从 [Releases](https://github.com/Niall-Young/Asky/releases) 下载 DMG，将 `Asky.app` 拖入“应用程序”。应用内自动更新默认开启，可在“设置 › 关于 Asky › 软件更新”中管理。安装更新前，Asky 会核对 ZIP 的 SHA-256 校验文件和开发者团队签名。
 
 - **权限**：自动粘贴和窗口搜索需要辅助功能权限；日历、备忘录等在首次使用时申请授权。
 - **AI 配置**：在“设置 › 智能配置 › 模型配置”填写 API Key，或配置兼容 OpenAI 的 Base URL 与模型名。
@@ -144,7 +144,7 @@ brew tap niall-young/asky https://github.com/Niall-Young/Asky.git
 brew install --cask niall-young/asky/asky
 ```
 
-Or download the DMG from [Releases](https://github.com/Niall-Young/Asky/releases) and drag `Asky.app` into Applications. In-app automatic updates are enabled by default; manage them in Settings › About Asky › Software Update.
+Or download the DMG from [Releases](https://github.com/Niall-Young/Asky/releases) and drag `Asky.app` into Applications. In-app automatic updates are enabled by default; manage them in Settings › About Asky › Software Update. Before installing an update, Asky verifies the ZIP against its SHA-256 checksum file and checks the developer team signature.
 
 - **Permissions**: Automatic pasting and window search require Accessibility access. Calendar, Notes, and other system integrations request authorization on first use.
 - **AI setup**: Enter your API key or an OpenAI-compatible Base URL and model name in Settings › AI Settings › Model Configuration.

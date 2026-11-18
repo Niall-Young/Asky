@@ -5,7 +5,11 @@ public struct ConversionResult: Sendable, Equatable {
     public var fromSymbol: String
     public var value: Double
     public var toSymbol: String
-    public var display: String { "\(Calculator.format(input)) \(fromSymbol) = \(Calculator.format((value * 1e6).rounded() / 1e6)) \(toSymbol)" }
+    public var formattedValue: String {
+        if value != 0, abs(value) < 1e-6 || abs(value) >= 1e15 { return String(format: "%.8g", value) }
+        return Calculator.format((value * 1e6).rounded() / 1e6)
+    }
+    public var display: String { "\(Calculator.format(input)) \(fromSymbol) = \(formattedValue) \(toSymbol)" }
 }
 
 /// Length, mass, temperature and volume conversion, e.g. "10 km mi", "5 kg to lb", "100 °F in C".
@@ -49,6 +53,7 @@ public enum UnitConverter {
         guard let fu = units[from.lowercased()], let tu = units[to.lowercased()] else { return nil }
         guard type(of: fu) == type(of: tu) || (fu is UnitMass && tu is UnitMass) else { return nil }
         let value = Measurement(value: amount, unit: fu).converted(to: tu).value
+        guard value.isFinite else { return nil }
         return ConversionResult(input: amount, fromSymbol: from, value: value, toSymbol: to)
     }
 }
@@ -57,7 +62,7 @@ public enum UnitConverter {
 enum QuantityParser {
     static func parse(_ input: String) -> (Double, String, String)? {
         var s = input.trimmingCharacters(in: .whitespaces)
-        for sep in [" to ", " in ", " = ", "=", "→", "->", " 转 ", "转", "换成"] {
+        for sep in ["=", "→", "->", " 转 ", "转", "换成"] {
             s = s.replacingOccurrences(of: sep, with: " ")
         }
         s = s.replacingOccurrences(of: "fl oz", with: "floz")
@@ -68,8 +73,9 @@ enum QuantityParser {
             idx = s.index(after: idx)
         }
         let numStr = s[s.startIndex..<idx].replacingOccurrences(of: ",", with: "")
-        guard !numStr.isEmpty, let amount = Double(numStr) else { return nil }
-        let rest = s[idx...].split(whereSeparator: { $0 == " " }).map(String.init)
+        guard !numStr.isEmpty, let amount = Double(numStr), amount.isFinite else { return nil }
+        let rest = s[idx...].split(whereSeparator: \.isWhitespace).map(String.init)
+        if rest.count == 3, ["to", "in"].contains(rest[1].lowercased()) { return (amount, rest[0], rest[2]) }
         guard rest.count == 2 else { return nil }
         return (amount, rest[0], rest[1])
     }

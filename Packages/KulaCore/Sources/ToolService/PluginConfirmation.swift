@@ -18,7 +18,7 @@ enum PluginConfirmation {
             if let data = text.data(using: .utf8),
                let decoded = try? JSONDecoder().decode(JSONValue.self, from: data),
                decoded.objectValue != nil || decoded.arrayValue != nil { return }
-            changes.append(CoreLocalization.text(label) + "：" + String(text.prefix(400)))
+            changes.append(label + "：" + String(text.prefix(400)))
         }
         for (key, value) in (arguments.objectValue ?? [:]).sorted(by: { $0.key < $1.key }) {
             append(key, value)

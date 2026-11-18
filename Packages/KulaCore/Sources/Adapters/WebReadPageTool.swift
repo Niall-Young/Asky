@@ -94,7 +94,7 @@ public struct WebReadPageTool: ToolAdapter {
                     body = FreeWebMCP.text(result)
                     // A textual error/empty response must not be passed off as a fetched page.
                     guard body.contains("URL: "), body.contains(url) else {
-                        throw FreeWebFailure(status: "unavailable", message: "Unrecognized Exa page output")
+                        throw FreeWebFailure(status: "unavailable", message: "Unrecognized Exa page output", stage: "page")
                     }
                     title = body.components(separatedBy: "\n").first ?? url
                     remoteTruncated = body.count >= 24000

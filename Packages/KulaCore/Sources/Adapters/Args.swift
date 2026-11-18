@@ -45,8 +45,10 @@ public enum Args {
     }
 
     public static func int(_ v: JSONValue?, default def: Int, max: Int) -> Int {
-        guard let n = v?.numberValue else { return def }
-        return Swift.max(1, Swift.min(Int(n), max))
+        guard let n = v?.numberValue, n.isFinite else { return def }
+        if n <= 1 { return 1 }
+        if n >= Double(max) { return Swift.max(1, max) }
+        return Int(n)
     }
 
     /// JSON-schema helper.

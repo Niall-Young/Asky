@@ -132,7 +132,8 @@ public struct MessageTriage: Sendable {
             let context = Self.context(for: batch, in: messages)
             let prompt = prompt(batch: batch, context: context, open: state.notes, now: now)
             guard let reply = try? await complete(Self.systemPrompt, prompt) else { break }
-            state.notes = apply(reply, batch: batch, open: state.notes, now: now)
+            guard let notes = apply(reply, batch: batch, open: state.notes, now: now) else { break }
+            state.notes = notes
             state.watermark = batch.map(\.sequence).max() ?? state.watermark
         }
         state.notes = Array(state.notes.sorted { $0.date > $1.date }.prefix(maxNotes))
@@ -202,12 +203,12 @@ public struct MessageTriage: Sendable {
     }
 
     /// Unknown aliases are ignored; an unreadable reply leaves the notes unchanged.
-    func apply(_ reply: String, batch: [MessageSnapshot], open: [MessageNote], now: Date = Date()) -> [MessageNote] {
+    func apply(_ reply: String, batch: [MessageSnapshot], open: [MessageNote], now: Date = Date()) -> [MessageNote]? {
         guard let data = SmartAdvisor.jsonObject(in: reply).data(using: .utf8),
-              let decoded = try? JSONDecoder().decode(Reply.self, from: data) else { return open }
+              let decoded = try? JSONDecoder().decode(Reply.self, from: data), decoded.items != nil || decoded.resolved != nil else { return nil }
         func index(_ alias: String, _ prefix: Character) -> Int? {
             let a = alias.trimmingCharacters(in: .whitespaces).uppercased()
-            guard a.first == prefix, let n = Int(a.dropFirst()) else { return nil }
+            guard a.first == prefix, let n = Int(a.dropFirst()), n > 0 else { return nil }
             return n - 1
         }
         let closed = Set((decoded.resolved ?? []).compactMap { index($0, "N") })

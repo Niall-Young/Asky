@@ -12,7 +12,7 @@ public final class ResourceScope: Sendable {
     public let kind: ScopeKind
     private struct State {
         var ended = false
-        var tasks: [Task<Void, Never>] = []
+        var tasks: [UUID: Task<Void, Never>] = [:]
         var releases: [@Sendable () -> Void] = []
     }
     private let state = OSAllocatedUnfairLock(initialState: State())
@@ -24,20 +24,25 @@ public final class ResourceScope: Sendable {
 
     public var isEnded: Bool { state.withLock { $0.ended } }
 
-    public var activeTaskCount: Int { state.withLock { $0.tasks.filter { !$0.isCancelled }.count } }
+    public var activeTaskCount: Int { state.withLock { $0.tasks.values.filter { !$0.isCancelled }.count } }
 
     /// Starts work owned by the scope. If already ended the work is cancelled immediately.
     @discardableResult
     public func run(_ operation: @escaping @Sendable () async -> Void) -> Task<Void, Never> {
-        let task = Task { await operation() }
-        let ended = state.withLock { s -> Bool in
-            if s.ended { return true }
-            s.tasks.removeAll { $0.isCancelled }
-            s.tasks.append(task)
-            return false
+        state.withLock { s in
+            guard !s.ended else {
+                let task = Task<Void, Never> {}
+                task.cancel()
+                return task
+            }
+            let id = UUID()
+            let task = Task { [weak self] in
+                await operation()
+                self?.state.withLock { $0.tasks[id] = nil }
+            }
+            s.tasks[id] = task
+            return task
         }
-        if ended { task.cancel() }
-        return task
     }
 
     public func onEnd(_ release: @escaping @Sendable () -> Void) {
@@ -53,8 +58,8 @@ public final class ResourceScope: Sendable {
         let (tasks, releases) = state.withLock { s -> ([Task<Void, Never>], [@Sendable () -> Void]) in
             guard !s.ended else { return ([], []) }
             s.ended = true
-            defer { s.tasks = []; s.releases = [] }
-            return (s.tasks, s.releases)
+            defer { s.tasks = [:]; s.releases = [] }
+            return (Array(s.tasks.values), s.releases)
         }
         tasks.forEach { $0.cancel() }
         releases.forEach { $0() }

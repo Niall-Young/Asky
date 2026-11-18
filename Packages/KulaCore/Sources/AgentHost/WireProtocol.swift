@@ -69,7 +69,10 @@ public enum RuntimeMessage: Sendable, Equatable {
         }
         switch v["type"]?.stringValue {
         case "ready":
-            return .ready(protocolVersion: Int(v["protocol"]?.numberValue ?? -1), runtimeVersion: v["runtime"]?.stringValue ?? "")
+            guard let version = v["protocol"]?.numberValue.flatMap(Int.init(exactly:)) else {
+                throw FrameError.malformed(CoreLocalization.text("协议版本不匹配"))
+            }
+            return .ready(protocolVersion: version, runtimeVersion: v["runtime"]?.stringValue ?? "")
         case "taskState":
             guard let st = AgentTaskState(rawValue: try s("state")) else { throw FrameError.malformed(CoreLocalization.text("任务状态无效")) }
             return .taskState(taskID: try s("taskID"), st, sessionFile: v["sessionFile"]?.stringValue)

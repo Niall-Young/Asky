@@ -88,7 +88,7 @@ public struct IntentRouter: Sendable {
             return [SearchResult(source: .calculator, target: TargetRef(kind: "calc", identifier: expr),
                                  title: s, subtitle: expr, actions: [.copy(s)], score: 100)]
         case .conversion(let c):
-            let v = Calculator.format((c.value * 1e6).rounded() / 1e6)
+            let v = c.formattedValue
             return [SearchResult(source: .conversion, target: TargetRef(kind: "unit", identifier: c.display),
                                  title: "\(v) \(c.toSymbol)", subtitle: CoreLocalization.format("%@ · ↩ 复制", String(describing: c.display)), actions: [.copy(v)], score: 100)]
         case .keyword(let cmd, let q):

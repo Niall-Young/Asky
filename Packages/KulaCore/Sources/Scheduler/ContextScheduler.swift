@@ -2,27 +2,7 @@ import Foundation
 import Contracts
 import LocalStore
 
-/// Minimal snapshot of an authorised calendar event (never a full copy of the calendar database).
-public struct EventSnapshot: Sendable, Hashable {
-    public var id: String
-    public var title: String
-    public var start: Date
-    public var end: Date
-    public var location: String?
-    public var isAllDay: Bool
-    public init(id: String, title: String, start: Date, end: Date, location: String? = nil, isAllDay: Bool = false) {
-        self.id = id
-        self.title = title
-        self.start = start
-        self.end = end
-        self.location = location
-        self.isAllDay = isAllDay
-    }
-
-    public var fingerprint: String {
-        "\(start.timeIntervalSince1970)|\(end.timeIntervalSince1970)|\(location ?? "")"
-    }
-}
+public typealias EventSnapshot = Contracts.EventSnapshot
 
 /// An upcoming date backed by an allowed memory (relationship or prior intent). Without evidence no plan is made.
 public struct ImportantDate: Sendable, Hashable {
@@ -212,7 +192,16 @@ public struct ContextScheduler: Sendable {
     }
 
     public func snooze(_ planID: String, by interval: TimeInterval = 3600, now: Date = Date()) throws -> Date {
-        let when = rules.fitToWindow(now.addingTimeInterval(interval))
+        let requested = now.addingTimeInterval(max(1, interval))
+        let when: Date
+        if rules.calendar.component(.hour, from: requested) >= rules.settings.windowEndHour {
+            var start = DateComponents()
+            start.hour = rules.settings.windowStartHour
+            start.minute = 0
+            when = rules.calendar.nextDate(after: requested, matching: start, matchingPolicy: .nextTime) ?? requested
+        } else {
+            when = max(requested, rules.fitToWindow(requested))
+        }
         try store.setStatus(planID, .snoozed, fireDate: when, now: now)
         return when
     }

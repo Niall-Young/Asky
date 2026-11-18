@@ -84,7 +84,7 @@ final class AgentWindowController {
 
     private func bringToFront() {
         guard let window else { return }
-        presentation.show(window, afterActivation: true)
+        presentation.show(window, afterActivation: true, level: window.level)
     }
 }
 
@@ -1449,6 +1449,12 @@ private struct ApprovalMenuPresentation<Menu: View>: ViewModifier {
             }
             .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: showing)
             .onChange(of: showing) { _, shown in shown ? startMonitoring() : stopMonitoring() }
+            .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { event in
+                if let owner = menuView.view?.window, event.object as? NSWindow === owner { showing = false; stopMonitoring() }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { event in
+                if let owner = menuView.view?.window, event.object as? NSWindow === owner { showing = false; stopMonitoring() }
+            }
             .onDisappear { showing = false; stopMonitoring() }
     }
 
@@ -1467,8 +1473,9 @@ private struct ApprovalMenuPresentation<Menu: View>: ViewModifier {
                     return false
                 }
                 // Like a transient popover, the dismissing click does nothing else.
+                let sameWindow = window != nil && window === box.view?.window
                 dismiss.wrappedValue = false
-                return true
+                return sameWindow
             }
             return consumed ? nil : event
         }

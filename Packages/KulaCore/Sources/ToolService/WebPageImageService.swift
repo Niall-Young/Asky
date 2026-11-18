@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 /// On-demand public HTML metadata lookup for chat illustrations. No cookies or files.
 public enum WebPageImageService {
@@ -38,7 +39,7 @@ public enum WebPageImageService {
     static func publicURL(_ value: String) -> URL? {
         guard value.count <= 4096, let url = URL(string: value),
               ["https", "http"].contains(url.scheme?.lowercased() ?? ""),
-              url.user == nil, url.password == nil, let host = url.host?.lowercased(), host.contains("."),
+              url.user == nil, url.password == nil, let host = url.host?.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: ".")), host.contains("."),
               !host.contains(":"), !host.allSatisfy({ $0.isNumber || $0 == "." }),
               !["localhost", "local", "internal", "test", "invalid"].contains(where: { host == $0 || host.hasSuffix("." + $0) }) else { return nil }
         return url
@@ -102,9 +103,46 @@ public enum WebPageImageService {
     }
 }
 
-private final class PublicPageRedirects: NSObject, URLSessionTaskDelegate, Sendable {
+final class PublicPageRedirects: NSObject, URLSessionTaskDelegate, Sendable {
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                     newRequest request: URLRequest, completionHandler: @escaping @Sendable (URLRequest?) -> Void) {
-        completionHandler(request.url.flatMap { WebPageImageService.publicURL($0.absoluteString) } == nil ? nil : request)
+        guard let url = request.url, WebPageImageService.publicURL(url.absoluteString) != nil,
+              let host = url.host, Self.resolvesPublicly(host) else { completionHandler(nil); return }
+        completionHandler(request)
+    }
+
+    private static func resolvesPublicly(_ host: String) -> Bool {
+        var hints = addrinfo()
+        hints.ai_socktype = SOCK_STREAM
+        var first: UnsafeMutablePointer<addrinfo>?
+        guard getaddrinfo(host, nil, &hints, &first) == 0, let first else { return false }
+        defer { freeaddrinfo(first) }
+        var current: UnsafeMutablePointer<addrinfo>? = first
+        while let entry = current {
+            let address = entry.pointee
+            switch address.ai_family {
+            case AF_INET:
+                let ipv4 = UnsafeRawPointer(address.ai_addr).assumingMemoryBound(to: sockaddr_in.self).pointee.sin_addr
+                let bytes = withUnsafeBytes(of: ipv4.s_addr) { Array($0) }
+                guard Self.publicIPv4(bytes) else { return false }
+            case AF_INET6:
+                let ipv6 = UnsafeRawPointer(address.ai_addr).assumingMemoryBound(to: sockaddr_in6.self).pointee.sin6_addr
+                // Globally routable unicast. Reject local, mapped IPv4 and transition prefixes.
+                let bytes = withUnsafeBytes(of: ipv6) { Array($0) }
+                guard bytes[0] & 0xe0 == 0x20, !bytes.starts(with: [0x20, 0x02]),
+                      !bytes.starts(with: [0x20, 0x01, 0, 0]) else { return false }
+            default: return false
+            }
+            current = address.ai_next
+        }
+        return true
+    }
+
+    private static func publicIPv4(_ bytes: [UInt8]) -> Bool {
+        let a = bytes[0], b = bytes[1]
+        return a != 0 && a != 10 && a != 127 && a < 224
+            && !(a == 100 && (64...127).contains(b)) && !(a == 169 && b == 254)
+            && !(a == 172 && (16...31).contains(b)) && !(a == 192 && (b == 168 || b == 0))
+            && !(a == 198 && (18...19).contains(b))
     }
 }

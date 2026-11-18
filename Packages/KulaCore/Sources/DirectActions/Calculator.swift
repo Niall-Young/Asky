@@ -29,8 +29,8 @@ public enum Calculator {
         guard let v = try? p.parseExpression() else { return nil }
         p.skipWhitespace()
         guard p.atEnd, v.isFinite else { return nil }
-        // A bare negative number such as "-5" is not a calculation worth showing.
-        if s.hasPrefix("-"), Double(s) != nil { return nil }
+        // Keep signed numbers and scientific literals available to search.
+        if Double(s.filter { !$0.isWhitespace }) != nil { return nil }
         return v
     }
 

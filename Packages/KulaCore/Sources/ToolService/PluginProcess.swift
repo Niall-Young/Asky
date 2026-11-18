@@ -6,6 +6,7 @@ import Darwin
 final class PluginProcessControl: @unchecked Sendable {
     private let lock = NSLock()
     private var processes: [Process] = []
+    private var children: [PluginProcessControl] = []
     private var cancelled = false
     private var timedOut = false
     func launch(_ process: Process) throws {
@@ -20,8 +21,19 @@ final class PluginProcessControl: @unchecked Sendable {
         if timedOut { throw ToolError(.timeout, CoreLocalization.text("进程执行超时")) }
         if cancelled { throw CancellationError() }
     }
+    func withChild<T>(_ body: (PluginProcessControl) throws -> T) throws -> T {
+        let child = PluginProcessControl()
+        try lock.withLock {
+            guard !cancelled else { throw CancellationError() }
+            children.append(child)
+        }
+        defer { lock.withLock { children.removeAll { $0 === child } } }
+        return try body(child)
+    }
+
     func cancel(timedOut: Bool = false) {
-        lock.lock(); cancelled = true; self.timedOut = self.timedOut || timedOut; let running = processes; lock.unlock()
+        lock.lock(); cancelled = true; self.timedOut = self.timedOut || timedOut; let running = processes; let nested = children; lock.unlock()
+        for child in nested { child.cancel(timedOut: timedOut) }
         for p in running where p.isRunning {
             p.terminate()
             DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) { if p.isRunning { kill(p.processIdentifier, SIGKILL) } }
@@ -77,9 +89,10 @@ enum PluginProcess {
         }
         let stdout = Result { try collect(out.fileHandleForReading, control: control) }
         p.waitUntilExit(); group.wait(); timer.cancel()
+        let output = try stdout.get(), diagnostic = try stderr.result!.get()
         try control.check()
-        return try PluginCommandResult(stdout: String(decoding: stdout.get(), as: UTF8.self),
-                                       stderr: String(decoding: stderr.result!.get(), as: UTF8.self), exitCode: p.terminationStatus)
+        return PluginCommandResult(stdout: String(decoding: output, as: UTF8.self),
+                                       stderr: String(decoding: diagnostic, as: UTF8.self), exitCode: p.terminationStatus)
     }
     static func command(_ executable: String, _ arguments: [String], cwd: URL? = nil, seconds: Double = 60) async throws -> PluginCommandResult {
         let control = PluginProcessControl()

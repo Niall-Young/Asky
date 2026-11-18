@@ -1,5 +1,6 @@
 import Foundation
 import Contracts
+import ToolService
 
 /// HTTP failures do not establish that a model lacks a capability.
 enum ModelCapabilityCheck {
@@ -11,7 +12,7 @@ enum ModelCapabilityCheck {
     typealias Transport = @Sendable (URLRequest) async throws -> (Data, URLResponse)
 
     static func run(baseURL: URL, model: String, apiKey: String,
-                    transport: Transport = { try await URLSession.shared.data(for: $0) }) async -> Report {
+                    transport: Transport = { try await ModelHTTPConnection.data(for: $0) }) async -> Report {
         let text = await probe(baseURL, apiKey, transport, ["model": model, "max_tokens": 4,
                                                  "messages": [["role": "user", "content": "ping"]]])
         let tools = await probe(baseURL, apiKey, transport, [
@@ -39,7 +40,8 @@ enum ModelCapabilityCheck {
     }
 
     private static func probe(_ base: URL, _ key: String, _ transport: Transport, _ body: [String: Any]) async -> String? {
-        var req = URLRequest(url: base.appending(path: "chat/completions"), timeoutInterval: 30)
+        guard let endpoint = try? ModelHTTPConnection.endpoint(base.absoluteString) else { return CoreLocalization.text("模型 API 地址无效") }
+        var req = URLRequest(url: endpoint, timeoutInterval: 30)
         req.httpMethod = "POST"
         req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")

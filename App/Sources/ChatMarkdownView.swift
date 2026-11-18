@@ -366,7 +366,7 @@ private struct ChatInlineNativeText: NSViewRepresentable {
             var attributes: [NSAttributedString.Key: Any] = [
                 .font: font, .foregroundColor: foreground, .paragraphStyle: paragraph
             ]
-            if let link = run.link, !ChatImageService.supports(link) {
+            if let link = run.link, link.scheme?.lowercased() == "mailto" {
                 attributes[.link] = link
                 attributes[.foregroundColor] = linkColor
                 attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue

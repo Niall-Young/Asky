@@ -70,7 +70,10 @@ final class ChatSourceTextView: ChatSelectableTextView, NSTextViewDelegate {
 
     func textView(_ textView: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
         guard let sources = textStorage?.attribute(.chatSources, at: charIndex, effectiveRange: nil) as? [URL],
-              !sources.isEmpty else { return false }
+              !sources.isEmpty else {
+            if let url = link as? URL, url.scheme?.lowercased() == "mailto" { _ = ToolService.openLauncherURL(url) }
+            return true
+        }
         openSources(sources, at: charIndex)
         return true
     }

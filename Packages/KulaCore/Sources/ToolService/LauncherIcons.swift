@@ -26,6 +26,10 @@ extension ToolService {
     @MainActor public static func openLauncherURL(_ url: URL) -> Bool {
         return NSWorkspace.shared.open(url)
     }
+    @MainActor public static func revealInFinder(_ url: URL) {
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
     /// Presentation-only system reads stay in the native service boundary.
     @MainActor public static func launcherIcon(filePath: String) -> NSImage {
         if let cached = launcherIcons.object(forKey: filePath as NSString) { return cached }

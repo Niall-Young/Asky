@@ -46,11 +46,15 @@ public struct MemoryExtractor: Sendable {
         guard sourceID.hasPrefix(Self.conversationPrefix) else { return [] }
         let cid = String(sourceID.dropFirst(Self.conversationPrefix.count))
         let after = Int(store.setting(Self.cursorKey(sourceID)) ?? "") ?? 0
-        let messages = ConversationStore(store).after(conversationID: cid, seq: after, limit: maxMessages)
-            .filter { $0.seq > after && ($0.role == "user" || $0.role == "assistant") }
-        guard let last = messages.last?.seq else { return [] }
-        guard messages.contains(where: { $0.role == "user" }) else {
+        let page = ConversationStore(store).after(conversationID: cid, seq: after, limit: maxMessages)
+        let messages = page.filter { $0.seq > after && ($0.role == "user" || $0.role == "assistant") }
+        guard let last = page.last?.seq else { return [] }
+        func advance() throws {
+            if page.count == maxMessages { _ = try ExtractionQueue(store).enqueue(sourceID) }
             store.setSetting(Self.cursorKey(sourceID), String(last))
+        }
+        guard messages.contains(where: { $0.role == "user" }) else {
+            try advance()
             return []
         }
         let revision = store.setting("history.revision")
@@ -70,7 +74,7 @@ public struct MemoryExtractor: Sendable {
             out.append(a.content)
         }
         if !out.isEmpty || removed { MemoryConsolidator.markDirty(store) }
-        store.setSetting(Self.cursorKey(sourceID), String(last))
+        try advance()
         return out
     }
 

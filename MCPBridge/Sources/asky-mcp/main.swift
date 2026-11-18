@@ -42,7 +42,9 @@ guard let credential = (env["ASKY_MCP_CREDENTIAL"] ?? env["KULAHERE_MCP_CREDENTI
 }
 signal(SIGPIPE, SIG_IGN)
 let link = Link(socketPath: env["ASKY_MCP_SOCKET"] ?? env["KULAHERE_MCP_SOCKET"] ?? MCPLink.defaultSocketPath(), credential: credential)
-let server = MCPStdioServer(version: "0.1.0",
+let appURL = Bundle.main.executableURL?.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+let version = appURL.flatMap { Bundle(url: $0)?.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String }
+let server = MCPStdioServer(version: version ?? "0.1.0",
                             listTools: { try link.with { try $0.listTools() } },
                             callTool: { tool, args in try link.with { try $0.call(tool: tool, arguments: args) } })
 
@@ -52,7 +54,11 @@ while true {
     let n = read(STDIN_FILENO, &buf, buf.count)
     if n < 0, errno == EINTR { continue }
     guard n > 0 else { break }
-    for line in framer.push(Data(buf[0..<n])) {
+    let lines = framer.push(Data(buf[0..<n])) {
+        let error = #"{"jsonrpc":"2.0","id":null,"error":{"code":-32600,"message":"Request exceeds frame size limit"}}"#
+        if !writeAll(STDOUT_FILENO, Data((error + "\n").utf8)) { exit(0) }
+    }
+    for line in lines {
         if let out = server.handle(line), !writeAll(STDOUT_FILENO, out) { exit(0) }
     }
 }

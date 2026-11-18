@@ -44,6 +44,18 @@ import LocalStore
         #expect(c.isDue())
     }
 
+    @Test func concurrentEditSurvivesConsolidation() async throws {
+        let (s, m) = try setup()
+        MemoryConsolidator.markDirty(s)
+        let consolidate = MemoryConsolidator(store: s, memory: m) { _, _ in
+            try m.add("新偏好", section: "偏好")
+            return #"{"files":[{"name":"MEMORY.md","content":"old summary"}]}"#
+        }
+        #expect(await !consolidate.run())
+        #expect(m.read().contains("新偏好"))
+        #expect(s.setting(MemoryConsolidator.dirtyKey) == "1")
+    }
+
     @Test func invalidRepliesLeaveFilesUntouched() async throws {
         let (s, m) = try setup()
         let before = m.read()

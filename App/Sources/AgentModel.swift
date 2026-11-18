@@ -3,7 +3,6 @@ import Contracts
 import LocalStore
 import Memory
 import AgentHost
-import ScreenCaptureKit
 import UniformTypeIdentifiers
 import ToolService
 import Scheduler
@@ -242,7 +241,7 @@ final class AgentModel {
         open(nil)
         draft = ""
         quotes = []
-        attachments = []
+        for attachment in attachments { removeAttachment(attachment) }
         attachmentThumbnails = [:]
         pendingReply = nil
         streaming = ""
@@ -671,37 +670,4 @@ final class AgentModel {
     func reportAttachmentError(_ error: Error) {
         appendTrimmed(ChatItem(id: UUID().uuidString, kind: .error, text: String(format: NSLocalizedString("添加附件失败：%@", comment: ""), error.localizedDescription)))
     }
-
-    func attachText(_ text: String) {
-        let url = app.store.attachmentsDirectory.appending(path: "\(UUID().uuidString).txt")
-        try? FileManager.default.createDirectory(at: app.store.attachmentsDirectory, withIntermediateDirectories: true)
-        guard (try? Data(text.utf8).write(to: url)) != nil else { return }
-        attachments.append(AttachmentRef(kind: .text, path: url.path, mimeType: "text/plain", byteSize: text.utf8.count, temporary: false))
-    }
-
-    /// User-initiated screenshot of the main display (ScreenCaptureKit; Screen Recording permission is asked by the system).
-    func captureScreen() {
-        Task {
-            do {
-                let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-                guard let display = content.displays.first else { return }
-                let own = content.applications.filter { $0.bundleIdentifier == Bundle.main.bundleIdentifier }
-                let filter = SCContentFilter(display: display, excludingApplications: own, exceptingWindows: [])
-                let cfg = SCStreamConfiguration()
-                cfg.width = display.width * 2
-                cfg.height = display.height * 2
-                let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: cfg)
-                let url = app.store.attachmentsDirectory.appending(path: "screenshot-\(UUID().uuidString).png")
-                try FileManager.default.createDirectory(at: app.store.attachmentsDirectory, withIntermediateDirectories: true)
-                guard let dest = CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil) else { return }
-                CGImageDestinationAddImage(dest, image, nil)
-                guard CGImageDestinationFinalize(dest) else { return }
-                let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int) ?? 0
-                addAttachment(ComposerAttachmentService.preview(AttachmentRef(kind: .image, path: url.path, mimeType: "image/png", byteSize: size, temporary: false)))
-            } catch {
-                appendTrimmed(ChatItem(id: UUID().uuidString, kind: .error, text: String(format: NSLocalizedString("截图失败：%@", comment: ""), error.localizedDescription)))
-            }
-        }
-    }
-
 }

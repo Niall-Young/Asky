@@ -324,7 +324,8 @@ final class AppModel {
                                  let s = reader.load()
                                  return s.advisorReadsMessages == true && s.enabledSources.contains(.messages)
                              },
-                             messagesDays: { reader.load().messagesLookback })
+                             messagesDays: { reader.load().messagesLookback },
+                             contactsEnabled: { reader.load().enabledSources.contains(.contacts) })
         gateway = MCPGateway(store: store, tools: tools)
         exchange = ExchangeRateService(cacheURL: store.root.appending(path: "ecb-rates.json"))
         terminal = TerminalRunner(spillDirectory: store.outputDirectory)

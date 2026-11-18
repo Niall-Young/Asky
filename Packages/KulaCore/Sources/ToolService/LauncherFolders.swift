@@ -22,17 +22,18 @@ extension ToolService {
         try Task.checkCancellation()
         var urls = children.filter { text.isEmpty || $0.lastPathComponent.localizedStandardContains(text) }
         if !text.isEmpty {
-            urls += await FolderMetadataSearch().run(folder: folder, text: text, limit: limit * 4)
+            let paths = await LauncherFileMetadataSearch().run(text: text, scopes: [folder], timeout: .milliseconds(450), limit: limit * 4)
+            urls += paths.map { URL(fileURLWithPath: $0) }
         }
         try Task.checkCancellation()
-        let exclusions = excluded.map { URL(fileURLWithPath: $0).standardizedFileURL.path }
+        let exclusions = LauncherFileExclusions(excluded)
         let root = folder.standardizedFileURL.path
         var seen = Set<String>()
         return urls.filter { url in
             let path = url.standardizedFileURL.path
             return path.hasPrefix(root == "/" ? "/" : root + "/") &&
                 !path.dropFirst(root.count).split(separator: "/").contains(where: { $0.hasPrefix(".") }) &&
-                !exclusions.contains(where: { path == $0 || path.hasPrefix($0 + "/") }) &&
+                !exclusions.contains(path) &&
                 seen.insert(path).inserted
         }.sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
             .prefix(max(0, limit)).map { url in
@@ -41,44 +42,5 @@ extension ToolService {
                              subtitle: (url.deletingLastPathComponent().path as NSString).abbreviatingWithTildeInPath,
                              actions: [.open, .revealInFinder])
             }
-    }
-}
-
-@MainActor
-private final class FolderMetadataSearch {
-    private var observer: NSObjectProtocol?
-    nonisolated init() {}
-
-    func run(folder: URL, text: String, limit: Int) async -> [URL] {
-        guard !Task.isCancelled else { return [] }
-        let query = NSMetadataQuery()
-        query.searchScopes = [folder]
-        query.predicate = NSPredicate(format: "%K CONTAINS[cd] %@", NSMetadataItemFSNameKey, text)
-        return await withCheckedContinuation { continuation in
-            var finished = false
-            let finish: @MainActor () -> Void = {
-                guard !finished else { return }
-                finished = true
-                query.disableUpdates()
-                let urls = (0..<min(limit, query.resultCount)).compactMap { index -> URL? in
-                    guard let path = (query.result(at: index) as? NSMetadataItem)?
-                        .value(forAttribute: NSMetadataItemPathKey) as? String else { return nil }
-                    return URL(fileURLWithPath: path)
-                }
-                query.stop()
-                if let observer = self.observer { NotificationCenter.default.removeObserver(observer) }
-                self.observer = nil
-                continuation.resume(returning: urls)
-            }
-            self.observer = NotificationCenter.default.addObserver(forName: .NSMetadataQueryDidFinishGathering,
-                                                               object: query, queue: .main) { _ in
-                MainActor.assumeIsolated { finish() }
-            }
-            if !query.start() { finish(); return }
-            Task { @MainActor in
-                try? await Task.sleep(for: .milliseconds(450))
-                finish()
-            }
-        }
     }
 }

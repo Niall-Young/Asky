@@ -5,6 +5,15 @@ import LocalStore
 
 @Suite @MainActor
 struct ClipboardAccessTests {
+    @Test func concealedConfigurationIsPasteableAndSkippedByHistory() {
+        let pasteboard = NSPasteboard.withUniqueName()
+        defer { pasteboard.releaseGlobally() }
+        #expect(ClipboardAccess.copyConcealed("fixture", to: pasteboard))
+        let snapshot = ClipboardAccess.snapshot(from: pasteboard)
+        #expect(pasteboard.string(forType: .string) == "fixture")
+        #expect(snapshot.concealed && snapshot.text == nil)
+    }
+
     @Test func filenameCopyPreservesUnicodeAndExtension() {
         let pasteboard = NSPasteboard.withUniqueName()
         defer { pasteboard.releaseGlobally() }

@@ -34,6 +34,16 @@ private func triage(_ calls: Calls, batch: Int = 2500) -> MessageTriage {
         #expect(t.batches(all, after: 2).map { $0.map(\.id) } == [["3"], ["4"]])
     }
 
+    @Test func malformedReplyRetriesTheSameBatch() async {
+        let calls = Calls(["unparseable", #"{"items":[]}"#])
+        let messages = [msg(4, "c:1", "预约")]
+        let service = triage(calls)
+        let first = await service.update(MessageTriageState(), messages: messages, now: now)
+        #expect(first.watermark == 0)
+        let second = await service.update(first, messages: messages, now: now)
+        #expect(second.watermark == 4)
+    }
+
     @Test func eachMessageIsSentOnceAndOnlyNotesAreKept() async {
         let calls = Calls([#"{"items":[{"source":["S1","S2"],"summary":"王磊要你周五前发合同，你已答应","due":null}]}"#])
         let first = [msg(10, "c:1", "周五前把合同发我"), msg(11, "c:1", "好的", mine: true), msg(12, "c:2", "广告：双十一大促")]

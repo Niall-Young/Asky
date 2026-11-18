@@ -36,6 +36,14 @@ import Contracts
         #expect(Args.int(nil, default: 50, max: 200) == 50)
     }
 
+    @Test func numericLimitsClampPriorToIntegerConversion() {
+        #expect(Args.int(.number(1e20), default: 5, max: 50) == 50)
+        #expect(Args.int(.number(Double(Int.max)), default: 5, max: Int.max) == Int.max)
+        #expect(Args.int(.number(-1e20), default: 5, max: 50) == 1)
+        #expect(Args.int(.number(.infinity), default: 5, max: 50) == 5)
+        #expect(Args.int(.number(.nan), default: 5, max: 50) == 5)
+    }
+
     @Test func schemaForbidsExtraProperties() {
         let s = Args.schema(["a": Args.stringProp], required: ["a"])
         #expect(s["additionalProperties"] == false)

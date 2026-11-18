@@ -78,12 +78,15 @@ public final class TerminalRunner: Sendable {
                     continuation.finish()
                 }
             }
-            continuation.onTermination = { [weak self] reason in
-                if case .cancelled = reason { self?.stop() }
+            continuation.onTermination = { reason in
+                if case .cancelled = reason { Self.stop(p) }
             }
             do {
-                try p.run()
-                process.withLock { $0 = p }
+                try process.withLock { current in
+                    if let current { Self.stop(current) }
+                    try p.run()
+                    current = p
+                }
             } catch {
                 continuation.yield(.stderr(CoreLocalization.format("无法启动命令：%@\n", String(describing: error.localizedDescription))))
                 continuation.yield(.exited(code: -1, spilledOutput: nil))
@@ -96,7 +99,11 @@ public final class TerminalRunner: Sendable {
 
     /// Terminates the running command (SIGTERM, then SIGKILL after 2 s).
     public func stop() {
-        guard let p = process.withLock({ $0 }), p.isRunning else { return }
+        if let p = process.withLock({ $0 }) { Self.stop(p) }
+    }
+
+    private static func stop(_ p: Process) {
+        guard p.isRunning else { return }
         p.terminate()
         let pid = p.processIdentifier
         DispatchQueue.global().asyncAfter(deadline: .now() + 2) {
@@ -112,6 +119,8 @@ public final class TerminalRunner: Sendable {
         private var buffered = Data()
         private var file: FileHandle?
         private var url: URL?
+        private var remaining = 16 * 1024 * 1024
+        private var spilling = false
 
         init(limit: Int, directory: URL) {
             self.limit = limit
@@ -121,20 +130,30 @@ public final class TerminalRunner: Sendable {
         /// Returns true if the chunk should still be shown live.
         func append(_ data: Data) -> Bool {
             lock.lock(); defer { lock.unlock() }
-            if file == nil, buffered.count + data.count <= limit {
+            if !spilling, buffered.count + data.count <= min(limit, remaining) {
                 buffered.append(data)
                 return true
             }
-            if file == nil {
-                try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-                let u = directory.appendingPathComponent("terminal-\(UUID().uuidString).log")
-                FileManager.default.createFile(atPath: u.path, contents: buffered)
-                file = try? FileHandle(forWritingTo: u)
-                file?.seekToEndOfFile()
-                url = u
-                buffered = Data()
+            do {
+                if !spilling {
+                    spilling = true
+                    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                    let u = directory.appendingPathComponent("terminal-\(UUID().uuidString).log")
+                    try buffered.write(to: u)
+                    file = try FileHandle(forWritingTo: u)
+                    try file?.seekToEnd()
+                    url = u
+                    remaining -= buffered.count
+                    buffered.removeAll()
+                }
+                if remaining > 0, let file {
+                    let chunk = data.prefix(remaining)
+                    try file.write(contentsOf: chunk)
+                    remaining -= chunk.count
+                }
+            } catch {
+                remaining = 0
             }
-            file?.write(data)
             return false
         }
 

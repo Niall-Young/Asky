@@ -164,11 +164,17 @@ enum AppUpdate {
         process.standardError = errors
         process.standardOutput = FileHandle.nullDevice
         try process.run()
+        let data = try errors.fileHandleForReading.readToEnd() ?? Data()
         process.waitUntilExit()
         guard process.terminationStatus == 0 else {
-            let detail = String(data: errors.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            let detail = String(data: data, encoding: .utf8) ?? ""
             throw AppUpdateError.installFailed(detail.trimmingCharacters(in: .whitespacesAndNewlines))
         }
+    }
+
+    static func runStageCommand(_ executable: String, _ arguments: [String]) async throws {
+        let result = try await PluginProcess.command(executable, arguments, seconds: 300)
+        guard result.exitCode == 0 else { throw AppUpdateError.installFailed(result.stderr) }
     }
 
     static let lsregister = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
@@ -272,7 +278,8 @@ extension ToolService {
             catch { throw AppUpdateError.network(error.localizedDescription) }
 
             await progress(CoreLocalization.text("正在校验…"))
-            if let checksumURL = release.checksumURL {
+            guard let checksumURL = release.checksumURL else { throw AppUpdateError.checksumMismatch }
+            do {
                 let (data, _) = try await URLSession.shared.data(for: AppUpdate.request(checksumURL))
                 guard let expected = AppUpdate.parseChecksum(String(decoding: data, as: UTF8.self)),
                       try AppUpdate.sha256(of: archive) == expected else { throw AppUpdateError.checksumMismatch }
@@ -280,12 +287,13 @@ extension ToolService {
 
             await progress(CoreLocalization.text("正在安装…"))
             let extracted = work.appending(path: "extracted")
-            try AppUpdate.run("/usr/bin/ditto", ["-x", "-k", archive.path, extracted.path])
+            try await AppUpdate.runStageCommand("/usr/bin/ditto", ["-x", "-k", archive.path, extracted.path])
             let candidates = (try? fileManager.contentsOfDirectory(at: extracted, includingPropertiesForKeys: nil)) ?? []
             guard let app = candidates.first(where: { $0.pathExtension == "app" }),
                   let bundle = Bundle(url: app),
                   bundle.bundleIdentifier == Bundle.main.bundleIdentifier else { throw AppUpdateError.invalidBundle }
-            try AppUpdate.run("/usr/bin/codesign", ["--verify", "--deep", "--strict", app.path])
+            let requirement = #"anchor apple generic and certificate leaf[subject.OU] = "V8GVW783CK" and certificate leaf[field.1.2.840.113635.100.6.1.13] exists"#
+            try await AppUpdate.runStageCommand("/usr/bin/codesign", ["--verify", "--deep", "--strict", "-R=" + requirement, app.path])
             try? fileManager.removeItem(at: archive)
             return StagedAppUpdate(release: release, installed: installed, app: app, work: work)
         } catch {

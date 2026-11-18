@@ -136,6 +136,7 @@ public final class MCPLinkClient: @unchecked Sendable {
 
     private func send(_ f: MCPLink.ClientFrame) throws {
         let data = try MCPLink.encode(f)
+        guard data.count - 1 <= MCPLink.maxFrameBytes else { throw MCPLinkError.protocolError(CoreLocalization.text("模型响应超过大小上限")) }
         guard writeAll(fd, data) else { throw MCPLinkError.closed }
     }
 
@@ -145,7 +146,9 @@ public final class MCPLinkClient: @unchecked Sendable {
             let n = read(fd, &buf, buf.count)
             if n < 0, errno == EINTR { continue }
             guard n > 0 else { throw MCPLinkError.closed }
-            pending += framer.push(Data(buf[0..<n]))
+            var oversized = false
+            pending += framer.push(Data(buf[0..<n])) { oversized = true }
+            if oversized { throw MCPLinkError.protocolError(CoreLocalization.text("模型响应超过大小上限")) }
         }
         let line = pending.removeFirst()
         do { return try JSONDecoder().decode(MCPLink.ServerFrame.self, from: line) } catch {

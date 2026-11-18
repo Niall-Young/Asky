@@ -15,9 +15,22 @@ if [[ "${1:-}" == "--build" || ! -d "$APP" ]]; then
         build
 fi
 
-# 已安装的正式版可能正在运行（同一 bundle id），用 -n 强制启动 Debug 副本。
-if pgrep -f "$APP/Contents/MacOS/" >/dev/null; then
-    open "$APP"
+# Match the executable path exactly, including when both Debug and Release are open.
+debug_pid() {
+    ps -axo pid=,comm= | awk -v exe="$APP/Contents/MacOS/Asky" '{ pid=$1; sub(/^ *[0-9]+ +/, ""); if ($0 == exe) print pid }'
+}
+pid="$(debug_pid | head -n 1)"
+if [[ -n "$pid" && "${1:-}" == "--build" ]]; then
+    kill -TERM "$pid"
+    for ((i=0; i<50; i++)); do
+        kill -0 "$pid" 2>/dev/null || break
+        sleep 0.1
+    done
+    if kill -0 "$pid" 2>/dev/null; then exit 1; fi
+    pid=""
+fi
+if [[ -n "$pid" ]]; then
+    osascript -l JavaScript -e "ObjC.import('AppKit'); $.NSRunningApplication.runningApplicationWithProcessIdentifier($pid).activateWithOptions(2)"
 else
     open -n "$APP"
 fi

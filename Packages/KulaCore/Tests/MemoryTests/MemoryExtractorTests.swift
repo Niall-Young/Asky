@@ -51,6 +51,22 @@ private func conversation(_ s: LocalStore, _ texts: [(String, String)]) throws -
         #expect(m.read().components(separatedBy: "用户希望默认用中文回复").count == 2)
     }
 
+    @Test func longConversationRequeuesRemainingMessages() async throws {
+        let s = try LocalStore(inMemoryWithRoot: FileManager.default.temporaryDirectory)
+        _ = try conversation(s, (1...41).map { ("user", "message-\($0)") })
+        let calls = Calls()
+        var extractor = MemoryExtractor(store: s, memory: tempMemoryFolder()) { _, user in
+            await calls.add(user)
+            return #"{"add":[]}"#
+        }
+        extractor.minIdle = 0
+        _ = await extractor.run()
+        #expect(ExtractionQueue(s).count == 1)
+        _ = await extractor.run()
+        #expect(await calls.prompts.last?.contains("message-41") == true)
+        #expect(ExtractionQueue(s).count == 0)
+    }
+
     @Test func failedCallRequeuesAndDeletedSourceIsSkipped() async throws {
         struct Boom: Error {}
         let s = try LocalStore(inMemoryWithRoot: FileManager.default.temporaryDirectory)
