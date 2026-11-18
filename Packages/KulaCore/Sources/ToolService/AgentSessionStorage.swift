@@ -127,7 +127,7 @@ public actor AgentSessionStorage {
         return file.path
     }
 
-    public func input(_ request: AgentRequest) throws -> JSONValue {
+    public func input(_ request: AgentRequest, now: Date = Date()) throws -> JSONValue {
         func escape(_ text: String) -> String {
             text.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;").replacingOccurrences(of: ">", with: "&gt;").replacingOccurrences(of: "\"", with: "&quot;")
         }
@@ -150,6 +150,10 @@ public actor AgentSessionStorage {
                 text += "\n<attachment name=\"\(escape(file.lastPathComponent))\">不支持读取此附件格式</attachment>\n"
             }
         }
+        let formatter = ISO8601DateFormatter()
+        let zone = TimeZone.current
+        formatter.timeZone = zone
+        text += "\n<context source=\"turn-clock\">本轮提交时间：\(formatter.string(from: now))（时区 \(zone.identifier)）</context>"
         text += "\n\n" + request.text
         if images.isEmpty { return .string(text) }
         return .array([["type": "text", "text": .string(text)]] + images)

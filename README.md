@@ -95,7 +95,7 @@ open build/DerivedData/Build/Products/Debug/Asky.app
 
 图片栏解析回归：`python3 App/Tests/run-agent-reply-regression.py --image-gallery`（先构建 Debug）；加 `--preview` 可打开四张图片的轮播检查窗口。
 
-真实模型的主动配图检查需显式启用，方法见[主动配图回归](docs/agent-runtime.md#主动配图的真实模型回归)。
+真实模型检查需显式启用，方法见[主动配图回归](docs/agent-runtime.md#主动配图的真实模型回归)和 [DeepSeek 输入缓存测试](docs/agent-runtime.md#deepseek-输入缓存)。
 
 UI 回归、Debug 预览、`scripts/package-release.py` 签名与打包流程见[开发与发布指南](docs/development.md)。macOS 14/15 实机验收尚待完成，具体测试范围以[验证记录](docs/validation/)为准。
 
@@ -189,7 +189,7 @@ Core checks:
 
 Image strip parsing regression: `python3 App/Tests/run-agent-reply-regression.py --image-gallery` (build Debug first). Add `--preview` to open a four-image carousel for interaction checks.
 
-Real-model image reply checks are opt-in; see [image reply regression](docs/agent-runtime.md#主动配图的真实模型回归).
+For opt-in tests against a live model, see [image reply regression](docs/agent-runtime.md#主动配图的真实模型回归) and [DeepSeek input cache testing](docs/agent-runtime.md#deepseek-输入缓存).
 
 See the [Development and Release Guide](docs/development.md) for UI regressions, Debug previews, and signing and packaging with `scripts/package-release.py`. Testing on macOS 14/15 hardware is still pending; consult the [validation records](docs/validation/) for test coverage.
 

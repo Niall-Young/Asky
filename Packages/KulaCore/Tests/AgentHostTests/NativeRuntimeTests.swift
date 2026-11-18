@@ -31,6 +31,57 @@ private func host(root: URL, script: ModelScript, tools: [ToolDefinition] = [],
 }
 
 @Suite(.timeLimit(.minutes(1))) struct NativeRuntimeTests {
+    @Test func stablePrefixAcrossSubmissionsAndToolContinuation() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let script = ModelScript([NativeCompletion(text: "四"), NativeCompletion(calls: [call("lookup")]),
+                                  NativeCompletion(text: "六")])
+        let definition = ToolDefinition(name: "lookup", summary: "read", source: .web, effect: .read,
+                                        confirmation: .never, externallyExposable: false)
+        let agent = host(root: root, script: script, tools: [definition]) {
+            ExecutionResult(requestID: $0.requestID, status: .completed, output: ["value": 6])
+        }
+        let history = ContextSnippet(sourceID: "history", text: "此前的对话")
+        _ = await collect(agent, AgentRequest(sessionID: "a", text: "二加二", context: [history]))
+        _ = await collect(agent, AgentRequest(sessionID: "b", text: "三加三", context: [history]))
+        let requests = await script.requests
+        await agent.shutdown()
+        try #require(requests.count == 3)
+        let first = try #require(requests[0]["messages"]?.arrayValue)
+        let next = try #require(requests[1]["messages"]?.arrayValue)
+        let continuation = try #require(requests[2]["messages"]?.arrayValue)
+        #expect(first.first == next.first)
+        #expect(first.first?["content"]?.stringValue?.contains("当前本地时间：") == false)
+        #expect(requests[0]["tools"] == requests[1]["tools"])
+        #expect(requests[0]["stream_options"] == nil) // Custom endpoints retain their existing wire options.
+        #expect(continuation.starts(with: next))
+        #expect(continuation.last?["role"] == "tool")
+
+        let storage = AgentSessionStorage(root: root)
+        let submission = AgentRequest(sessionID: "fixed", text: "明天下午", context: [history])
+        let firstTime = Date(timeIntervalSince1970: 1_800_000_000)
+        let firstText = try #require(try await storage.input(submission, now: firstTime).stringValue)
+        let laterText = try #require(try await storage.input(submission, now: firstTime.addingTimeInterval(60)).stringValue)
+        #expect(firstText != laterText)
+        let clock = try #require(firstText.range(of: "本轮提交时间："))
+        #expect(firstText[..<clock.lowerBound].contains(history.text))
+        #expect(laterText.hasPrefix(String(firstText[..<clock.upperBound])))
+        #expect(firstText.hasSuffix(submission.text))
+    }
+
+    @Test(arguments: [true, false]) func cacheUsageSurvivesFinalStreamChunk(separate: Bool) throws {
+        let usage: JSONValue = ["prompt_cache_hit_tokens": 0, "prompt_cache_miss_tokens": 2048]
+        var decoder = NativeCompletionDecoder()
+        _ = try decoder.consume(["choices": [["delta": ["content": "ok"], "finish_reason": "stop"]],
+                                 "usage": separate ? .null : usage])
+        if separate { _ = try decoder.consume(["choices": [], "usage": usage]) }
+        let reply = try decoder.result()
+        #expect(reply.cacheUsage?.hit == 0)
+        #expect(reply.cacheUsage?.miss == 2048)
+        #expect(reply.message == ["role": "assistant", "content": "ok"])
+        #expect(PromptCacheUsage(["prompt_cache_miss_tokens": 1]) == nil)
+    }
+
     @Test func inventedImageDraftIsCorrectedOnceBeforePublication() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

@@ -102,6 +102,19 @@ Asky 保留 AgentHost 的任务事件和 ToolService 的原生权限边界。Nat
 
 完整且未提交的表单仅为缺少答案的字段提供默认值，显式空字符串或空数组保留为空。提交以存储的表单为准合并默认值并再次校验，保存实际提交快照；预填不会自动提交或批准系统操作。未提交的本地编辑重开后恢复原始默认值；已提交快照原样恢复，不补填遗漏字段。旧表单没有 `defaultValue` 时行为不变。
 
+## DeepSeek 输入缓存
+
+系统提示词保留固定的日期解释规则。本轮本地时间和时区随用户消息发送，排在历史资料、附件文字之后和当前问题之前。同一轮的工具调用沿用这份时间。请求以固定的 JSON 键顺序编码。历史仍按当前可见记录和本轮相关性重建，滚动窗口、工具目录、插件说明或记忆发生变化时，可复用的前缀长度也会变化。
+
+DeepSeek 官方端点通过流式响应返回输入 token 的命中数和未命中数。Asky 将两项计数和请求阶段写入 macOS 统一日志的 `ModelCache` 类别。`initial` 表示本轮首次回答请求，`continuation` 表示工具或纠错续轮，`compaction` 表示上下文摘要。命中率按命中数除以两项之和计算。[DeepSeek 缓存规则](https://api-docs.deepseek.com/zh-cn/guides/kv_cache/)
+
+在仓库根目录运行以下可选在线测试。`ASKY_CACHE_TEST_CONFIG` 指向已配置的 DeepSeek `ModelConfiguration` JSON，密钥由 Keychain 提供。测试用临时快照、合成历史和只读样品查询完成四轮提问，输出每次请求的服务端计数，消耗所配置账户的 API 额度。
+
+```sh
+ASKY_CACHE_TEST_CONFIG=/path/to/model-config.json \
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --package-path Packages/KulaCore --filter CacheLiveTests
+```
+
 ## 主动配图的真实模型回归
 
 `NativeImageLiveTests` 默认不联网。显式设置 `ASKY_LIVE_IMAGE_MODEL_CONFIG` 为仅包含 `ModelConfiguration` 的 JSON 文件路径后，测试使用其中的服务地址、模型名与 Keychain 引用，经原生 AgentHost/ToolService 运行；密钥只在内存中读取，不写入报告。测试使用临时会话目录和内存数据库，不导入用户历史，固定加入一段“不能贴图”的旧回复来复现能力误判。
