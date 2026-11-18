@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 import Contracts
 import Search
 import LocalStore
@@ -61,6 +62,8 @@ enum LauncherWindowRegression {
                         try await checkCommandActions()
                     } else if CommandLine.arguments.contains("--action-bar") {
                         try await checkActionBar()
+                    } else if CommandLine.arguments.contains("--file-preview") {
+                        try await checkFilePreview()
                     } else if CommandLine.arguments.contains("--compact-results") {
                         try await checkCompactResults()
                     } else if CommandLine.arguments.contains("--bookmarks") {
@@ -101,6 +104,178 @@ enum LauncherWindowRegression {
         let source: SearchSource
         let results: [SearchResult]
         func search(_ query: String, limit: Int) async -> [SearchResult] { Array(results.prefix(limit)) }
+    }
+
+    private static func checkFilePreview() async throws {
+        let systemKeys = CommandLine.arguments.contains("--system-keys")
+        if systemKeys {
+            try require(AXIsProcessTrusted() && CGPreflightPostEventAccess(),
+                        "system shortcut checks require existing Accessibility permission")
+        }
+        let inputSource = systemKeys ? TISCopyCurrentKeyboardInputSource().takeRetainedValue() : nil
+        defer {
+            if let inputSource, !CFEqual(inputSource, TISCopyCurrentKeyboardInputSource().takeRetainedValue()) {
+                TISSelectInputSource(inputSource)
+            }
+        }
+        let root = FileManager.default.temporaryDirectory.appending(path: "Asky-file-preview-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let app = try AppModel(root: root)
+        let markdown = root.appending(path: "Preview.MD")
+        let image = root.appending(path: "Preview.png")
+        let clipboardImage = root.appending(path: "clipboard.img")
+        let other = root.appending(path: "Preview.txt")
+        let document = "# Project notes\n\n**Images** and Markdown share a preview.\n\n- One\n- Two\n\n![Example](Preview.png)\n\n```swift\nlet name = \"Asky\"\n```"
+        try Data(document.utf8).write(to: markdown)
+        try Data("Unsupported plain text".utf8).write(to: other)
+        let bitmap = NSImage(size: NSSize(width: 320, height: 180), flipped: false) { frame in
+            NSGradient(starting: .systemBlue, ending: .systemTeal)?.draw(in: frame, angle: 0)
+            NSColor.white.setFill()
+            NSBezierPath(ovalIn: NSRect(x: 108, y: 38, width: 104, height: 104)).fill()
+            return true
+        }
+        let png = NSBitmapImageRep(data: bitmap.tiffRepresentation!)!.representation(using: .png, properties: [:])!
+        try png.write(to: image)
+        try png.write(to: clipboardImage)
+
+        switch try await PreviewFile(url: markdown)?.load() {
+        case .markdown(let text, let directory):
+            try require(text == document && directory.path == root.resolvingSymlinksInPath().path,
+                        "read the original Markdown and its directory")
+        default:
+            try require(false, "decode an uppercase Markdown extension")
+        }
+        let embedded = await PreviewFile.loadMarkdownImage(at: image, in: root, maxPixelSize: 320)
+        try require(embedded?.width == 320, "resolve local images inside the Markdown directory")
+
+        let results = [markdown, image, other].map { url in
+            SearchResult(source: .file, target: TargetRef(kind: "file", identifier: url.path),
+                         title: url.lastPathComponent, actions: [.open], score: 100)
+        }
+        let model = LauncherModel(app: app, searchProviders: [CompactProvider(source: .file, results: results)])
+        let launcher = LauncherController(model: model)
+        NSApp.activate(ignoringOtherApps: true)
+        model.query = "Preview"
+        launcher.show()
+        defer { launcher.hide() }
+        for _ in 0..<80 {
+            if model.results.filter({ $0.source == .file }).count == results.count { break }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        guard let launcherPanel = NSApp.windows.first(where: { $0 is LauncherPanel && $0.isVisible }),
+              model.results.filter({ $0.source == .file }).count == results.count else {
+            throw NSError(domain: "AskyFilePreview", code: 1,
+                          userInfo: [NSLocalizedDescriptionKey: "Launcher and file fixtures must be visible before testing"])
+        }
+
+        func key(_ code: UInt16, _ modifiers: NSEvent.ModifierFlags, in window: NSWindow, repeatKey: Bool = false) {
+            let character = code == 49 ? " " : (code == 53 ? "\u{1B}" : "p")
+            window.sendEvent(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: modifiers,
+                timestamp: 0, windowNumber: window.windowNumber, context: nil, characters: character,
+                charactersIgnoringModifiers: character, isARepeat: repeatKey, keyCode: code)!)
+        }
+
+        func previewShortcut(_ code: UInt16, _ modifiers: NSEvent.ModifierFlags, in window: NSWindow) async throws {
+            guard systemKeys else { key(code, modifiers, in: window); return }
+            try require(window.isKeyWindow, "the target window must own the keyboard before posting a shortcut")
+            var flags: CGEventFlags = .maskControl
+            if modifiers.contains(.shift) { flags.insert(.maskShift) }
+            for down in [true, false] {
+                let event = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: down)!
+                event.flags = flags
+                event.post(tap: .cghidEventTap)
+                try await Task.sleep(for: .milliseconds(30))
+            }
+        }
+
+        func open(_ label: String, from panel: NSWindow, code: UInt16 = 49,
+                  modifiers: NSEvent.ModifierFlags = .control) async throws -> NSWindow {
+            try await previewShortcut(code, modifiers, in: panel)
+            for _ in 0..<15 {
+                if let preview = ContentPreviewWindow.quick.window, preview.isKeyWindow, preview.title == label { break }
+                try await Task.sleep(for: .milliseconds(50))
+            }
+            if let inputSource {
+                try require(CFEqual(inputSource, TISCopyCurrentKeyboardInputSource().takeRetainedValue()),
+                            "opening a preview preserves the system input source")
+            }
+            let window = ContentPreviewWindow.quick.window
+            try require(window?.title == label && window?.isKeyWindow == true && panel.isVisible,
+                        "the shortcut opens \(label) above the originating panel. Key window: \(NSApp.keyWindow?.title ?? "none")")
+            let preview = window!
+            key(code, modifiers, in: preview, repeatKey: true)
+            try require(preview.isVisible, "holding the shortcut keeps the preview open")
+            if CommandLine.arguments.contains("--capture") {
+                try await Task.sleep(for: .milliseconds(250))
+                let process = Process()
+                process.executableURL = URL(filePath: "/usr/sbin/screencapture")
+                let origin = panel is LauncherPanel ? "launcher" : "clipboard"
+                let appearance = panel.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua])?.rawValue ?? "system"
+                let frame = preview.frame.integral
+                let top = (NSScreen.screens.first?.frame.maxY ?? frame.maxY) - frame.maxY
+                let region = [frame.minX, top, frame.width, frame.height].map { String(Int($0)) }.joined(separator: ",")
+                process.arguments = ["-x", "-R" + region,
+                    "build/file-preview-\(appearance)-\(origin)-\(label).png"]
+                try process.run()
+                while process.isRunning { try await Task.sleep(for: .milliseconds(20)) }
+                try require(process.terminationStatus == 0, "capture the visible preview")
+            }
+            return preview
+        }
+
+        for url in [markdown, image] {
+            model.selection = model.results.firstIndex { $0.target.identifier == url.path }!
+            let preview = try await open(url.lastPathComponent, from: launcherPanel)
+            key(53, [], in: preview)
+            try await Task.sleep(for: .milliseconds(100))
+            try require(!preview.isVisible && launcherPanel.isKeyWindow, "Escape restores the search field")
+            try require(model.query == "Preview" && model.selectedActionResult?.target.identifier == url.path,
+                        "closing a preview preserves the search and selected result")
+        }
+        model.selection = model.results.firstIndex { $0.target.identifier == other.path }!
+        key(49, .control, in: launcherPanel)
+        try require(ContentPreviewWindow.quick.window?.isVisible == false, "plain files have no preview")
+        launcher.hide()
+
+        let store = ClipboardStore(app.store)
+        let entries = [
+            ClipboardItem(kind: .image, filePath: clipboardImage.path, byteSize: png.count, contentHash: "image"),
+            ClipboardItem(kind: .file, text: markdown.lastPathComponent, filePaths: [markdown.path], byteSize: 1, contentHash: "markdown"),
+            ClipboardItem(kind: .file, text: "Multiple", filePaths: [image.path, markdown.path], byteSize: 1, contentHash: "multi")
+        ]
+        for item in entries { try store.insert(item) }
+        let clipboard = ClipboardController(app: app, pasteTargetProvider: { .unavailable })
+        clipboard.show()
+        defer { clipboard.hide() }
+        for _ in 0..<80 {
+            if clipboard.items.count == entries.count { break }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        guard let clipboardPanel = NSApp.windows.first(where: {
+            $0.title == NSLocalizedString("剪贴板历史", comment: "") && $0.isVisible
+        }), clipboard.items.count == entries.count else {
+            throw NSError(domain: "AskyFilePreview", code: 2,
+                          userInfo: [NSLocalizedDescriptionKey: "Clipboard and history fixtures must be visible before testing"])
+        }
+        for (item, title) in zip(entries, [entries[0].imageTitle, markdown.lastPathComponent]) {
+            clipboard.select(item)
+            let preview = try await open(title, from: clipboardPanel)
+            try await previewShortcut(49, .control, in: preview)
+            try await Task.sleep(for: .milliseconds(100))
+            try require(!preview.isVisible && clipboardPanel.isKeyWindow && clipboard.selectedItem?.id == item.id,
+                        "Control-Space closes the preview and restores the clipboard selection")
+        }
+        clipboard.select(entries[2])
+        key(49, .control, in: clipboardPanel)
+        try require(ContentPreviewWindow.quick.window?.isVisible == false, "a batch of files has no single-file preview")
+        clipboard.select(entries[1])
+        try require(app.preferences.setShortcut(.clipboardPreview, .init(code: 35, modifiers: 4608, label: "⌃⇧ P")),
+                    "an unused shortcut can replace the clipboard default")
+        key(49, .control, in: clipboardPanel)
+        try require(ContentPreviewWindow.quick.window?.isVisible == false, "the old shortcut is released on remap")
+        let preview = try await open(markdown.lastPathComponent, from: clipboardPanel, code: 35, modifiers: [.control, .shift])
+        clipboard.hide()
+        try require(!preview.isVisible, "hiding the original panel closes its preview")
     }
 
     private static func checkAppOpening() async throws {

@@ -28,7 +28,7 @@ let package = Package(
         .target(name: "DirectActions", dependencies: ["Contracts"]),
         .target(name: "Resources", dependencies: ["Contracts"]),
         .target(name: "LocalStore", dependencies: ["Contracts"], linkerSettings: [.linkedLibrary("sqlite3")]),
-        .target(name: "ToolService", dependencies: ["Contracts", "LocalStore", "DirectActions"]),
+        .target(name: "ToolService", dependencies: ["Contracts", "LocalStore", "DirectActions", "Resources"]),
         .target(name: "AgentHost", dependencies: ["Contracts", "ToolService"]),
         .target(name: "Memory", dependencies: ["Contracts", "LocalStore"]),
         .target(name: "Scheduler", dependencies: ["Contracts", "LocalStore"]),

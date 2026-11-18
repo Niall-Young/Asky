@@ -3,7 +3,7 @@ import SwiftUI
 
 /// Stored by stable action ID; missing IDs retain their defaults on older installations.
 enum LocalShortcutAction: String, CaseIterable, Identifiable {
-    case windowPreviousDisplay, windowNextDisplay, reveal, copyPath, copyFile, copyName, fileInfo, execute, askAI, launcherMore, launcherUp, launcherDown, enterFolder, back, launcherEscape, settings, paste, clipboardCopy, delete, clipboardMore, clipboardUp, clipboardDown, clipboardLeft, clipboardRight, clipboardEscape, send, newline, newChat, closeChat, agentEscape
+    case windowPreviousDisplay, windowNextDisplay, reveal, copyPath, copyFile, copyName, fileInfo, execute, askAI, launcherPreview, launcherMore, launcherUp, launcherDown, enterFolder, back, launcherEscape, settings, paste, clipboardCopy, delete, clipboardPreview, clipboardMore, clipboardUp, clipboardDown, clipboardLeft, clipboardRight, clipboardEscape, send, newline, newChat, closeChat, agentEscape
     var id: String { rawValue }
     var isConfigurable: Bool {
         switch self {
@@ -22,6 +22,7 @@ enum LocalShortcutAction: String, CaseIterable, Identifiable {
         case .copyFile: "复制文件"
         case .copyName: "复制文件名"
         case .fileInfo: "展示文件信息"
+        case .launcherPreview, .clipboardPreview: "快速预览"
         case .execute: "执行选中结果"
         case .askAI: "询问 AI"
         case .launcherMore: "更多"
@@ -55,6 +56,7 @@ enum LocalShortcutAction: String, CaseIterable, Identifiable {
         case .copyFile: "launcher"
         case .copyName: "launcher"
         case .fileInfo: "launcher"
+        case .launcherPreview: "launcher"
         case .execute: "launcher"
         case .askAI: "launcher"
         case .launcherMore: "launcher"
@@ -67,6 +69,7 @@ enum LocalShortcutAction: String, CaseIterable, Identifiable {
         case .paste: "clipboard"
         case .clipboardCopy: "clipboard"
         case .delete: "clipboard"
+        case .clipboardPreview: "clipboard"
         case .clipboardMore: "clipboard"
         case .clipboardUp: "clipboard"
         case .clipboardDown: "clipboard"
@@ -89,6 +92,7 @@ enum LocalShortcutAction: String, CaseIterable, Identifiable {
         case .copyFile: .init(code: 8, modifiers: 256, label: "⌘ C")
         case .copyName: .init(code: 47, modifiers: 768, label: "⌘⇧ .")
         case .fileInfo: .init(code: 34, modifiers: 256, label: "⌘ I")
+        case .launcherPreview, .clipboardPreview: .init(code: 49, modifiers: 4096, label: "⌃ Space")
         case .execute: .init(code: 36, modifiers: 0, label: "↵")
         case .askAI: .init(code: 36, modifiers: 768, label: "⇧⌘ ↵")
         case .launcherMore: .init(code: 40, modifiers: 256, label: "⌘ K")

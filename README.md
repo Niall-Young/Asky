@@ -62,6 +62,7 @@ brew install --cask niall-young/asky/asky
 | --- | --- |
 | 快速搜索 | 菜单栏图标 / 自定义全局快捷键，`Return` 打开结果 |
 | 剪贴板历史 | `Ctrl + Shift + C`；`Return` 粘贴，`⌘ Return` 仅复制 |
+| 快速预览 | 在快速搜索或剪贴板历史中选中图片或单个 Markdown 文件，按 `Ctrl + 空格`；再按一次或按 `Esc` 关闭 |
 | AI 对话 | `Ctrl + Shift + /` |
 | 分类检索 | `app ` / `file ` / `ql ` / `sc `（应用 / 文件 / 快捷方式 / 快捷指令） |
 | 文件夹浏览 | 选中文件夹后按 `Tab` |
@@ -70,6 +71,8 @@ brew install --cask niall-young/asky/asky
 | 操作菜单 / 设置 | `⌘K` / `⌘,`（窗口获焦时） |
 
 触发词可在“设置 › 指令”中自定义。更多操作与配置见[使用教程](https://asky.niallspace.workers.dev/docs)。
+
+如果 macOS 已将 `Ctrl + 空格` 用于切换输入法，Asky 可用已有的辅助功能权限在预览时优先处理这组按键。也可在“设置 › 触发快捷键”中为“文件与应用”和“剪贴板历史”各自修改“快速预览”快捷键。
 
 ### 开发与构建
 
@@ -151,6 +154,7 @@ Or download the DMG from [Releases](https://github.com/Niall-Young/Asky/releases
 | --- | --- |
 | Quick search | Menu bar icon / custom global hotkey; `Return` to open a result |
 | Clipboard history | `Ctrl + Shift + C`; `Return` to paste, `⌘ Return` to copy |
+| Quick preview | Select an image or one Markdown file in Quick Search or Clipboard History and press `Ctrl + Space`. Press it again or press `Esc` to close. |
 | AI conversation | `Ctrl + Shift + /` |
 | Category search | `app ` / `file ` / `ql ` / `sc ` (apps / files / quick links / shortcuts) |
 | Folder browsing | Select a folder and press `Tab` |
@@ -159,6 +163,8 @@ Or download the DMG from [Releases](https://github.com/Niall-Young/Asky/releases
 | Action menu / Settings | `⌘K` / `⌘,` (when the window is focused) |
 
 Customize triggers in Settings › Commands. See the [User Guide](https://asky.niallspace.workers.dev/docs) for more actions and configuration.
+
+If macOS uses `Ctrl + Space` to switch input sources, Asky can use existing Accessibility access to handle the shortcut first when a preview is available. You can also change Quick Preview under Files and Applications and Clipboard History in Settings › Keyboard Shortcuts.
 
 ### Development
 

@@ -97,7 +97,7 @@ private struct ChatImageTile: View {
                 if let image {
                     GeometryReader { geometry in
                         Button {
-                            ChatImagePreviewWindow.shared.show(image: image, label: photo.label)
+                            ContentPreviewWindow.shared.show(image: image, label: photo.label)
                         } label: {
                             Image(nsImage: image).resizable().scaledToFill()
                                 .frame(width: geometry.size.width, height: geometry.size.height)
@@ -201,57 +201,5 @@ private struct ChatImageDownloadButton: View {
                 downloaded = false
             } catch {}
         }
-    }
-}
-
-/// One reusable native image window; history and live answers open the same surface.
-@MainActor
-final class ChatImagePreviewWindow: NSWindowController, NSWindowDelegate {
-    static let shared = ChatImagePreviewWindow()
-    private let presentation = WindowPresentation()
-
-    private init() { super.init(window: nil) }
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-
-    func show(image: NSImage, label: String) {
-        let window: NSWindow
-        if let existing = self.window { window = existing }
-        else {
-            window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 680, height: 560),
-                styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
-                backing: .buffered, defer: false)
-            window.delegate = self
-            window.isReleasedWhenClosed = false
-            window.isOpaque = false
-            window.backgroundColor = .clear
-            window.hasShadow = true
-            window.titleVisibility = .hidden
-            window.titlebarAppearsTransparent = true
-            window.contentMinSize = NSSize(width: 320, height: 280)
-            self.window = window
-            window.center()
-        }
-        window.title = label.isEmpty ? NSLocalizedString("图片预览", comment: "") : label
-        let host = NSHostingView(rootView: ChatImagePreview(image: image, label: label))
-        host.frame = NSRect(origin: .zero, size: window.contentRect(forFrameRect: window.frame).size)
-        window.contentView = WindowSurface.glassContentView(host, cornerRadius: 16)
-        presentation.show(window, afterActivation: true)
-    }
-
-    func windowWillClose(_ notification: Notification) {
-        window?.contentView = nil
-    }
-}
-
-private struct ChatImagePreview: View {
-    let image: NSImage
-    let label: String
-    var body: some View {
-        Image(nsImage: image).resizable().scaledToFit()
-            .accessibilityLabel(label)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .padding(16).padding(.top, 28)
-            .windowSurfaceBackground(in: RoundedRectangle(cornerRadius: 16))
-            .ignoresSafeArea()
     }
 }

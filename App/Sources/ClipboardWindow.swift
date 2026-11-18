@@ -195,10 +195,20 @@ final class ClipboardController {
         panel.shortcuts = { [weak app] in app?.preferences ?? SettingsPreferences() }
         // Keyboard application switching must also remove outside-click observation.
         NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: panel, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { if let self, !self.pinned, !self.dragSource.active, !self.keepingOpenForPaste, !self.isConfirmingClearAll { self.hide() } }
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                ContentPreviewWindow.quick.releaseShortcut(in: self.panel)
+                self.handleBlur()
+            }
         }
         NotificationCenter.default.addObserver(forName: NSWindow.didBecomeKeyNotification, object: panel, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.panel.level = .floating }
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.panel.level = .floating
+                ContentPreviewWindow.quick.captureShortcut(in: self.panel) { [weak self] event in
+                    self?.previewFile(for: event) != nil
+                }
+            }
         }
     }
 
@@ -207,6 +217,12 @@ final class ClipboardController {
 
     var isVisible: Bool { panel.isVisible }
     func toggle() { panel.isVisible ? hide() : show() }
+
+    private func handleBlur() {
+        guard !ContentPreviewWindow.quick.isShowing(from: panel),
+              !pinned, !dragSource.active, !keepingOpenForPaste, !isConfirmingClearAll else { return }
+        hide()
+    }
 
     func show() {
         pasteTask?.cancel()
@@ -253,6 +269,7 @@ final class ClipboardController {
         keepingOpenForPaste = false
         defer { hiding = false }
         isActionsMenuPresented = false
+        ContentPreviewWindow.quick.dismiss(from: panel)
         outsideClickDismissal.hide()
         status = nil
         toastPanel.remove()
@@ -271,7 +288,7 @@ final class ClipboardController {
         guard !isConfirmingClearAll, panel.isVisible, (!pinned || isActionsMenuPresented), !dragSource.active else { outsideClickDismissal.hide(); return }
         outsideClickDismissal.show(contains: { [weak self] point in
             guard let self else { return false }
-            return self.shellFrame.contains(point)
+            return self.shellFrame.contains(point) || ContentPreviewWindow.quick.contains(point, from: self.panel)
         }, dismiss: { [weak self] in
             guard let self else { return }
             if self.pinned { self.isActionsMenuPresented = false } else { self.hide() }
@@ -311,10 +328,26 @@ final class ClipboardController {
         }
     }
 
+    private func previewFile(for event: NSEvent) -> PreviewFile? {
+        guard app.preferences.shortcut(.clipboardPreview).matches(event),
+              (panel.firstResponder as? NSTextView)?.hasMarkedText() != true,
+              let item = selectedItem else { return nil }
+        return PreviewFile(clipboardItem: item)
+    }
+
     func handleActionKey(_ event: NSEvent) -> Bool {
         guard event.type == .keyDown,
               (panel.firstResponder as? NSTextView)?.hasMarkedText() != true else { return false }
         func matches(_ action: LocalShortcutAction) -> Bool { app.preferences.shortcut(action).matches(event) }
+        if let item = selectedItem, let file = previewFile(for: event) {
+            if !event.isARepeat {
+                isActionsMenuPresented = false
+                let label = item.kind == .image ? item.imageTitle : file.url.lastPathComponent
+                ContentPreviewWindow.quick.show(file: file, label: label, from: panel,
+                    shortcut: app.preferences.shortcut(.clipboardPreview), onBlur: { [weak self] in self?.handleBlur() })
+            }
+            return true
+        }
         if matches(.clipboardMore) { toggleActionsMenu(); return true }
         if matches(.clipboardCopy) {
             isActionsMenuPresented = false

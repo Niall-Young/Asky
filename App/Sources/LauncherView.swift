@@ -169,14 +169,25 @@ final class LauncherController {
         }
         panel.onBlur = { [weak self] in
             guard let self else { return }
+            guard !ContentPreviewWindow.quick.isShowing(from: self.panel) else { return }
             guard !LauncherPresentationTrace.isEnabled else { return }
             self.model.closeActionsMenu()
             guard !self.model.isConfirmingQuit, !self.model.isConfirmingPluginCommand else { return }
             self.hide()
         }
-        panel.onActionKey = { [weak model] event in
-            guard let model else { return false }
-            return model.handleActionKey(event)
+        panel.onActionKey = { [weak self] event in
+            guard let self else { return false }
+            return self.handlePreviewKey(event) || self.model.handleActionKey(event)
+        }
+        panel.onKeyChange = { [weak self] key in
+            guard let self else { return }
+            if key {
+                ContentPreviewWindow.quick.captureShortcut(in: self.panel) { [weak self] event in
+                    self?.previewFile(for: event) != nil
+                }
+            } else {
+                ContentPreviewWindow.quick.releaseShortcut(in: self.panel)
+            }
         }
         panel.actionMenuContainsPoint = { [weak model] point in
             guard let model, model.isActionsMenuPresented else { return false }
@@ -202,6 +213,23 @@ final class LauncherController {
     var isVisible: Bool { panel.isVisible }
 
     func toggle() { isVisible ? hide() : show() }
+
+    private func previewFile(for event: NSEvent) -> PreviewFile? {
+        guard model.actionPreferences.shortcut(.launcherPreview).matches(event),
+              (panel.firstResponder as? NSTextView)?.hasMarkedText() != true,
+              let result = model.selectedActionResult, result.source == .file else { return nil }
+        return PreviewFile(url: URL(filePath: result.target.identifier))
+    }
+
+    private func handlePreviewKey(_ event: NSEvent) -> Bool {
+        guard let file = previewFile(for: event) else { return false }
+        if !event.isARepeat {
+            model.closeActionsMenu()
+            ContentPreviewWindow.quick.show(file: file, label: file.url.lastPathComponent, from: panel,
+                shortcut: model.actionPreferences.shortcut(.launcherPreview), onBlur: panel.onBlur)
+        }
+        return true
+    }
 
     func show(on targetScreen: NSScreen? = nil) {
         LauncherPresentationTrace.record("show-request", panel: panel)
@@ -295,6 +323,7 @@ final class LauncherController {
         outsideClickDismissal.show(contains: { [weak self] point in
             guard let self else { return false }
             if self.model.isConfirmingPluginCommand { return true }
+            if ContentPreviewWindow.quick.contains(point, from: self.panel) { return true }
             let surfaces = [self.panel]
             return surfaces.contains { $0.isVisible && !$0.ignoresMouseEvents && $0.alphaValue > 0 && $0.frame.contains(point) }
         }, dismiss: { [weak self] in self?.hide() })
@@ -363,6 +392,7 @@ final class LauncherController {
         // Invalidate before orderOut or model reset can invoke any old callbacks.
         presentation.isPresented = false
         presentation.sessionID = UUID()
+        ContentPreviewWindow.quick.dismiss(from: panel)
         outsideClickDismissal.hide()
         resultReveal.stop()
         for surface in [toastPanel] { surface.remove() }

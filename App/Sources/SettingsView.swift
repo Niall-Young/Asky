@@ -69,7 +69,7 @@ private struct HotKeySettings: View {
                 Text(NSLocalizedString("通用", comment: ""))
             }
             Section {
-                localRows([.reveal, .copyPath, .copyFile, .copyName, .fileInfo])
+                localRows([.reveal, .copyPath, .copyFile, .copyName, .fileInfo, .launcherPreview])
             } header: {
                 Text(NSLocalizedString("文件与应用", comment: ""))
             }
@@ -79,7 +79,7 @@ private struct HotKeySettings: View {
                 Text(NSLocalizedString("启动器", comment: ""))
             }
             Section {
-                localRows([.clipboardCopy, .delete, .clipboardMore])
+                localRows([.clipboardCopy, .delete, .clipboardPreview, .clipboardMore])
             } header: {
                 Text(NSLocalizedString("剪贴板历史", comment: ""))
             }

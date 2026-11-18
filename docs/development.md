@@ -27,6 +27,8 @@ python3 App/Tests/run-launcher-window-regression.py --first-presentation
 python3 App/Tests/run-launcher-window-regression.py --shell-lifecycle
 python3 App/Tests/run-launcher-window-regression.py --accessories
 python3 App/Tests/run-launcher-window-regression.py --command-icons
+python3 App/Tests/run-launcher-window-regression.py --file-preview
+python3 App/Tests/run-launcher-window-regression.py --file-preview --system-keys --capture
 python3 App/Tests/run-launcher-terminal-regression.py
 python3 App/Tests/run-launcher-calculation-regression.py
 python3 App/Tests/run-launcher-window-regression.py --ai-routing
@@ -186,6 +188,8 @@ python3 App/Tests/run-launcher-window-regression.py --first-presentation
 python3 App/Tests/run-launcher-window-regression.py --shell-lifecycle
 python3 App/Tests/run-launcher-window-regression.py --accessories
 python3 App/Tests/run-launcher-window-regression.py --command-icons
+python3 App/Tests/run-launcher-window-regression.py --file-preview
+python3 App/Tests/run-launcher-window-regression.py --file-preview --system-keys --capture
 python3 App/Tests/run-launcher-terminal-regression.py
 python3 App/Tests/run-launcher-calculation-regression.py
 python3 App/Tests/run-launcher-window-regression.py --ai-routing
