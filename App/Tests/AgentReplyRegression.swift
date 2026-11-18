@@ -1471,17 +1471,45 @@ enum AgentReplyRegression {
             // Composer top padding (10), button gap (8), and half its height (16).
             let point = scroll.contentView.convert(NSPoint(x: scroll.contentView.bounds.midX,
                                                            y: editorRect.minY - 34), to: nil)
-            for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
-                let event = NSEvent.mouseEvent(with: type, location: point, modifierFlags: [],
-                    timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
-                    context: nil, eventNumber: 1, clickCount: 1, pressure: type == .leftMouseDown ? 1 : 0)!
-                window.sendEvent(event)
+            let startY = scroll.contentView.bounds.minY
+            func clickBottom() {
+                for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                    let event = NSEvent.mouseEvent(with: type, location: point, modifierFlags: [],
+                        timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                        context: nil, eventNumber: 1, clickCount: 1, pressure: type == .leftMouseDown ? 1 : 0)!
+                    window.sendEvent(event)
+                }
             }
-            try await Task.sleep(for: .milliseconds(700))
+            if attempt == 0 && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+                clickBottom()
+                try await Task.sleep(for: .milliseconds(70))
+                NotificationCenter.default.post(name: NSScrollView.willStartLiveScrollNotification, object: scroll)
+                scroll.contentView.scroll(to: NSPoint(x: 0, y: startY))
+                scroll.reflectScrolledClipView(scroll.contentView)
+                try await Task.sleep(for: .milliseconds(400))
+                precondition(abs(scroll.contentView.bounds.minY - startY) <= 1,
+                             "Manual scrolling must immediately take over from the bottom animation")
+            }
+            clickBottom()
+            var intermediatePositions = Set<CGFloat>()
+            for _ in 0..<20 {
+                try await Task.sleep(for: .milliseconds(16))
+                let y = scroll.contentView.bounds.minY
+                let distance = scroll.documentView!.bounds.maxY - scroll.contentView.bounds.height - startY
+                let progress = (y - startY) / distance
+                if (0.05...0.95).contains(progress) {
+                    intermediatePositions.insert(y)
+                }
+            }
+            if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+                precondition(intermediatePositions.count >= 3,
+                             "Clicking the bottom button must animate through multiple positions: saw \(intermediatePositions.count)")
+            }
+            try await Task.sleep(for: .milliseconds(380))
             window.contentView!.layoutSubtreeIfNeeded()
             let gap = scroll.documentView!.bounds.maxY - scroll.documentVisibleRect.maxY
             precondition(abs(gap) <= 1, "One button press must reach the actual bottom, including padding: attempt=\(attempt), gap=\(gap), document=\(scroll.documentView!.frame), clip=\(scroll.contentView.bounds), visible=\(scroll.documentVisibleRect)")
-            print("One-click bottom: attempt=\(attempt), size=\(size), gap=\(gap)")
+            print("One-click bottom: attempt=\(attempt), size=\(size), intermediate positions=\(intermediatePositions.count), gap=\(gap)")
         }
         let settled = scroll.contentView.bounds.minY
         // Returning to the bottom must not enable ongoing automatic reply following.

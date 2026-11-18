@@ -406,7 +406,7 @@ private struct Transcript: View {
                         .padding(.bottom, 40)
                     }
                     // Scroll content continues behind the floating composer; its tail remains readable.
-                    Color.clear.frame(height: bottomInset + 13).id("bottom")
+                    Color.clear.frame(height: bottomInset + 13)
                 }
                 .padding(.horizontal, 12).padding(.top, 12)
                 .padding(.top, AgentLayout.headerHeight)
@@ -471,31 +471,6 @@ private struct CompatibleTranscriptScroll<Content: View>: View {
     }
 }
 
-/// Native rich text can finish layout over several passes after a page change.
-/// Only the explicit return-to-bottom button uses this destination.
-@MainActor
-private func alignTranscriptBottom(_ proxy: ScrollViewProxy, viewport: TranscriptViewport,
-                                   reduceMotion: Bool) -> Task<Void, Never> {
-    Task { @MainActor in
-        guard !Task.isCancelled else { return }
-        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
-            proxy.scrollTo("bottom", anchor: .bottom)
-        }
-        do {
-            try await Task.sleep(for: .milliseconds(reduceMotion ? 0 : 220))
-            var settledPasses = 0
-            for _ in 0..<12 {
-                try Task.checkCancellation()
-                viewport.alignBottom()
-                try await Task.sleep(for: .milliseconds(30))
-                settledPasses = viewport.isAtBottom ? settledPasses + 1 : 0
-                if settledPasses >= 3 { return }
-            }
-        } catch { /* The window closed or the reader took over. */ }
-    }
-}
-
-/// Resolve the actual clip/document bounds after SwiftUI's animated estimate.
 @MainActor
 private final class TranscriptViewport {
     weak var scroll: NSScrollView?
@@ -545,18 +520,8 @@ private final class TranscriptViewport {
             // Let a newly loaded history page settle before measuring the destination.
             do { try await Task.sleep(for: .milliseconds(30)) } catch { return }
             guard let self, !Task.isCancelled else { return }
-            if !reduceMotion, let scroll = self.scroll, self.readingOrigin() != nil {
-                let start = scroll.contentView.bounds.origin
-                let startedAt = ProcessInfo.processInfo.systemUptime
-                while !Task.isCancelled, let target = self.readingOrigin() {
-                    let progress = min(1, (ProcessInfo.processInfo.systemUptime - startedAt) / 0.22)
-                    let eased = 1 - pow(1 - progress, 3)
-                    let origin = NSPoint(x: start.x, y: start.y + (target.y - start.y) * eased)
-                    scroll.contentView.scroll(to: origin)
-                    scroll.reflectScrolledClipView(scroll.contentView)
-                    if progress >= 1 { break }
-                    do { try await Task.sleep(for: .milliseconds(8)) } catch { return }
-                }
+            if !reduceMotion {
+                await self.animateScroll { self.readingOrigin()?.y }
             }
             guard !Task.isCancelled else { return }
             self.animatingReply = false
@@ -638,13 +603,45 @@ private final class TranscriptViewport {
         return abs(scroll.contentView.bounds.minY - bottomY) <= 1
     }
 
-    func alignBottom() {
+    func returnToBottom(reduceMotion: Bool) -> Task<Void, Never> {
+        cancelReadingAnchor()
+        readerMoved = true
+        followsLatestContent = false
+        return Task { @MainActor in
+            guard !Task.isCancelled, let scroll else { return }
+            scroll.layoutSubtreeIfNeeded()
+            scroll.documentView?.layoutSubtreeIfNeeded()
+            if !reduceMotion {
+                await animateScroll { self.bottomY }
+            }
+            // A newly loaded page can finish measuring its rich text after the animation.
+            var settledPasses = 0
+            for _ in 0..<12 {
+                guard !Task.isCancelled, let bottomY else { return }
+                if !isAtBottom {
+                    scroll.contentView.scroll(to: NSPoint(x: scroll.contentView.bounds.minX, y: bottomY))
+                    scroll.reflectScrolledClipView(scroll.contentView)
+                }
+                do { try await Task.sleep(for: .milliseconds(30)) } catch { return }
+                settledPasses = isAtBottom ? settledPasses + 1 : 0
+                if settledPasses >= 3 { return }
+            }
+        }
+    }
+
+    private func animateScroll(to destinationY: () -> CGFloat?) async {
         guard let scroll else { return }
-        scroll.layoutSubtreeIfNeeded()
-        scroll.documentView?.layoutSubtreeIfNeeded()
-        guard let bottomY else { return }
-        scroll.contentView.scroll(to: NSPoint(x: scroll.contentView.bounds.minX, y: bottomY))
-        scroll.reflectScrolledClipView(scroll.contentView)
+        let start = scroll.contentView.bounds.origin
+        let startedAt = ProcessInfo.processInfo.systemUptime
+        while !Task.isCancelled, let targetY = destinationY() {
+            let progress = min(1, (ProcessInfo.processInfo.systemUptime - startedAt) / 0.22)
+            let eased = 1 - pow(1 - progress, 3)
+            let origin = NSPoint(x: start.x, y: start.y + (targetY - start.y) * eased)
+            scroll.contentView.scroll(to: origin)
+            scroll.reflectScrolledClipView(scroll.contentView)
+            if progress >= 1 { return }
+            do { try await Task.sleep(for: .milliseconds(8)) } catch { return }
+        }
     }
 }
 
@@ -702,83 +699,79 @@ private struct ModernTranscriptScroll<Content: View>: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                content.background {
-                    TranscriptPosition(viewport: viewport, onChange: { isAtBottom = $0 },
-                                       onUserScroll: { bottomTask?.cancel(); submissionTask?.cancel(); replyTask?.cancel(); viewport.followsLatestContent = false; viewport.readerMoved = true })
-                }
+        ScrollView {
+            content.background {
+                TranscriptPosition(viewport: viewport, onChange: { isAtBottom = $0 },
+                                   onUserScroll: { bottomTask?.cancel(); submissionTask?.cancel(); replyTask?.cancel(); viewport.followsLatestContent = false; viewport.readerMoved = true })
             }
-            .scrollIndicators(.hidden)
-            .onDisappear { bottomTask?.cancel(); submissionTask?.cancel(); replyTask?.cancel(); viewport.followsLatestContent = false; viewport.cancelReadingAnchor() }
-            .onChange(of: replyNavigation) { _, request in
-                guard let request else { return }
+        }
+        .scrollIndicators(.hidden)
+        .onDisappear { bottomTask?.cancel(); submissionTask?.cancel(); replyTask?.cancel(); viewport.followsLatestContent = false; viewport.cancelReadingAnchor() }
+        .onChange(of: replyNavigation) { _, request in
+            guard let request else { return }
+            bottomTask?.cancel()
+            submissionTask?.cancel()
+            replyTask?.cancel()
+            viewport.revealReply(request.messageID, reduceMotion: reduceMotion)
+        }
+        .onChange(of: isWaiting) { _, waiting in
+            if !waiting { submissionTask?.cancel() }
+        }
+        .onChange(of: completedReplyID) { oldID, newID in
+            viewport.followsLatestContent = false
+            if let newID, newID != oldID, !isWaiting, !viewport.readerMoved {
                 bottomTask?.cancel()
                 submissionTask?.cancel()
                 replyTask?.cancel()
-                viewport.revealReply(request.messageID, reduceMotion: reduceMotion)
+                replyTask = alignTranscriptContent(viewport: viewport, replyID: newID)
             }
-            .onChange(of: isWaiting) { _, waiting in
-                if !waiting { submissionTask?.cancel() }
-            }
-            .onChange(of: completedReplyID) { oldID, newID in
+        }
+        .defaultScrollAnchor(.top, for: .initialOffset)
+        .defaultScrollAnchor(.top, for: .sizeChanges)
+        .onScrollPhaseChange { _, phase in
+            if phase == .interacting || phase == .tracking {
+                viewport.cancelReadingAnchor()
                 viewport.followsLatestContent = false
-                if let newID, newID != oldID, !isWaiting, !viewport.readerMoved {
-                    bottomTask?.cancel()
-                    submissionTask?.cancel()
-                    replyTask?.cancel()
-                    replyTask = alignTranscriptContent(viewport: viewport, replyID: newID)
-                }
-            }
-            .defaultScrollAnchor(.top, for: .initialOffset)
-            .defaultScrollAnchor(.top, for: .sizeChanges)
-            .onScrollPhaseChange { _, phase in
-                if phase == .interacting || phase == .tracking {
-                    viewport.cancelReadingAnchor()
-                    viewport.followsLatestContent = false
-                    bottomTask?.cancel()
-                    submissionTask?.cancel()
-                    replyTask?.cancel()
-                    viewport.readerMoved = true
-                }
-            }
-            .onAppear {
-                viewport.readerMoved = false
-                viewport.followsLatestContent = true
                 bottomTask?.cancel()
-                bottomTask = alignTranscriptContent(viewport: viewport, replyID: isWaiting ? nil : completedReplyID)
+                submissionTask?.cancel()
+                replyTask?.cancel()
+                viewport.readerMoved = true
             }
-            .overlay(alignment: .bottom) {
-                if !isAtBottom || hasNewer {
-                    Button {
-                        bottomTask?.cancel()
-                        submissionTask?.cancel()
-                        viewport.readerMoved = true
-                        viewport.followsLatestContent = false
-                        viewport.cancelReadingAnchor()
-                        loadLatest()
-                        bottomTask = alignTranscriptBottom(proxy, viewport: viewport, reduceMotion: reduceMotion)
-                    } label: {
-                        Image(mingCute: "arrow.up", size: 20)
-                            .rotationEffect(.degrees(180))
-                            .frame(width: 32, height: 32)
-                    }
-                    .buttonStyle(AgentHeaderButtonStyle(colorScheme: colorScheme))
-                    .accessibilityLabel(NSLocalizedString("回到底部", comment: ""))
-                    .help(NSLocalizedString("回到底部", comment: ""))
-                    .padding(.bottom, bottomInset + 8)
-                }
-            }
-            .onChange(of: submittedMessageID) { oldID, newID in
-                // A new outgoing message resumes normal bottom-following, even after manual reading.
-                viewport.followsLatestContent = false
-                if let newID, newID != oldID, isWaiting {
+        }
+        .onAppear {
+            viewport.readerMoved = false
+            viewport.followsLatestContent = true
+            bottomTask?.cancel()
+            bottomTask = alignTranscriptContent(viewport: viewport, replyID: isWaiting ? nil : completedReplyID)
+        }
+        .overlay(alignment: .bottom) {
+            if !isAtBottom || hasNewer {
+                Button {
                     bottomTask?.cancel()
                     submissionTask?.cancel()
                     replyTask?.cancel()
-                    viewport.readerMoved = false
-                    submissionTask = alignTranscriptContent(viewport: viewport, replyID: nil)
+                    loadLatest()
+                    bottomTask = viewport.returnToBottom(reduceMotion: reduceMotion)
+                } label: {
+                    Image(mingCute: "arrow.up", size: 20)
+                        .rotationEffect(.degrees(180))
+                        .frame(width: 32, height: 32)
                 }
+                .buttonStyle(AgentHeaderButtonStyle(colorScheme: colorScheme))
+                .accessibilityLabel(NSLocalizedString("回到底部", comment: ""))
+                .help(NSLocalizedString("回到底部", comment: ""))
+                .padding(.bottom, bottomInset + 8)
+            }
+        }
+        .onChange(of: submittedMessageID) { oldID, newID in
+            // A new outgoing message resumes normal bottom-following, even after manual reading.
+            viewport.followsLatestContent = false
+            if let newID, newID != oldID, isWaiting {
+                bottomTask?.cancel()
+                submissionTask?.cancel()
+                replyTask?.cancel()
+                viewport.readerMoved = false
+                submissionTask = alignTranscriptContent(viewport: viewport, replyID: nil)
             }
         }
     }
@@ -859,73 +852,67 @@ private struct LegacyTranscriptScroll<Content: View>: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        Group {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    content.background {
-                        TranscriptPosition(viewport: viewport, onChange: { isAtBottom = $0 },
-                                           onUserScroll: { bottomTask?.cancel(); submissionTask?.cancel(); replyTask?.cancel(); viewport.followsLatestContent = false; viewport.readerMoved = true })
-                    }
-                }
-                .scrollIndicators(.hidden)
-                .onDisappear { bottomTask?.cancel(); submissionTask?.cancel(); replyTask?.cancel(); viewport.followsLatestContent = false; viewport.cancelReadingAnchor() }
-                .onChange(of: replyNavigation) { _, request in
-                    guard let request else { return }
+        ScrollView {
+            content.background {
+                TranscriptPosition(viewport: viewport, onChange: { isAtBottom = $0 },
+                                   onUserScroll: { bottomTask?.cancel(); submissionTask?.cancel(); replyTask?.cancel(); viewport.followsLatestContent = false; viewport.readerMoved = true })
+            }
+        }
+        .scrollIndicators(.hidden)
+        .onDisappear { bottomTask?.cancel(); submissionTask?.cancel(); replyTask?.cancel(); viewport.followsLatestContent = false; viewport.cancelReadingAnchor() }
+        .onChange(of: replyNavigation) { _, request in
+            guard let request else { return }
+            bottomTask?.cancel()
+            submissionTask?.cancel()
+            replyTask?.cancel()
+            viewport.revealReply(request.messageID, reduceMotion: reduceMotion)
+        }
+        .onChange(of: isWaiting) { _, waiting in
+            if !waiting { submissionTask?.cancel() }
+        }
+        .onChange(of: completedReplyID) { oldID, newID in
+            viewport.followsLatestContent = false
+            if let newID, newID != oldID, !isWaiting, !viewport.readerMoved {
+                bottomTask?.cancel()
+                submissionTask?.cancel()
+                replyTask?.cancel()
+                replyTask = alignTranscriptContent(viewport: viewport, replyID: newID)
+            }
+        }
+        .defaultScrollAnchor(.top)
+        .onAppear {
+            viewport.readerMoved = false
+            viewport.followsLatestContent = true
+            bottomTask?.cancel()
+            bottomTask = alignTranscriptContent(viewport: viewport, replyID: isWaiting ? nil : completedReplyID)
+        }
+        .overlay(alignment: .bottom) {
+            if !isAtBottom || hasNewer {
+                Button {
                     bottomTask?.cancel()
                     submissionTask?.cancel()
                     replyTask?.cancel()
-                    viewport.revealReply(request.messageID, reduceMotion: reduceMotion)
+                    loadLatest()
+                    bottomTask = viewport.returnToBottom(reduceMotion: reduceMotion)
+                } label: {
+                    Image(mingCute: "arrow.up", size: 20)
+                        .rotationEffect(.degrees(180))
+                        .frame(width: 32, height: 32)
                 }
-                .onChange(of: isWaiting) { _, waiting in
-                    if !waiting { submissionTask?.cancel() }
-                }
-                .onChange(of: completedReplyID) { oldID, newID in
-                    viewport.followsLatestContent = false
-                    if let newID, newID != oldID, !isWaiting, !viewport.readerMoved {
-                        bottomTask?.cancel()
-                        submissionTask?.cancel()
-                        replyTask?.cancel()
-                        replyTask = alignTranscriptContent(viewport: viewport, replyID: newID)
-                    }
-                }
-                .defaultScrollAnchor(.top)
-                .onAppear {
-                    viewport.readerMoved = false
-                    viewport.followsLatestContent = true
-                    bottomTask?.cancel()
-                    bottomTask = alignTranscriptContent(viewport: viewport, replyID: isWaiting ? nil : completedReplyID)
-                }
-                .overlay(alignment: .bottom) {
-                    if !isAtBottom || hasNewer {
-                        Button {
-                            bottomTask?.cancel()
-                            submissionTask?.cancel()
-                            viewport.readerMoved = true
-                            viewport.followsLatestContent = false
-                            viewport.cancelReadingAnchor()
-                            loadLatest()
-                            bottomTask = alignTranscriptBottom(proxy, viewport: viewport, reduceMotion: reduceMotion)
-                        } label: {
-                            Image(mingCute: "arrow.up", size: 20)
-                                .rotationEffect(.degrees(180))
-                                .frame(width: 32, height: 32)
-                        }
-                        .buttonStyle(AgentHeaderButtonStyle(colorScheme: colorScheme))
-                        .accessibilityLabel(NSLocalizedString("回到底部", comment: ""))
-                        .help(NSLocalizedString("回到底部", comment: ""))
-                        .padding(.bottom, bottomInset + 8)
-                    }
-                }
-                .onChange(of: submittedMessageID) { oldID, newID in
-                    viewport.followsLatestContent = false
-                    if let newID, newID != oldID, isWaiting {
-                        bottomTask?.cancel()
-                        submissionTask?.cancel()
-                        replyTask?.cancel()
-                        viewport.readerMoved = false
-                        submissionTask = alignTranscriptContent(viewport: viewport, replyID: nil)
-                    }
-                }
+                .buttonStyle(AgentHeaderButtonStyle(colorScheme: colorScheme))
+                .accessibilityLabel(NSLocalizedString("回到底部", comment: ""))
+                .help(NSLocalizedString("回到底部", comment: ""))
+                .padding(.bottom, bottomInset + 8)
+            }
+        }
+        .onChange(of: submittedMessageID) { oldID, newID in
+            viewport.followsLatestContent = false
+            if let newID, newID != oldID, isWaiting {
+                bottomTask?.cancel()
+                submissionTask?.cancel()
+                replyTask?.cancel()
+                viewport.readerMoved = false
+                submissionTask = alignTranscriptContent(viewport: viewport, replyID: nil)
             }
         }
     }
