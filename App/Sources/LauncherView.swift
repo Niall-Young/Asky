@@ -183,7 +183,7 @@ final class LauncherController {
             guard let self else { return }
             if key {
                 ContentPreviewWindow.quick.captureShortcut(in: self.panel) { [weak self] event in
-                    self?.previewFile(for: event) != nil
+                    self?.previewAction(for: event) != nil
                 }
             } else {
                 ContentPreviewWindow.quick.releaseShortcut(in: self.panel)
@@ -197,6 +197,11 @@ final class LauncherController {
         panel.onCopyPath = { [weak model] in model?.copySelectedPath() ?? false }
         panel.onRevealInFinder = { [weak model] in model?.revealSelectionInFinder() ?? false }
         model.onHide = { [weak self] in self?.hide() }
+        model.onPreviewFile = { [weak self] file in
+            guard let self else { return }
+            ContentPreviewWindow.quick.show(file: file, label: file.url.lastPathComponent, from: self.panel,
+                shortcut: self.model.actionPreferences.shortcut(.launcherPreview), onBlur: self.panel.onBlur)
+        }
         resultReveal.onStep = { [weak self] height in
             guard let self else { return }
             self.shellHeight = CGFloat(height)
@@ -214,20 +219,15 @@ final class LauncherController {
 
     func toggle() { isVisible ? hide() : show() }
 
-    private func previewFile(for event: NSEvent) -> PreviewFile? {
+    private func previewAction(for event: NSEvent) -> LauncherAction? {
         guard model.actionPreferences.shortcut(.launcherPreview).matches(event),
-              (panel.firstResponder as? NSTextView)?.hasMarkedText() != true,
-              let result = model.selectedActionResult, result.source == .file else { return nil }
-        return PreviewFile(url: URL(filePath: result.target.identifier))
+              (panel.firstResponder as? NSTextView)?.hasMarkedText() != true else { return nil }
+        return model.previewLauncherAction
     }
 
     private func handlePreviewKey(_ event: NSEvent) -> Bool {
-        guard let file = previewFile(for: event) else { return false }
-        if !event.isARepeat {
-            model.closeActionsMenu()
-            ContentPreviewWindow.quick.show(file: file, label: file.url.lastPathComponent, from: panel,
-                shortcut: model.actionPreferences.shortcut(.launcherPreview), onBlur: panel.onBlur)
-        }
+        guard let action = previewAction(for: event) else { return false }
+        if !event.isARepeat { model.performLauncherAction(action) }
         return true
     }
 

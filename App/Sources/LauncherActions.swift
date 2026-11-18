@@ -3,7 +3,7 @@ import Contracts
 import Theme
 
 struct LauncherAction {
-    enum Kind { case moveWindowDisplay(Int), closeWindow, continueCalculation, deleteCalculation, editCommand(String), disableCommand(String), result(ResultAction), copyPath, copyFile, copyFileName, showFileInfo, enterFolder }
+    enum Kind { case moveWindowDisplay(Int), closeWindow, continueCalculation, deleteCalculation, editCommand(String), disableCommand(String), result(ResultAction), previewFile, copyPath, copyFile, copyFileName, showFileInfo, enterFolder }
     var isNegative: Bool {
         if case .disableCommand = kind { return true }
         if case .deleteCalculation = kind { return true }

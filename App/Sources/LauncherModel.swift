@@ -193,6 +193,7 @@ final class LauncherModel {
     private(set) var isConfirmingQuit = false
     var onQuit: () -> Void = { NSApp.terminate(nil) }
     var onHide: () -> Void = {}
+    var onPreviewFile: (PreviewFile) -> Void = { _ in }
     var onAskAI: (String) -> Void = { _ in }
 
     init(app: AppModel, searchProviders: [any SearchProvider]? = nil, chromeBookmarkAccessAllowed: Bool? = nil,
@@ -1323,6 +1324,17 @@ extension LauncherModel {
                               shortcut: actionPreferences.revealInFinderHotKey.label)
     }
 
+    private var selectedPreviewFile: PreviewFile? {
+        guard let result = selectedActionResult, result.source == .file else { return nil }
+        return PreviewFile(url: URL(filePath: result.target.identifier))
+    }
+
+    var previewLauncherAction: LauncherAction? {
+        guard selectedPreviewFile != nil else { return nil }
+        return LauncherAction(title: "快速预览", icon: "eye",
+                              shortcut: actionPreferences.shortcut(.launcherPreview).label, kind: .previewFile)
+    }
+
     var secondaryActions: [LauncherAction] {
         guard let result = selectedActionResult, result.primaryAction != nil else { return [] }
         if result.target.kind == "application-window" {
@@ -1349,6 +1361,8 @@ extension LauncherModel {
         if canEnterSelectedFolder {
             actions.append(LauncherAction(title: "搜索文件夹", icon: "folder",
                                           shortcut: actionPreferences.shortcut(.enterFolder).label, kind: .enterFolder))
+        } else if let preview = previewLauncherAction {
+            actions.insert(preview, at: 0)
         }
         if result.actions.contains(.revealInFinder) {
             if [.file, .app].contains(result.source) {
@@ -1449,6 +1463,8 @@ extension LauncherModel {
             update()
             selection = min(previousSelection, max(0, results.count - 1))
         case .enterFolder: _ = enterSelectedFolder()
+        case .previewFile:
+            if let file = selectedPreviewFile { onPreviewFile(file) }
         case .copyFile: _ = copySelectedFile()
         case .copyPath: _ = copySelectedPath()
         case .copyFileName: _ = copySelectedFileName()

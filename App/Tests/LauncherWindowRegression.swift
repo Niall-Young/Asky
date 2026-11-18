@@ -125,9 +125,11 @@ enum LauncherWindowRegression {
         let image = root.appending(path: "Preview.png")
         let clipboardImage = root.appending(path: "clipboard.img")
         let other = root.appending(path: "Preview.txt")
+        let folder = root.appending(path: "Preview.folder.md", directoryHint: .isDirectory)
         let document = "# Project notes\n\n**Images** and Markdown share a preview.\n\n- One\n- Two\n\n![Example](Preview.png)\n\n```swift\nlet name = \"Asky\"\n```"
         try Data(document.utf8).write(to: markdown)
         try Data("Unsupported plain text".utf8).write(to: other)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
         let bitmap = NSImage(size: NSSize(width: 320, height: 180), flipped: false) { frame in
             NSGradient(starting: .systemBlue, ending: .systemTeal)?.draw(in: frame, angle: 0)
             NSColor.white.setFill()
@@ -148,9 +150,9 @@ enum LauncherWindowRegression {
         let embedded = await PreviewFile.loadMarkdownImage(at: image, in: root, maxPixelSize: 320)
         try require(embedded?.width == 320, "resolve local images inside the Markdown directory")
 
-        let results = [markdown, image, other].map { url in
+        let results = [markdown, image, other, folder].map { url in
             SearchResult(source: .file, target: TargetRef(kind: "file", identifier: url.path),
-                         title: url.lastPathComponent, actions: [.open], score: 100)
+                         title: url.lastPathComponent, actions: [.open, .revealInFinder], score: 100)
         }
         let model = LauncherModel(app: app, searchProviders: [CompactProvider(source: .file, results: results)])
         let launcher = LauncherController(model: model)
@@ -169,10 +171,31 @@ enum LauncherWindowRegression {
         }
 
         func key(_ code: UInt16, _ modifiers: NSEvent.ModifierFlags, in window: NSWindow, repeatKey: Bool = false) {
-            let character = code == 49 ? " " : (code == 53 ? "\u{1B}" : "p")
+            let character = switch code {
+            case 36: "\r"
+            case 40: "k"
+            case 49: " "
+            case 53: "\u{1B}"
+            default: "p"
+            }
             window.sendEvent(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: modifiers,
                 timestamp: 0, windowNumber: window.windowNumber, context: nil, characters: character,
                 charactersIgnoringModifiers: character, isARepeat: repeatKey, keyCode: code)!)
+        }
+
+        func capture(_ label: String, window: NSWindow) async throws {
+            guard CommandLine.arguments.contains("--capture") else { return }
+            try await Task.sleep(for: .milliseconds(250))
+            let process = Process()
+            process.executableURL = URL(filePath: "/usr/sbin/screencapture")
+            let appearance = window.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua])?.rawValue ?? "system"
+            let frame = window.frame.integral
+            let top = (NSScreen.screens.first?.frame.maxY ?? frame.maxY) - frame.maxY
+            let region = [frame.minX, top, frame.width, frame.height].map { String(Int($0)) }.joined(separator: ",")
+            process.arguments = ["-x", "-R" + region, "build/file-preview-\(appearance)-\(label).png"]
+            try process.run()
+            while process.isRunning { try await Task.sleep(for: .milliseconds(20)) }
+            try require(process.terminationStatus == 0, "capture the visible window")
         }
 
         func previewShortcut(_ code: UInt16, _ modifiers: NSEvent.ModifierFlags, in window: NSWindow) async throws {
@@ -205,26 +228,16 @@ enum LauncherWindowRegression {
             let preview = window!
             key(code, modifiers, in: preview, repeatKey: true)
             try require(preview.isVisible, "holding the shortcut keeps the preview open")
-            if CommandLine.arguments.contains("--capture") {
-                try await Task.sleep(for: .milliseconds(250))
-                let process = Process()
-                process.executableURL = URL(filePath: "/usr/sbin/screencapture")
-                let origin = panel is LauncherPanel ? "launcher" : "clipboard"
-                let appearance = panel.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua])?.rawValue ?? "system"
-                let frame = preview.frame.integral
-                let top = (NSScreen.screens.first?.frame.maxY ?? frame.maxY) - frame.maxY
-                let region = [frame.minX, top, frame.width, frame.height].map { String(Int($0)) }.joined(separator: ",")
-                process.arguments = ["-x", "-R" + region,
-                    "build/file-preview-\(appearance)-\(origin)-\(label).png"]
-                try process.run()
-                while process.isRunning { try await Task.sleep(for: .milliseconds(20)) }
-                try require(process.terminationStatus == 0, "capture the visible preview")
-            }
+            let origin = panel is LauncherPanel ? "launcher" : "clipboard"
+            try await capture("\(origin)-\(label)", window: preview)
             return preview
         }
 
         for url in [markdown, image] {
             model.selection = model.results.firstIndex { $0.target.identifier == url.path }!
+            try require(model.secondaryActions.first?.title == "快速预览" &&
+                        model.secondaryActions.first?.shortcut == "⌃ Space",
+                        "supported files show Quick Preview first with its shortcut")
             let preview = try await open(url.lastPathComponent, from: launcherPanel)
             key(53, [], in: preview)
             try await Task.sleep(for: .milliseconds(100))
@@ -232,9 +245,31 @@ enum LauncherWindowRegression {
             try require(model.query == "Preview" && model.selectedActionResult?.target.identifier == url.path,
                         "closing a preview preserves the search and selected result")
         }
+        model.selection = model.results.firstIndex { $0.target.identifier == markdown.path }!
+        key(40, .command, in: launcherPanel)
+        try require(model.isActionsMenuPresented && model.actionSelection == 0 &&
+                    model.secondaryActions.first?.title == "快速预览",
+                    "More opens with Quick Preview highlighted")
+        try await capture("launcher-more", window: launcherPanel)
+        try require(app.preferences.setShortcut(.launcherPreview, .init(code: 35, modifiers: 4608, label: "⌃⇧ P")),
+                    "launcher preview shortcut can be remapped")
+        try require(model.secondaryActions.first?.shortcut == "⌃⇧ P", "More shows the configured shortcut")
+        key(36, [], in: launcherPanel)
+        guard let menuPreview = ContentPreviewWindow.quick.window else {
+            throw NSError(domain: "AskyFilePreview", code: 3)
+        }
+        try require(menuPreview.isKeyWindow && menuPreview.title == markdown.lastPathComponent && !model.isActionsMenuPresented,
+                    "Return on the first menu item opens the file preview")
+        key(53, [], in: menuPreview)
+        try await Task.sleep(for: .milliseconds(100))
         model.selection = model.results.firstIndex { $0.target.identifier == other.path }!
-        key(49, .control, in: launcherPanel)
+        key(35, [.control, .shift], in: launcherPanel)
         try require(ContentPreviewWindow.quick.window?.isVisible == false, "plain files have no preview")
+        for url in [other, folder] {
+            model.selection = model.results.firstIndex { $0.target.identifier == url.path }!
+            try require(!model.secondaryActions.contains { $0.title == "快速预览" },
+                        "unsupported files and folders omit Quick Preview")
+        }
         launcher.hide()
 
         let store = ClipboardStore(app.store)
@@ -507,9 +542,9 @@ enum LauncherWindowRegression {
         try require(model.finderLauncherAction?.title == "在访达中显示" &&
                     model.finderLauncherAction?.shortcut == model.actionPreferences.revealInFinderHotKey.label,
                     "file must expose Finder action with configured shortcut in the left action bar")
-        try require(model.secondaryActions.count == 4 && !model.secondaryActions.contains {
+        try require(model.secondaryActions.count == 5 && model.secondaryActions.first?.title == "快速预览" && !model.secondaryActions.contains {
             if case .result(.revealInFinder) = $0.kind { return true }; return false
-        }, "file menu must contain file, path, filename and info actions")
+        }, "supported file menu must put preview before the file operations")
         if CommandLine.arguments.contains("--more-inspect") {
             NSApp.activate(ignoringOtherApps: true)
             panel.makeKeyAndOrderFront(nil)
@@ -566,6 +601,7 @@ enum LauncherWindowRegression {
         model.selection = 0
         key(40, modifiers: .command)
         key(125)
+        key(125)
         key(36)
         try require(!model.isActionsMenuPresented && NSPasteboard.general.string(forType: .string) == fixture.path,
                     "Return on Copy path must execute the selected menu action")
@@ -586,6 +622,7 @@ enum LauncherWindowRegression {
         try require(!model.isActionsMenuPresented && controller.isVisible && model.inputText == input,
                     "filename shortcut must close More and retain the launcher query")
         key(40, modifiers: .command)
+        key(125)
         key(125)
         key(125)
         key(36)
@@ -609,6 +646,7 @@ enum LauncherWindowRegression {
                     "Cmd C must preserve selected search text copying")
         editor.setSelectedRange(NSRange(location: 0, length: 0))
         key(40, modifiers: .command)
+        key(125)
         key(36)
         try require(!model.isActionsMenuPresented && copiedURLs() == [fixture],
                     "Return on Copy must copy file and close menu")
