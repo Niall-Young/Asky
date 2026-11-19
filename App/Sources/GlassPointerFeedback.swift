@@ -52,16 +52,61 @@ extension View {
     }
 }
 
-/// Rows inside a glass container (menus, source cards) light up in place like the
-/// selection actions: hover and press only brighten the row; it never grows.
+/// Rows inside a glass container (menus, source cards) light up like the toolbar
+/// capsule: a soft pool of light under the pointer, not a flat fill of the whole row.
+/// The row never grows.
 struct GlassRowButtonStyle: ButtonStyle {
     var cornerRadius: CGFloat = 8
 
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
+        GlassRowFeedback(pressed: configuration.isPressed, cornerRadius: cornerRadius) {
+            configuration.label
+        }
+    }
+}
+
+private struct GlassRowFeedback<Label: View>: View {
+    let pressed: Bool
+    let cornerRadius: CGFloat
+    @ViewBuilder let label: Label
+    @State private var pointer: CGPoint?
+    @Environment(\.isEnabled) private var enabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// Fixed radius so a tall source card and a short menu row light the same small area.
+    private static var radius: CGFloat { 56 }
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius)
+        let active = pressed && enabled
+        label
             .frame(maxWidth: .infinity)
             .contentShape(.rect(cornerRadius: cornerRadius))
-            .glassPointerFeedback(pressed: configuration.isPressed, in: RoundedRectangle(cornerRadius: cornerRadius), scales: false)
+            .overlay {
+                GeometryReader { geometry in
+                    let center = pointer ?? CGPoint(x: geometry.size.width / 2, y: geometry.size.height / 2)
+                    shape.fill(RadialGradient(stops: [
+                        .init(color: .white, location: 0),
+                        .init(color: .white.opacity(0.55), location: 0.35),
+                        .init(color: .white.opacity(0), location: 1)
+                    ], center: UnitPoint(x: center.x / max(geometry.size.width, 1),
+                                         y: center.y / max(geometry.size.height, 1)),
+                       startRadius: 0, endRadius: Self.radius))
+                }
+                .opacity(enabled ? (active ? 0.20 : pointer != nil ? 0.08 : 0) : 0)
+                .blendMode(.plusLighter)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+            }
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.10), value: active)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: pointer == nil)
+            .onContinuousHover { phase in
+                switch phase {
+                case .active(let location): pointer = location
+                case .ended: pointer = nil
+                }
+            }
+            .background(ActionArrowCursor())
     }
 }
 
