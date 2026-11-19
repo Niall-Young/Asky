@@ -2460,14 +2460,114 @@ enum AgentReplyRegression {
         print("Chat presentation passed: inactive first show, key before visibility, light/dark, reopen, repeated show, authentication and close cancellation")
     }
 
+    static func firstOpenStabilityRegression() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: "Asky-first-open-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let app = try AppModel(root: root)
+        let store = ConversationStore(app.store)
+        let cid = try store.create(title: "First open stability")
+        for i in 1...18 {
+            try store.append(conversationID: cid, role: "user", text: "第 \(i) 个问题：请帮我总结一下今天的工作重点和下一步安排。")
+            try store.append(conversationID: cid, role: "assistant", text: """
+            这是第 \(i) 条回复，包含多行内容与列表：
+
+            - 第一项：完成核心功能开发与自测
+            - 第二项：整理回归测试与性能基线
+            - 第三项：准备发布说明和安装包
+
+            `code_snippet_\(i)()` 已经验证通过。
+            """)
+        }
+
+        let application = NSApplication.shared
+
+        func assertStableFirstOpen(activeBeforeShow: Bool) async throws {
+            let presentation = WindowPresentation()
+            let controller = AgentWindowController(model: AgentModel(app: app), presentation: presentation)
+            if activeBeforeShow {
+                application.activate(ignoringOtherApps: true)
+                for _ in 0..<50 where !application.isActive {
+                    try await Task.sleep(for: .milliseconds(10))
+                }
+            } else {
+                application.deactivate()
+                try await Task.sleep(for: .milliseconds(150))
+            }
+            controller.show()
+            let window = application.windows.first { $0.title == "Asky AI" }!
+            window.title = "First open \(activeBeforeShow ? "active" : "inactive")"
+            defer { window.close() }
+
+            if !activeBeforeShow {
+                for _ in 0..<80 {
+                    if window.isVisible && window.isKeyWindow && window.alphaValue == 1 { break }
+                    try await Task.sleep(for: .milliseconds(10))
+                }
+            }
+            precondition(window.isVisible && window.isKeyWindow && window.alphaValue == 1, "Window must become visible and key")
+
+            func findTranscriptScroll(_ view: NSView) -> NSScrollView? {
+                if let s = view as? NSScrollView, String(describing: type(of: s)).contains("TranscriptNSScrollView") {
+                    return s
+                }
+                for sub in view.subviews {
+                    if let found = findTranscriptScroll(sub) { return found }
+                }
+                return nil
+            }
+
+            func findLastReplyMarker(_ view: NSView, id: String) -> NSView? {
+                if view.identifier?.rawValue == "transcript-reply-" + id { return view }
+                for sub in view.subviews {
+                    if let found = findLastReplyMarker(sub, id: id) { return found }
+                }
+                return nil
+            }
+
+            let scroll = findTranscriptScroll(window.contentView!)
+            let lastAssistantID = controller.model.items.last(where: { $0.kind == .assistant })?.id ?? ""
+
+            func sample() -> (scrollY: CGFloat, bottomY: CGFloat, markerScreenY: CGFloat?) {
+                let sy = scroll?.contentView.bounds.minY ?? -1
+                let dh = scroll?.documentView?.bounds.height ?? -1
+                let vh = scroll?.contentView.bounds.height ?? 0
+                let by = max(0, dh - vh)
+                let marker = findLastReplyMarker(window.contentView!, id: lastAssistantID)
+                let my = marker.map { window.contentView!.convert($0.bounds, from: $0).minY }
+                return (sy, by, my)
+            }
+
+            let first = sample()
+            let gapAtReveal = abs(first.scrollY - first.bottomY)
+            var maxMarkerDrift: CGFloat = 0
+            let baselineY = first.markerScreenY
+
+            for _ in 1...40 {
+                try await Task.sleep(for: .milliseconds(16))
+                let s = sample()
+                if let my = s.markerScreenY, let base = baselineY {
+                    maxMarkerDrift = max(maxMarkerDrift, abs(my - base))
+                }
+            }
+            precondition(baselineY != nil, "Last reply marker must already be mounted on first visible frame (active=\(activeBeforeShow))")
+            precondition(gapAtReveal <= 2, "First visible frame must already be aligned to bottom (active=\(activeBeforeShow), gap=\(gapAtReveal))")
+            precondition(maxMarkerDrift <= 2, "Visible reply must not jitter after first reveal (active=\(activeBeforeShow), drift=\(maxMarkerDrift))")
+        }
+
+        try await assertStableFirstOpen(activeBeforeShow: false)
+        try await assertStableFirstOpen(activeBeforeShow: true)
+        print("First open stability passed: inactive and active first reveal aligned with 0 drift")
+    }
+
     static func main() async throws {
         let application = NSApplication.shared
         application.setActivationPolicy(.accessory)
-        if CommandLine.arguments.contains("--window-presentation") || CommandLine.arguments.contains("--header-cursor-preview") || CommandLine.arguments.contains("--header-drag") || CommandLine.arguments.contains("--action-cursor-preview") || CommandLine.arguments.contains("--user-bubble-hover") || CommandLine.arguments.contains("--approval-menu-hover") {
+        if CommandLine.arguments.contains("--window-presentation") || CommandLine.arguments.contains("--first-open-stability") || CommandLine.arguments.contains("--header-cursor-preview") || CommandLine.arguments.contains("--header-drag") || CommandLine.arguments.contains("--action-cursor-preview") || CommandLine.arguments.contains("--user-bubble-hover") || CommandLine.arguments.contains("--approval-menu-hover") {
             var completed = false
             Task { @MainActor in
                 do {
                     if CommandLine.arguments.contains("--window-presentation") { try await windowPresentationRegression() }
+                    else if CommandLine.arguments.contains("--first-open-stability") { try await firstOpenStabilityRegression() }
                     else if CommandLine.arguments.contains("--header-cursor-preview") { try await headerCursorPreview() }
                     else if CommandLine.arguments.contains("--header-drag") { try await headerDragRegression() }
                     else if CommandLine.arguments.contains("--action-cursor-preview") { try await actionCursorPreview() }

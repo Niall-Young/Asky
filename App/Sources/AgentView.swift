@@ -811,6 +811,7 @@ private struct NativeTranscriptScrollContainer: View {
         NativeTranscriptScrollView(
             viewport: viewport,
             bottomInset: bottomInset,
+            initialReplyID: isWaiting ? nil : completedReplyID,
             entries: entries,
             onChange: { if bottomState.isAtBottom != $0 { bottomState.isAtBottom = $0 } },
             onUserScroll: cancelAutomatedScroll
@@ -969,7 +970,7 @@ private final class TranscriptDocumentView: NSView {
     }
 
     var onLayoutChanged: (() -> Void)?
-    var beforeMountVisibleRows: (() -> Void)?
+    var beforeMountVisibleRows: (() -> Bool)?
 
     private var entries: [TranscriptRowEntry] = []
     private var bottomInset: CGFloat = 0
@@ -1017,7 +1018,7 @@ private final class TranscriptDocumentView: NSView {
         self.viewportHeight = viewportHeight
 
         relayoutRows()
-        beforeMountVisibleRows?()
+        _ = beforeMountVisibleRows?()
         updateVisibleRows()
         schedulePrewarm()
     }
@@ -1040,9 +1041,61 @@ private final class TranscriptDocumentView: NSView {
         } else {
             targetID = nil
         }
-        guard let targetID, !mountedIDs.contains(targetID) else { return }
+        guard let targetID, !mountedIDs.contains(targetID),
+              let entry = entries.first(where: { $0.id == targetID }),
+              let rowFrame = frames[targetID] else { return }
         pinnedRowIDs.insert(targetID)
-        updateVisibleRows()
+        mountEntry(entry, frame: rowFrame)
+    }
+
+    private func mountEntry(_ entry: TranscriptRowEntry, frame rowFrame: NSRect) {
+        useTick &+= 1
+        if var slot = hostCache[entry.id] {
+            slot.lastUsedTick = useTick
+            if slot.key != entry.key {
+                slot.key = entry.key
+                let rowID = entry.id
+                slot.controller.rootView = TranscriptRowSizedView(content: entry.makeView()) { [weak self] h in
+                    self?.handleRowHeightChange(rowID: rowID, newHeight: h)
+                }
+            }
+            hostCache[entry.id] = slot
+            let view = slot.controller.view
+            if view.frame != rowFrame { view.frame = rowFrame }
+            if view.superview !== self { addSubview(view) }
+        } else {
+            let rowID = entry.id
+            let controller = NSHostingController(rootView: TranscriptRowSizedView(content: entry.makeView()) { [weak self] h in
+                self?.handleRowHeightChange(rowID: rowID, newHeight: h)
+            })
+            controller.sizingOptions = []
+            controller.view.translatesAutoresizingMaskIntoConstraints = true
+            controller.view.frame = rowFrame
+            addSubview(controller.view)
+            hostCache[entry.id] = HostSlot(key: entry.key, controller: controller, lastUsedTick: useTick)
+        }
+        mountedIDs.insert(entry.id)
+    }
+
+    private func captureVisibleAnchor() -> (id: String, offset: CGFloat)? {
+        guard let scroll = enclosingScrollView else { return nil }
+        let visibleTop = scroll.contentView.bounds.minY
+        let visibleRect = scroll.documentVisibleRect
+        guard let entry = entries.first(where: { frames[$0.id]?.intersects(visibleRect) == true }),
+              let rect = frames[entry.id] else { return nil }
+        return (entry.id, rect.minY - visibleTop)
+    }
+
+    private func restoreVisibleAnchor(_ anchor: (id: String, offset: CGFloat)) {
+        guard let scroll = enclosingScrollView,
+              let newRect = frames[anchor.id] else { return }
+        var bounds = scroll.contentView.bounds
+        bounds.origin.y = newRect.minY - anchor.offset
+        let constrained = scroll.contentView.constrainBoundsRect(bounds).origin
+        if abs(scroll.contentView.bounds.minY - constrained.y) > 0.5 {
+            scroll.contentView.scroll(to: constrained)
+            scroll.reflectScrolledClipView(scroll.contentView)
+        }
     }
 
     private func relayoutRows() {
@@ -1110,32 +1163,7 @@ private final class TranscriptDocumentView: NSView {
 
         for entry in entries where keep.contains(entry.id) {
             guard let rowFrame = frames[entry.id] else { continue }
-            useTick &+= 1
-            if var slot = hostCache[entry.id] {
-                slot.lastUsedTick = useTick
-                if slot.key != entry.key {
-                    slot.key = entry.key
-                    let rowID = entry.id
-                    slot.controller.rootView = TranscriptRowSizedView(content: entry.makeView()) { [weak self] h in
-                        self?.handleRowHeightChange(rowID: rowID, newHeight: h)
-                    }
-                }
-                hostCache[entry.id] = slot
-                let view = slot.controller.view
-                if view.frame != rowFrame { view.frame = rowFrame }
-                if view.superview !== self { addSubview(view) }
-            } else {
-                let rowID = entry.id
-                let controller = NSHostingController(rootView: TranscriptRowSizedView(content: entry.makeView()) { [weak self] h in
-                    self?.handleRowHeightChange(rowID: rowID, newHeight: h)
-                })
-                controller.sizingOptions = []
-                controller.view.translatesAutoresizingMaskIntoConstraints = true
-                controller.view.frame = rowFrame
-                addSubview(controller.view)
-                hostCache[entry.id] = HostSlot(key: entry.key, controller: controller, lastUsedTick: useTick)
-            }
-            mountedIDs.insert(entry.id)
+            mountEntry(entry, frame: rowFrame)
         }
 
         if hostCache.count > maxCachedHosts {
@@ -1158,8 +1186,12 @@ private final class TranscriptDocumentView: NSView {
         }
         cached.height = ceiled
         heightCache[rowID] = cached
+        let anchor = captureVisibleAnchor()
         relayoutRows()
-        beforeMountVisibleRows?()
+        let aligned = beforeMountVisibleRows?() ?? false
+        if !aligned, let anchor {
+            restoreVisibleAnchor(anchor)
+        }
         updateVisibleRows()
         onLayoutChanged?()
     }
@@ -1199,8 +1231,12 @@ private final class TranscriptDocumentView: NSView {
             }
             prewarmControllers.removeAll()
             if changed {
+                let anchor = captureVisibleAnchor()
                 relayoutRows()
-                beforeMountVisibleRows?()
+                let aligned = beforeMountVisibleRows?() ?? false
+                if !aligned, let anchor {
+                    restoreVisibleAnchor(anchor)
+                }
                 updateVisibleRows()
                 onLayoutChanged?()
             }
@@ -1254,6 +1290,7 @@ private final class TranscriptDocumentView: NSView {
 private struct NativeTranscriptScrollView: NSViewRepresentable {
     let viewport: TranscriptViewport
     let bottomInset: CGFloat
+    let initialReplyID: String?
     let entries: [TranscriptRowEntry]
     var onChange: (Bool) -> Void
     var onUserScroll: () -> Void
@@ -1270,7 +1307,7 @@ private struct NativeTranscriptScrollView: NSViewRepresentable {
         context.coordinator.onChange = onChange
         context.coordinator.onUserScroll = onUserScroll
         context.coordinator.viewport = viewport
-        context.coordinator.update(entries: entries, bottomInset: bottomInset)
+        context.coordinator.update(entries: entries, bottomInset: bottomInset, initialReplyID: initialReplyID)
     }
 
     @MainActor
@@ -1282,6 +1319,7 @@ private struct NativeTranscriptScrollView: NSViewRepresentable {
         var onUserScroll: () -> Void
         private var lastEntries: [TranscriptRowEntry] = []
         private var lastBottomInset: CGFloat = 0
+        private var didInitializeAlignment = false
         private var syncScheduled = false
         private var positionScheduled = false
         private var lastIsAtBottom: Bool?
@@ -1315,7 +1353,17 @@ private struct NativeTranscriptScrollView: NSViewRepresentable {
                 self?.schedulePositionUpdate()
             }
             document.beforeMountVisibleRows = { [weak self] in
-                self?.viewport.restoreReadingPosition()
+                guard let self else { return false }
+                self.viewport.scroll = self.scroll
+                if self.viewport.hasReadingAnchor {
+                    self.viewport.restoreReadingPosition()
+                    return true
+                }
+                if self.viewport.followsLatestContent, !self.viewport.readerMoved {
+                    _ = self.viewport.alignLatestContent()
+                    return true
+                }
+                return false
             }
 
             scroll.contentView.postsBoundsChangedNotifications = true
@@ -1328,7 +1376,13 @@ private struct NativeTranscriptScrollView: NSViewRepresentable {
                 name: NSView.frameDidChangeNotification, object: document)
         }
 
-        func update(entries: [TranscriptRowEntry], bottomInset: CGFloat) {
+        func update(entries: [TranscriptRowEntry], bottomInset: CGFloat, initialReplyID: String?) {
+            if !didInitializeAlignment {
+                didInitializeAlignment = true
+                viewport.readerMoved = false
+                viewport.followsLatestContent = true
+                viewport.replyID = initialReplyID
+            }
             lastEntries = entries
             lastBottomInset = bottomInset
             applyEntries()
