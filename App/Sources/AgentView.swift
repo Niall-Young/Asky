@@ -749,6 +749,17 @@ private struct TranscriptReplyPosition: NSViewRepresentable {
     }
 }
 
+private struct TranscriptTypingPosition: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        view.identifier = NSUserInterfaceItemIdentifier("chat-typing-bubble")
+        return view
+    }
+    func updateNSView(_ view: NSView, context: Context) {
+        view.identifier = NSUserInterfaceItemIdentifier("chat-typing-bubble")
+    }
+}
+
 @MainActor
 private func alignTranscriptContent(viewport: TranscriptViewport, replyID: String?) -> Task<Void, Never> {
     viewport.cancelReadingAnchor()
@@ -1519,6 +1530,7 @@ private struct ResponseGroupView: View {
                     .transition(.opacity)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .animation(reduceMotion ? .easeOut(duration: 0.15) : .spring(response: 0.32, dampingFraction: 0.9),
                    value: group.isRunning)
     }
@@ -1558,9 +1570,11 @@ private struct ChatTypingBubble: View {
                 RoundedRectangle(cornerRadius: 16).fill(ThemeColor.kBackgroundNeutral)
                     .matchedGeometryEffect(id: "reply-surface", in: bubbleMotion, properties: reduceMotion ? [] : .frame, anchor: .topLeading)
             }
+            .background { TranscriptTypingPosition() }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(NSLocalizedString("思考中…", comment: ""))
+        .accessibilityIdentifier("chat-typing-bubble")
     }
 }
 

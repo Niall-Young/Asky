@@ -612,18 +612,24 @@ server.serve_forever()
         let systems = requests.compactMap { $0["messages"]?.arrayValue?.first?["content"]?.stringValue }
         try #require(systems.count == 4)
         let expectedDefault = NativeAgentPrompt.system(guidance: ["插件附加说明"])
-        let expectedCustom = "你是精简版个人助理。\n" + NativeAgentPrompt.runtimeProtocolPrompt + "\n插件附加说明"
+        let expectedCustom = NativeAgentPrompt.runtimeProtocolPrompt + "\n插件附加说明\n你是精简版个人助理。"
         #expect(!NativeAgentPrompt.defaultSystemPrompt.contains("asky-form"))
         #expect(!NativeAgentPrompt.defaultSystemPrompt.contains("<asky-reaction>"))
         #expect(!NativeAgentPrompt.defaultSystemPrompt.contains("web_read_page"))
         #expect(!NativeAgentPrompt.defaultSystemPrompt.contains("calendar_list_calendars"))
         #expect(!NativeAgentPrompt.defaultSystemPrompt.contains("memory_save"))
         #expect(systems[0] == expectedDefault)
+        #expect(systems[0].hasSuffix(NativeAgentPrompt.defaultSystemPrompt))
         #expect(systems[1] == expectedCustom)
         #expect(systems[1].contains("asky-form"))
         #expect(systems[1].contains("<asky-reaction>"))
+        #expect(systems[1].hasSuffix("你是精简版个人助理。"))
         #expect(systems[2] == expectedDefault)
         #expect(systems[3] == expectedDefault)
+
+        let legacyCustom = "自定义人设\n```asky-form\n<asky-reaction>"
+        let legacyAssembled = NativeAgentPrompt.system(basePrompt: legacyCustom, guidance: ["插件附加说明"])
+        #expect(legacyAssembled == "插件附加说明\n" + legacyCustom)
     }
 
     @Test func webCitationGuidancePreservedAcrossFormattingAndTerminalImages() async throws {

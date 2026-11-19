@@ -34,6 +34,25 @@ enum AgentReplyRegression {
         surface.cacheDisplay(in: surface.bounds, to: bitmap)
         try bitmap.representation(using: .png, properties: [:])!.write(to: URL(filePath: "build/bubble-width-chat.png"))
 
+        // Verify the standalone typing indicator stays leading-aligned in the virtualized transcript row.
+        model.beginResponse(taskID: "typing-alignment")
+        try await Task.sleep(for: .milliseconds(350))
+        window.contentView?.layoutSubtreeIfNeeded()
+        func findMarker(_ node: NSView, id: String) -> NSView? {
+            if node.identifier?.rawValue == id { return node }
+            return node.subviews.compactMap { findMarker($0, id: id) }.first
+        }
+        let typingMarker = findMarker(surface, id: "chat-typing-bubble")
+        precondition(typingMarker != nil, "Typing bubble must be visible while response is running")
+        let typingInWindow = typingMarker!.convert(typingMarker!.bounds, to: surface)
+        print("Typing bubble in window: minX=\(typingInWindow.minX), width=\(typingInWindow.width), windowWidth=\(surface.bounds.width)")
+        precondition(typingInWindow.minX < 40, "Typing bubble must stay leading-aligned, not centered (got minX=\(typingInWindow.minX))")
+        precondition(typingInWindow.width < 120, "Typing bubble must hug its dots, not stretch full width (got width=\(typingInWindow.width))")
+        let typingBitmap = surface.bitmapImageRepForCachingDisplay(in: surface.bounds)!
+        surface.cacheDisplay(in: surface.bounds, to: typingBitmap)
+        try typingBitmap.representation(using: .png, properties: [:])!.write(to: URL(filePath: "build/typing-bubble-alignment.png"))
+        model.finishTask(conversationID: cid)
+
         for width: CGFloat in [280, 460] {
             for content in [sample, "**粗体**、`code` 和 💬", String(repeating: "长回复需要正常换行。", count: 12)] {
                 let hosted = NSHostingView(rootView: ChatReplyView(text: content)
