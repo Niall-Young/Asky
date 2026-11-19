@@ -2332,6 +2332,71 @@ enum AgentReplyRegression {
         print("Header cursor passed: 120 synchronous cursor/move pairs over real scrolled chat text, return to body")
     }
 
+    static func headerDragRegression() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: "Asky-header-drag-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let app = try AppModel(root: root)
+        let store = ConversationStore(app.store)
+        let cid = try store.create(title: "Header drag")
+        try store.append(conversationID: cid, role: "user", text: "顶部拖动测试")
+        try store.append(conversationID: cid, role: "assistant",
+            text: String(repeating: "顶部拖动区域下方的对话正文，用于验证点击顶部区域时命中拖动视图而不是滚动内容。\n\n", count: 20))
+        let model = AgentModel(app: app)
+        model.open(cid)
+        let controller = AgentWindowController(model: model, presentation: WindowPresentation())
+        controller.show()
+        let window = NSApp.windows.first { $0.title == "Asky AI" }!
+        defer { window.orderOut(nil) }
+        try await Task.sleep(for: .milliseconds(600))
+        let content = window.contentView!
+        func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
+        if let scroll = descendants(content).compactMap({ $0 as? NSScrollView }).first(where: {
+            ($0.documentView?.frame.height ?? 0) > $0.contentView.bounds.height + 200
+        }) {
+            scroll.contentView.scroll(to: NSPoint(x: 0, y: scroll.contentView.bounds.minY + 160))
+            scroll.reflectScrolledClipView(scroll.contentView)
+            try await Task.sleep(for: .milliseconds(200))
+        }
+        content.layoutSubtreeIfNeeded()
+        for x in [120.0, Double(content.bounds.midX), Double(content.bounds.width - 140)] {
+            let point = NSPoint(x: x, y: content.bounds.height - 28)
+            let hit = content.hitTest(point)
+            precondition(hit.map { String(describing: type(of: $0)).contains("DragView") } == true,
+                         "Header point \(point) must hit WindowDragArea.DragView in non-empty conversation, got: \(String(describing: hit))")
+        }
+        let buttons = descendants(content).compactMap { $0 as? NSButton }.filter {
+            !$0.isHiddenOrHasHiddenAncestor && $0.convert($0.bounds, to: nil).minY > content.bounds.height - 64
+        }
+        precondition(buttons.count >= 2, "Header toolbar buttons must remain mounted")
+        for button in buttons {
+            let rect = button.convert(button.bounds, to: nil)
+            let hit = content.hitTest(NSPoint(x: rect.midX, y: rect.midY))
+            precondition(hit === button || hit?.isDescendant(of: button) == true,
+                         "Header toolbar button must remain clickable above DragView, got: \(String(describing: hit))")
+        }
+        let bodyPoint = NSPoint(x: content.bounds.midX, y: content.bounds.midY)
+        let bodyHit = content.hitTest(bodyPoint)
+        precondition(bodyHit.map { !String(describing: type(of: $0)).contains("DragView") } == true,
+                     "Body transcript below header must not be covered by DragView, got: \(String(describing: bodyHit))")
+        // Also verify empty conversation header dragging.
+        let emptyRoot = FileManager.default.temporaryDirectory.appending(path: "Asky-header-drag-empty-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: emptyRoot) }
+        let emptyApp = try AppModel(root: emptyRoot)
+        let emptyModel = AgentModel(app: emptyApp)
+        let emptyController = AgentWindowController(model: emptyModel, presentation: WindowPresentation())
+        emptyController.show()
+        let emptyWindow = NSApp.windows.last { $0.title == "Asky AI" && $0 !== window }!
+        defer { emptyWindow.orderOut(nil) }
+        try await Task.sleep(for: .milliseconds(350))
+        let emptyContent = emptyWindow.contentView!
+        emptyContent.layoutSubtreeIfNeeded()
+        let emptyTopCenter = NSPoint(x: emptyContent.bounds.midX, y: emptyContent.bounds.height - 28)
+        let emptyHit = emptyContent.hitTest(emptyTopCenter)
+        precondition(emptyHit.map { String(describing: type(of: $0)).contains("DragView") } == true,
+                     "Header top-center must hit WindowDragArea.DragView in empty conversation, got: \(String(describing: emptyHit))")
+        print("Header drag passed: non-empty scrolled header, toolbar buttons, body transcript, and empty conversation header")
+    }
+
     static func windowPresentationRegression() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: "Asky-window-presentation-\(UUID())")
         defer { try? FileManager.default.removeItem(at: root) }
@@ -2398,16 +2463,17 @@ enum AgentReplyRegression {
     static func main() async throws {
         let application = NSApplication.shared
         application.setActivationPolicy(.accessory)
-        if CommandLine.arguments.contains("--window-presentation") || CommandLine.arguments.contains("--header-cursor-preview") || CommandLine.arguments.contains("--action-cursor-preview") || CommandLine.arguments.contains("--user-bubble-hover") || CommandLine.arguments.contains("--approval-menu-hover") {
+        if CommandLine.arguments.contains("--window-presentation") || CommandLine.arguments.contains("--header-cursor-preview") || CommandLine.arguments.contains("--header-drag") || CommandLine.arguments.contains("--action-cursor-preview") || CommandLine.arguments.contains("--user-bubble-hover") || CommandLine.arguments.contains("--approval-menu-hover") {
             var completed = false
             Task { @MainActor in
                 do {
                     if CommandLine.arguments.contains("--window-presentation") { try await windowPresentationRegression() }
                     else if CommandLine.arguments.contains("--header-cursor-preview") { try await headerCursorPreview() }
+                    else if CommandLine.arguments.contains("--header-drag") { try await headerDragRegression() }
                     else if CommandLine.arguments.contains("--action-cursor-preview") { try await actionCursorPreview() }
                     else if CommandLine.arguments.contains("--approval-menu-hover") { try await approvalMenuHoverRegression() }
                     else { try await userBubbleHoverRegression() }
-                } catch { preconditionFailure("User bubble hover failed: \(error)") }
+                } catch { preconditionFailure("Header/hover regression failed: \(error)") }
                 completed = true
                 application.stop(nil)
                 application.postEvent(NSEvent.otherEvent(with: .applicationDefined, location: .zero,

@@ -156,12 +156,12 @@ extension View {
         if #available(macOS 15, *), !SurfaceCompatibility.useMacOS14Compatibility {
             self.gesture(WindowDragGesture()).allowsWindowActivationEvents()
         } else {
-            self.background(LegacyWindowDragArea())
+            self.background(WindowDragArea())
         }
     }
 }
 
-private struct LegacyWindowDragArea: NSViewRepresentable {
+struct WindowDragArea: NSViewRepresentable {
     func makeNSView(context: Context) -> DragView { DragView() }
     func updateNSView(_ view: DragView, context: Context) {}
 

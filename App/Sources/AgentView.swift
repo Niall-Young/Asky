@@ -38,7 +38,7 @@ final class AgentWindowController {
             w.isOpaque = false
             w.backgroundColor = .clear
             w.animationBehavior = .none
-            w.isMovableByWindowBackground = true
+            w.isMovableByWindowBackground = false
             w.level = .normal
             w.collectionBehavior = [.moveToActiveSpace, .primary]
             w.minSize = NSSize(width: WindowMetrics.agentMinSize.width, height: WindowMetrics.agentMinSize.height)
@@ -125,6 +125,7 @@ struct AgentView: View {
                         .padding(.top, AgentLayout.headerHeight)
                         .padding(.bottom, composerHeight)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(WindowDragArea())
                         .transition(conversationTransition).zIndex(1)
                 } else {
                     Transcript(model: model, bottomInset: composerHeight)
@@ -195,8 +196,7 @@ struct AgentView: View {
         }
         .padding(.horizontal, 16)
         .frame(height: AgentLayout.headerHeight)
-        .contentShape(Rectangle())
-        .compatibleWindowDrag()
+        .background(WindowDragArea())
         .actionArrowCursor()
         .background {
             Group {
