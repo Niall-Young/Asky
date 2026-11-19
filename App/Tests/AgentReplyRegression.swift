@@ -1657,6 +1657,107 @@ enum AgentReplyRegression {
         print("Restored transcript passed: cold open, repeated close/reopen and manual reading takeover")
     }
 
+    static func sendStabilityRegression(app: AppModel) async throws {
+        app.preferences.automaticUpdates = false
+        await app.start()
+        app.modelConfiguration = ModelConfiguration(baseURL: URL(string: "http://127.0.0.1:1/v1")!,
+            modelName: "send-stability", credentialRef: "Asky-send-stability-" + UUID().uuidString)
+        let model = AgentModel(app: app)
+        let store = ConversationStore(app.store)
+        let cid = try store.create(title: "Send stability")
+        for index in 0..<24 {
+            try store.append(conversationID: cid, role: index.isMultiple(of: 2) ? "user" : "assistant",
+                text: "历史消息 \(index)：" + String(repeating: "用于填充滚动高度的测试文案。", count: 6))
+        }
+        model.open(cid)
+        let controller = AgentWindowController(model: model, presentation: WindowPresentation())
+        controller.show()
+        let window = NSApplication.shared.windows.first { $0.title == "Asky AI" }!
+        defer { window.orderOut(nil) }
+        try await Task.sleep(for: .milliseconds(600))
+        func findScroll(_ view: NSView) -> NSScrollView? {
+            if let scroll = view as? NSScrollView, scroll.contentSize.height > 200 { return scroll }
+            return view.subviews.compactMap(findScroll).first
+        }
+        func textViews(_ view: NSView) -> [NSTextView] {
+            (view as? NSTextView).map { [$0] } ?? view.subviews.flatMap(textViews)
+        }
+        let scroll = findScroll(window.contentView!)!
+        let rootView = window.contentView!
+        let rootLayer = rootView.layer!
+        func measureSend(_ label: String, text: String) async throws {
+            model.draft = text
+            try await Task.sleep(for: .milliseconds(120))
+            let expected = model.draft
+            let t0 = ProcessInfo.processInfo.systemUptime
+            model.send()
+            var samples: [(ms: Int, modelWinY: CGFloat, presWinY: CGFloat, clipY: CGFloat, docH: CGFloat)] = []
+            for _ in 0..<70 {
+                if !model.isRunning || model.items.last?.kind == .error { break }
+                let ms = Int((ProcessInfo.processInfo.systemUptime - t0) * 1000)
+                if let tv = textViews(rootView).first(where: { !$0.isEditable && $0.string == expected }) {
+                    let modelRect = tv.convert(tv.bounds, to: rootView)
+                    let presRect: CGRect
+                    if let pres = tv.layer?.presentation(), let target = rootLayer.presentation() {
+                        presRect = pres.convert(pres.bounds, to: target)
+                    } else {
+                        presRect = modelRect
+                    }
+                    samples.append((ms, modelRect.minY, presRect.minY, scroll.contentView.bounds.minY,
+                                    scroll.documentView?.bounds.height ?? 0))
+                }
+                try await Task.sleep(for: .milliseconds(5))
+            }
+            while model.isRunning {
+                model.stop()
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            try await Task.sleep(for: .milliseconds(150))
+            guard let final = samples.last else {
+                fatalError("[\(label)]: sent message bubble never rendered")
+            }
+            let maxModelY = samples.map(\.modelWinY).max() ?? final.modelWinY
+            let maxPresY = samples.map(\.presWinY).max() ?? final.presWinY
+            let overModel = maxModelY - final.modelWinY
+            let overPres = maxPresY - final.presWinY
+            print(String(format: "[%@] (%d samples): final=(m:%.1f p:%.1f) overUp=(m:%.1f p:%.1f)",
+                label, samples.count, final.modelWinY, final.presWinY, overModel, overPres))
+            if overModel > 2 || overPres > 2 {
+                for s in samples.prefix(20) {
+                    print(String(format: "  t=%3dms modelY=%.1f presY=%.1f clipY=%.1f docH=%.1f",
+                        s.ms, s.modelWinY, s.presWinY, s.clipY, s.docH))
+                }
+            }
+            precondition(overModel <= 2 && overPres <= 2,
+                         "[\(label)] sent message jumped upward before settling: overModel=\(overModel), overPres=\(overPres)")
+        }
+        // Scenario A: normal overflowing chat
+        try await measureSend("A1", text: "发送测试 A1")
+        try await measureSend("A2-multiline", text: "发送测试 A2\n第二行\n第三行")
+
+        // Scenario B: 120 items (window boundary + collapsed TranscriptGroupWindow)
+        for index in 0..<100 {
+            try store.append(conversationID: cid, role: index.isMultiple(of: 2) ? "user" : "assistant",
+                text: "填充历史 \(index)：" + String(repeating: "用于达到120条窗口上限的长消息内容。", count: index.isMultiple(of: 2) ? 3 : 12))
+        }
+        model.open(cid)
+        try await Task.sleep(for: .milliseconds(1000))
+        try await measureSend("B1-120window", text: "窗口上限测试 B1")
+        try await measureSend("B2-120window", text: "窗口上限测试 B2")
+        try await measureSend("B3-120window", text: "窗口上限测试 B3")
+
+        // Scenario C: after a long assistant reply (replyID set)
+        let longCID = model.conversationID!
+        model.beginResponse(taskID: "long-reply-test")
+        try await Task.sleep(for: .milliseconds(50))
+        model.handle(.message(taskID: "long-reply-test", String(repeating: "这是一段非常长的回复内容用于测试长回复后发送新消息的表现。\n", count: 40)), conversationID: longCID)
+        model.handle(.taskState(taskID: "long-reply-test", .completed), conversationID: longCID)
+        model.finishTask(conversationID: longCID)
+        try await Task.sleep(for: .milliseconds(400))
+        try await measureSend("C1-afterLongReply", text: "长回复后发送 C1")
+        print("Send stability regression passed: no upward jump on normal, multiline, 120-window trim, or post-long-reply sends")
+    }
+
     static func bottomPushRegression(app: AppModel) async throws {
         let model = AgentModel(app: app)
         let store = ConversationStore(app.store)
@@ -2668,6 +2769,10 @@ enum AgentReplyRegression {
         }
         if CommandLine.arguments.contains("--scroll-stability") {
             try await scrollStabilityRegression(app: app)
+            return
+        }
+        if CommandLine.arguments.contains("--send-stability") {
+            try await sendStabilityRegression(app: app)
             return
         }
         if CommandLine.arguments.contains("--scroll-perf") {

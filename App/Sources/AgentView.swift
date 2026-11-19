@@ -103,6 +103,7 @@ struct AgentView: View {
     var close: () -> Void = {}
     var setPinned: (Bool) -> Void = { _ in }
     @State private var composerHeight: CGFloat = 94
+    @State private var emptyComposerHeight: CGFloat = 94
     @State private var showingApprovalMenu = false
     @State private var pinned = false
     @State private var toolbarPressed: Int?
@@ -116,6 +117,8 @@ struct AgentView: View {
         reduceMotion ? .opacity : .opacity.combined(with: .offset(y: 8))
     }
     private var isEmptyConversation: Bool { model.items.isEmpty && !model.isRunning }
+    private var isComposerEmpty: Bool { model.draft.isEmpty && model.attachments.isEmpty && model.quotes.isEmpty }
+    private var effectiveComposerHeight: CGFloat { isComposerEmpty ? emptyComposerHeight : composerHeight }
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -123,27 +126,29 @@ struct AgentView: View {
                 if isEmptyConversation {
                     AgentGreeting()
                         .padding(.top, AgentLayout.headerHeight)
-                        .padding(.bottom, composerHeight)
+                        .padding(.bottom, effectiveComposerHeight)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .background(WindowDragArea())
                         .transition(conversationTransition).zIndex(1)
                 } else {
-                    Transcript(model: model, bottomInset: composerHeight)
+                    Transcript(model: model, bottomInset: effectiveComposerHeight)
                         .id("continuous-transcript")
                         .transition(conversationTransition).zIndex(1)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .clipped()
-            .animation(navigationAnimation, value: model.conversationID)
             .animation(navigationAnimation, value: isEmptyConversation)
             ProgressiveHeaderBlur(reversed: true)
-                .frame(height: composerHeight)
+                .frame(height: effectiveComposerHeight)
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
             Composer(model: model, showingApprovalMenu: $showingApprovalMenu)
                 .padding(.horizontal, 12).padding(.bottom, 12)
-                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { composerHeight = $0 }
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                    composerHeight = height
+                    if isComposerEmpty { emptyComposerHeight = height }
+                }
         }
         .overlay(alignment: .top) {
             ProgressiveHeaderBlur()
@@ -1437,9 +1442,9 @@ private struct Composer: View {
             }
             ComposerTextEditor(text: $model.draft, height: $editorHeight,
                 isFocused: $editorFocused,
-                pasteAttachment: { model.pasteAttachments() }, submit: { model.send() }, shortcuts: model.shortcutPreferences)
+                pasteAttachment: { model.pasteAttachments() }, submit: submitDraft, shortcuts: model.shortcutPreferences)
                 .environment(\.chatSelectionColor, model.avatarColor.tint)
-                .frame(height: editorHeight)
+                .frame(height: model.draft.isEmpty ? 28 : editorHeight)
                 .padding(.horizontal, 4)
             HStack {
                 Button { importing = true } label: {
@@ -1449,7 +1454,7 @@ private struct Composer: View {
                 .accessibilityLabel(NSLocalizedString("选择文件或图片", comment: ""))
                 Spacer()
                 ApprovalModePicker(model: model, showing: $showingApprovalMenu)
-                Button { if model.isRunning { model.stop() } else { model.send() } } label: {
+                Button { if model.isRunning { model.stop() } else { submitDraft() } } label: {
                     Image(mingCute: model.isRunning ? "stop.fill" : "arrow.up", size: 14).frame(width: 28, height: 28)
                 }
                 .buttonStyle(ComposerSubmitButtonStyle(color: model.avatarColor.tint))
@@ -1473,6 +1478,11 @@ private struct Composer: View {
             urls.forEach { model.attach(fileURL: $0) }
             return !urls.isEmpty
         }
+    }
+
+    private func submitDraft() {
+        model.send()
+        if model.draft.isEmpty { editorHeight = 28 }
     }
 }
 
