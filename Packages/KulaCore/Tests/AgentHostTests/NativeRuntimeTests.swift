@@ -611,9 +611,17 @@ server.serve_forever()
         try #require(requests.count == 4)
         let systems = requests.compactMap { $0["messages"]?.arrayValue?.first?["content"]?.stringValue }
         try #require(systems.count == 4)
-        let expectedDefault = NativeAgentPrompt.defaultSystemPrompt + "\n插件附加说明"
+        let expectedDefault = NativeAgentPrompt.system(guidance: ["插件附加说明"])
+        let expectedCustom = "你是精简版个人助理。\n" + NativeAgentPrompt.runtimeProtocolPrompt + "\n插件附加说明"
+        #expect(!NativeAgentPrompt.defaultSystemPrompt.contains("asky-form"))
+        #expect(!NativeAgentPrompt.defaultSystemPrompt.contains("<asky-reaction>"))
+        #expect(!NativeAgentPrompt.defaultSystemPrompt.contains("web_read_page"))
+        #expect(!NativeAgentPrompt.defaultSystemPrompt.contains("calendar_list_calendars"))
+        #expect(!NativeAgentPrompt.defaultSystemPrompt.contains("memory_save"))
         #expect(systems[0] == expectedDefault)
-        #expect(systems[1] == "你是精简版个人助理。\n插件附加说明")
+        #expect(systems[1] == expectedCustom)
+        #expect(systems[1].contains("asky-form"))
+        #expect(systems[1].contains("<asky-reaction>"))
         #expect(systems[2] == expectedDefault)
         #expect(systems[3] == expectedDefault)
     }
@@ -621,8 +629,11 @@ server.serve_forever()
     @Test func webCitationGuidancePreservedAcrossFormattingAndTerminalImages() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
-        #expect(NativeAgentPrompt.defaultSystemPrompt.contains("渲染为来源标签"))
-        #expect(NativeAgentPrompt.defaultSystemPrompt.contains("不能只给配图附来源"))
+        let assembled = NativeAgentPrompt.system(basePrompt: "你是精简版个人助理。", guidance: [])
+        #expect(NativeAgentPrompt.runtimeProtocolPrompt.contains("渲染为来源标签"))
+        #expect(NativeAgentPrompt.runtimeProtocolPrompt.contains("不能只给配图附来源"))
+        #expect(assembled.contains("渲染为来源标签"))
+        #expect(assembled.contains("不能只给配图附来源"))
         let capabilities = try #require(NativeAgentPrompt.imageCapabilities(hasPageReader: true))
         #expect(capabilities.contains("渲染为来源标签"))
         #expect(capabilities.contains("不能只给配图附来源"))
