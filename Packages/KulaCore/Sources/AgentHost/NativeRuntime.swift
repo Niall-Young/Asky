@@ -193,10 +193,10 @@ private actor NativeAgentEngine {
                     completionMessages.append(["role": "system", "content": .string(imageCapabilities)])
                 }
                 if webCoolingDown {
-                    completionMessages.append(["role": "system", "content": "本轮所有联网来源正在冷却，网页搜索和读页已暂停；不要换词重试或等待冷却。本轮立即基于已取得的有效资料完成回答，无法核实的部分如实说明，不猜图片链接，不把历史回复当作已核实来源。"])
+                    completionMessages.append(["role": "system", "content": "本轮所有联网来源正在冷却，网页搜索和读页已暂停；不要换词重试或等待冷却。本轮立即基于已取得的有效资料完成回答，依据联网结果写出的事实仍须在对应段落用 Markdown 链接（如 [来源](url)）附真实来源，无法核实的部分如实说明，不猜图片链接，不把历史回复当作已核实来源。"])
                 }
                 if illustrationsFinished {
-                    completionMessages.append(["role": "system", "content": "本轮已完成最后一批 imagesOnly 配图查询，网页工具现已收起。立即基于已经取得的文字证据与相关图片完成回答；有几张合适图片就用几张，不为凑齐图片再搜索或编造图片。普通区别比较用一句结论、一个紧凑对比表和配图即可，不再逐项重复表格，也不额外增加行程推荐；用户明确要求详细内容时遵从。"])
+                    completionMessages.append(["role": "system", "content": "本轮已完成最后一批 imagesOnly 配图查询，网页工具现已收起。立即基于已经取得的文字证据与相关图片完成回答；依据联网结果写出的文字事实仍须在对应段落用 Markdown 链接（如 [来源](url)）附真实来源，不能只给配图附来源。有几张合适图片就用几张，不为凑齐图片再搜索或编造图片。普通区别比较用一句结论、一个紧凑对比表和配图即可，不再逐项重复表格，也不额外增加行程推荐；用户明确要求详细内容时遵从。"])
                 }
                 if let imageCorrection {
                     completionMessages.append(["role": "system", "content": .string(imageCorrection)])
