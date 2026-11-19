@@ -1,3 +1,4 @@
+import Observation
 import SwiftUI
 import MarkdownUI
 import Theme
@@ -56,17 +57,17 @@ struct ChatMarkdownView: View {
             }
             .markdownBlockStyle(\.bulletedListMarker) { configuration in
                 // A minimum-width frame can claim half the row; markers need a bounded column.
-                ChatInlineText(markdown: ["•", "◦", "▪"][min(max(configuration.listLevel - 1, 0), 2)],
-                               literal: true, shrinkToFit: true)
-                    .frame(width: 21, alignment: .trailing)
+                ChatInlineText(markdown: "", literal: true, shrinkToFit: true,
+                               bullet: .forLevel(configuration.listLevel))
+                    .frame(width: 12, alignment: .trailing)
             }
             .markdownBlockStyle(\.numberedListMarker) { configuration in
                 let marker = "\(configuration.itemNumber)."
                 let width = ceil((marker as NSString).size(withAttributes: [
-                    .font: NSFont.systemFont(ofSize: Self.bodyStyle.size)
+                    .font: NSFont.monospacedDigitSystemFont(ofSize: Self.bodyStyle.size, weight: .regular)
                 ]).width) + 2
-                ChatInlineText(markdown: marker, literal: true, shrinkToFit: true)
-                    .frame(width: max(21, width), alignment: .trailing)
+                ChatInlineText(markdown: marker, literal: true, monospacedDigits: true, shrinkToFit: true)
+                    .frame(width: width, alignment: .trailing)
             }
             .markdownBlockStyle(\.listItem) { configuration in
                 configuration.label
@@ -98,7 +99,7 @@ struct ChatMarkdownView: View {
                 .markdownMargin(top: 0, bottom: 16)
             }
             .markdownBlockStyle(\.table) { configuration in
-                ScrollView(.horizontal) {
+                ChatMarkdownTable {
                     configuration.label
                         .fixedSize(horizontal: false, vertical: true)
                         .markdownTableBorderStyle(.init(.horizontalBorders, color: ThemeColor("border").color(for: colorScheme), width: 0))
@@ -155,9 +156,332 @@ private extension EnvironmentValues {
 
 private struct ChatListItemLabelStyle: LabelStyle {
     func makeBody(configuration: Configuration) -> some View {
-        HStack(alignment: .top, spacing: 8) {
+        HStack(alignment: .top, spacing: 5) {
             configuration.icon
             configuration.title
+        }
+    }
+}
+
+enum ChatListBullet: Hashable {
+    case disc, circle, square
+
+    static func forLevel(_ level: Int) -> Self {
+        [Self.disc, .circle, .square][min(max(level - 1, 0), 2)]
+    }
+
+    var selectionText: String {
+        switch self {
+        case .disc: "•"
+        case .circle: "◦"
+        case .square: "▪"
+        }
+    }
+
+    func attachment(color: NSColor) -> NSTextAttachment {
+        let canvas = NSSize(width: 6, height: 6)
+        let image = NSImage(size: canvas, flipped: false) { _ in
+            switch self {
+            case .disc:
+                color.setFill()
+                NSBezierPath(ovalIn: NSRect(x: 0.5, y: 0.5, width: 5, height: 5)).fill()
+            case .circle:
+                color.setStroke()
+                let path = NSBezierPath(ovalIn: NSRect(x: 1.1, y: 1.1, width: 3.8, height: 3.8))
+                path.lineWidth = 1.2
+                path.stroke()
+            case .square:
+                color.setFill()
+                NSBezierPath(roundedRect: NSRect(x: 0.75, y: 0.75, width: 4.5, height: 4.5), xRadius: 0.6, yRadius: 0.6).fill()
+            }
+            return true
+        }
+        let attachment = NSTextAttachment()
+        attachment.image = image
+        // Center the 6 pt glyph vertically on 14 pt mixed CJK/Latin prose.
+        attachment.bounds = NSRect(x: 0, y: 1.0, width: canvas.width, height: canvas.height)
+        return attachment
+    }
+}
+
+struct ChatTableScrollFade: Equatable, Sendable {
+    var leading: CGFloat = 0
+    var trailing: CGFloat = 0
+
+    static func resolve(visibleMinX: CGFloat, visibleMaxX: CGFloat,
+                        contentMinX: CGFloat, contentMaxX: CGFloat) -> Self {
+        Self(
+            leading: strength(for: max(0, visibleMinX - contentMinX)),
+            trailing: strength(for: max(0, contentMaxX - visibleMaxX))
+        )
+    }
+
+    private static func strength(for overflow: CGFloat) -> CGFloat {
+        guard overflow > 0.5 else { return 0 }
+        return min(1, (overflow - 0.5) / 8)
+    }
+}
+
+struct ChatTableScrollAxisLock: Equatable, Sendable {
+    enum Axis: Equatable, Sendable { case undecided, horizontal, vertical }
+    enum Decision: Equatable, Sendable { case passThrough, lockHorizontal }
+
+    private(set) var liveAxis: Axis = .undecided
+    private(set) var momentumAxis: Axis = .undecided
+    private var accumX: CGFloat = 0
+    private var accumY: CGFloat = 0
+
+    var isTrackingHorizontal: Bool { liveAxis == .horizontal || momentumAxis == .horizontal }
+
+    mutating func reset() {
+        liveAxis = .undecided
+        momentumAxis = .undecided
+        accumX = 0
+        accumY = 0
+    }
+
+    mutating func evaluate(dx: CGFloat, dy: CGFloat, phase: NSEvent.Phase, momentumPhase: NSEvent.Phase) -> Decision {
+        if !momentumPhase.isEmpty {
+            let decision: Decision
+            switch momentumAxis {
+            case .horizontal: decision = .lockHorizontal
+            case .vertical: decision = .passThrough
+            case .undecided: decision = abs(dx) > 0 && abs(dx) >= abs(dy) ? .lockHorizontal : .passThrough
+            }
+            if momentumPhase.contains(.ended) || momentumPhase.contains(.cancelled) {
+                momentumAxis = .undecided
+            }
+            return decision
+        }
+
+        if phase.isEmpty {
+            reset()
+            return abs(dx) > 0 && abs(dx) >= abs(dy) ? .lockHorizontal : .passThrough
+        }
+
+        if phase.contains(.mayBegin) {
+            reset()
+            return .passThrough
+        }
+
+        if phase.contains(.began) {
+            reset()
+            accumX = abs(dx)
+            accumY = abs(dy)
+            if max(accumX, accumY) >= 2 {
+                liveAxis = accumX >= accumY ? .horizontal : .vertical
+            }
+            return liveAxis == .horizontal || (liveAxis == .undecided && abs(dx) > 0 && abs(dx) >= abs(dy))
+                ? .lockHorizontal : .passThrough
+        }
+
+        if phase.contains(.ended) || phase.contains(.cancelled) {
+            let lockedHorizontal = liveAxis == .horizontal
+            momentumAxis = liveAxis
+            liveAxis = .undecided
+            accumX = 0
+            accumY = 0
+            return lockedHorizontal ? .lockHorizontal : .passThrough
+        }
+
+        if liveAxis == .undecided {
+            accumX += abs(dx)
+            accumY += abs(dy)
+            if max(accumX, accumY) >= 2 {
+                liveAxis = accumX >= accumY ? .horizontal : .vertical
+            }
+        }
+        if liveAxis == .horizontal { return .lockHorizontal }
+        if liveAxis == .undecided && abs(dx) > 0 && abs(dx) >= abs(dy) { return .lockHorizontal }
+        return .passThrough
+    }
+}
+
+@MainActor @Observable
+private final class ChatTableScrollFadeState {
+    var fade = ChatTableScrollFade()
+
+    func update(_ updated: ChatTableScrollFade) {
+        if abs(fade.leading - updated.leading) > 0.005
+            || abs(fade.trailing - updated.trailing) > 0.005 {
+            fade = updated
+        }
+    }
+}
+
+private struct ChatTableScrollFadeMask: View {
+    let state: ChatTableScrollFadeState
+
+    var body: some View {
+        GeometryReader { geometry in
+            let width = max(1, geometry.size.width)
+            let fadeFraction = min(36, width * 0.2) / width
+            let fade = state.fade
+            LinearGradient(stops: [
+                .init(color: .black.opacity(1 - fade.leading), location: 0),
+                .init(color: .black.opacity(1 - fade.leading * 0.45), location: fadeFraction * 0.45),
+                .init(color: .black, location: fadeFraction),
+                .init(color: .black, location: 1 - fadeFraction),
+                .init(color: .black.opacity(1 - fade.trailing * 0.45), location: 1 - fadeFraction * 0.45),
+                .init(color: .black.opacity(1 - fade.trailing), location: 1)
+            ], startPoint: .leading, endPoint: .trailing)
+        }
+    }
+}
+
+private struct ChatMarkdownTable<Content: View>: View {
+    @ViewBuilder let content: () -> Content
+    @State private var fadeState = ChatTableScrollFadeState()
+
+    var body: some View {
+        ScrollView(.horizontal) {
+            content()
+                .background {
+                    ChatTableScrollObserver { updated in
+                        fadeState.update(updated)
+                    }
+                }
+        }
+        .mask {
+            ChatTableScrollFadeMask(state: fadeState)
+        }
+    }
+}
+
+/// Observes the enclosing horizontal ScrollView so edge fades track overflow and horizontal gestures stay vertically steady.
+struct ChatTableScrollObserver: NSViewRepresentable {
+    var onChange: (ChatTableScrollFade) -> Void
+
+    func makeNSView(context: Context) -> ObserverView { ObserverView() }
+
+    func updateNSView(_ view: ObserverView, context: Context) {
+        view.onChange = onChange
+        view.scheduleUpdate()
+    }
+
+    final class ObserverView: NSView {
+        var onChange: ((ChatTableScrollFade) -> Void)?
+        private weak var observedScroll: NSScrollView?
+        private weak var observedDocument: NSView?
+        private var updateScheduled = false
+        private var axisLock = ChatTableScrollAxisLock()
+        nonisolated(unsafe) private var scrollMonitor: Any?
+
+        override func viewWillMove(toWindow newWindow: NSWindow?) {
+            if newWindow == nil { stopScrollMonitor() }
+            super.viewWillMove(toWindow: newWindow)
+        }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if window != nil { startScrollMonitor() } else { stopScrollMonitor() }
+            scheduleUpdate()
+        }
+
+        override func viewDidMoveToSuperview() { super.viewDidMoveToSuperview(); scheduleUpdate() }
+        override func layout() { super.layout(); scheduleUpdate() }
+
+        private func startScrollMonitor() {
+            guard scrollMonitor == nil else { return }
+            scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+                let consumed = MainActor.assumeIsolated {
+                    self?.consumeScrollEvent(event) ?? false
+                }
+                return consumed ? nil : event
+            }
+        }
+
+        private func stopScrollMonitor() {
+            if let scrollMonitor {
+                NSEvent.removeMonitor(scrollMonitor)
+                self.scrollMonitor = nil
+            }
+            axisLock.reset()
+        }
+
+        /// Strips unintentional vertical wobble during locked horizontal table scrolling so the outer transcript stays still.
+        func consumeScrollEvent(_ event: NSEvent, hitView overrideHitView: NSView? = nil) -> Bool {
+            guard let scroll = enclosingScrollView,
+                  let document = scroll.documentView,
+                  document.bounds.width > scroll.documentVisibleRect.width + 0.5 else {
+                axisLock.reset()
+                return false
+            }
+            if overrideHitView == nil {
+                guard let window, event.window === window else { return false }
+            }
+            let startsNewGesture = event.phase.contains(.mayBegin)
+                || event.phase.contains(.began)
+                || (event.phase.isEmpty && event.momentumPhase.isEmpty)
+            if startsNewGesture || !axisLock.isTrackingHorizontal {
+                let target = overrideHitView ?? window?.contentView?.hitTest(event.locationInWindow)
+                guard let target, target.isDescendant(of: scroll) else {
+                    if startsNewGesture { axisLock.reset() }
+                    return false
+                }
+            }
+            let decision = axisLock.evaluate(
+                dx: event.scrollingDeltaX,
+                dy: event.scrollingDeltaY,
+                phase: event.phase,
+                momentumPhase: event.momentumPhase
+            )
+            guard decision == .lockHorizontal else { return false }
+            guard event.scrollingDeltaY != 0 || event.deltaY != 0 else { return false }
+            guard let horizontalOnly = Self.horizontalOnlyEvent(from: event) else { return false }
+            scroll.scrollWheel(with: horizontalOnly)
+            return true
+        }
+
+        static func horizontalOnlyEvent(from event: NSEvent) -> NSEvent? {
+            guard let cgCopy = event.cgEvent?.copy() else { return nil }
+            cgCopy.setIntegerValueField(.scrollWheelEventDeltaAxis1, value: 0)
+            cgCopy.setDoubleValueField(.scrollWheelEventPointDeltaAxis1, value: 0)
+            cgCopy.setDoubleValueField(.scrollWheelEventFixedPtDeltaAxis1, value: 0)
+            return NSEvent(cgEvent: cgCopy)
+        }
+
+        func scheduleUpdate() {
+            guard !updateScheduled else { return }
+            updateScheduled = true
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.updateScheduled = false
+                self.updateFade()
+            }
+        }
+
+        @objc private func scrollChanged(_ notification: Notification) { scheduleUpdate() }
+
+        private func updateFade() {
+            guard let scroll = enclosingScrollView, let document = scroll.documentView else { return }
+            if observedScroll !== scroll || observedDocument !== document {
+                NotificationCenter.default.removeObserver(self)
+                observedScroll = scroll
+                observedDocument = document
+                scroll.contentView.postsBoundsChangedNotifications = true
+                scroll.contentView.postsFrameChangedNotifications = true
+                document.postsFrameChangedNotifications = true
+                NotificationCenter.default.addObserver(self, selector: #selector(scrollChanged(_:)),
+                    name: NSView.boundsDidChangeNotification, object: scroll.contentView)
+                NotificationCenter.default.addObserver(self, selector: #selector(scrollChanged(_:)),
+                    name: NSView.frameDidChangeNotification, object: scroll.contentView)
+                NotificationCenter.default.addObserver(self, selector: #selector(scrollChanged(_:)),
+                    name: NSView.frameDidChangeNotification, object: document)
+            }
+            let visible = scroll.documentVisibleRect
+            let content = document.bounds
+            onChange?(ChatTableScrollFade.resolve(
+                visibleMinX: visible.minX,
+                visibleMaxX: visible.maxX,
+                contentMinX: content.minX,
+                contentMaxX: content.maxX
+            ))
+        }
+
+        deinit {
+            if let scrollMonitor { NSEvent.removeMonitor(scrollMonitor) }
+            NotificationCenter.default.removeObserver(self)
         }
     }
 }
@@ -245,8 +569,10 @@ struct ChatInlineText: View {
     let markdown: String
     var literal = false
     var monospaced = false
+    var monospacedDigits = false
     var shrinkToFit = true
     var weight: NSFont.Weight = .regular
+    var bullet: ChatListBullet? = nil
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.chatInlineForeground) private var foreground
     @State private var images: [URL: Data] = [:]
@@ -266,24 +592,49 @@ struct ChatInlineText: View {
     }
 
     var body: some View {
-        ChatInlineNativeText(content: literal ? AttributedString(markdown) : Self.parsed(markdown), monospaced: monospaced, shrinkToFit: shrinkToFit, weight: weight, images: images, sourceName: ChatSourceTextView.sources(in: Self.parsed(markdown)).first.flatMap { sourceNames[$0] },
+        let content = literal ? AttributedString(markdown) : Self.parsed(markdown)
+        let sources = literal ? [] : ChatSourceTextView.sources(in: content)
+        let imageURLs = literal ? [] : Array(Set(content.runs.compactMap(\.imageURL).filter { ChatMath.formula($0) == nil })).sorted { $0.absoluteString < $1.absoluteString }
+        let resolvedSourceName = sources.first.flatMap { sourceNames[$0] ?? ChatLinkService.shared.cachedPreview(for: $0)?.siteName }
+        ChatInlineNativeText(content: content, monospaced: monospaced, monospacedDigits: monospacedDigits, shrinkToFit: shrinkToFit, weight: weight, bullet: bullet, images: images, sourceName: resolvedSourceName,
             foreground: NSColor(foreground.color(for: colorScheme)),
             background: NSColor(ThemeColor("backgroundNeutral").color(for: colorScheme)),
             linkColor: NSColor(ThemeColor("textPrimary").color(for: colorScheme)))
-            .task(id: markdown) {
-                guard !literal else { return }
+            .task(id: imageURLs) {
+                guard !imageURLs.isEmpty else { return }
                 var loaded: [URL: Data] = [:]
-                for url in Set(Self.parsed(markdown).runs.compactMap(\.imageURL)) {
+                for url in imageURLs {
                     guard !Task.isCancelled else { return }
-                    if ChatMath.formula(url) != nil { continue }
                     if let data = try? await ChatImageService.shared.imageData(from: url) { loaded[url] = data }
                 }
                 guard !Task.isCancelled else { return }
                 images = loaded
-                if let first = ChatSourceTextView.sources(in: Self.parsed(markdown)).first {
-                    let metadata = try? await ChatLinkService.shared.preview(for: first)
-                    guard !Task.isCancelled else { return }
-                    sourceNames[first] = metadata?.siteName
+            }
+            .task(id: sources) {
+                guard let first = sources.first else { return }
+                await withTaskGroup(of: (URL, ChatLinkService.Preview?).self) { group in
+                    var pending = sources.makeIterator()
+                    func enqueue(_ url: URL) {
+                        group.addTask {
+                            let preview = try? await ChatLinkService.shared.preview(for: url) { partial in
+                                guard url == first, let site = partial.siteName, !site.isEmpty else { return }
+                                Task { @MainActor in
+                                    if sourceNames[first] != site { sourceNames[first] = site }
+                                }
+                            }
+                            return (url, preview)
+                        }
+                    }
+                    for _ in 0..<min(4, sources.count) {
+                        if let url = pending.next() { enqueue(url) }
+                    }
+                    for await (url, metadata) in group {
+                        guard !Task.isCancelled else { group.cancelAll(); return }
+                        if url == first, let site = metadata?.siteName, !site.isEmpty, sourceNames[first] != site {
+                            sourceNames[first] = site
+                        }
+                        if let next = pending.next() { enqueue(next) }
+                    }
                 }
             }
     }
@@ -292,8 +643,10 @@ struct ChatInlineText: View {
 private struct ChatInlineNativeText: NSViewRepresentable {
     let content: AttributedString
     var monospaced = false
+    var monospacedDigits = false
     var shrinkToFit = false
     var weight: NSFont.Weight = .regular
+    var bullet: ChatListBullet? = nil
     @Environment(\.chatSelectionColor) private var selectionColor
     @Environment(\.chatQuoteAction) private var quoteAction
     @Environment(\.chatSelectionGroup) private var selectionGroup
@@ -309,11 +662,25 @@ private struct ChatInlineNativeText: NSViewRepresentable {
         let manager = NSLayoutManager()
         let container = NSTextContainer(size: .zero)
         private(set) var naturalWidth: CGFloat = 2
+        private var cachedBullet: ChatListBullet?
+        private var cachedBulletColor: NSColor?
+        private var cachedBulletAttachment: NSTextAttachment?
 
         init() {
             container.lineFragmentPadding = 0
             storage.addLayoutManager(manager)
             manager.addTextContainer(container)
+        }
+
+        func bulletAttachment(for bullet: ChatListBullet, color: NSColor) -> NSTextAttachment {
+            if cachedBullet == bullet, cachedBulletColor == color, let cached = cachedBulletAttachment {
+                return cached
+            }
+            let attachment = bullet.attachment(color: color)
+            cachedBullet = bullet
+            cachedBulletColor = color
+            cachedBulletAttachment = attachment
+            return attachment
         }
 
         func update(_ content: NSAttributedString) {
@@ -358,9 +725,27 @@ private struct ChatInlineNativeText: NSViewRepresentable {
         let result = NSMutableAttributedString()
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineSpacing = TextStyle(size: 14, weight: 400, mode: .default).lineHeight - 14 * 1.2
-        for run in content.runs {
+        if let bullet {
+            let attachment = context.coordinator.bulletAttachment(for: bullet, color: foreground)
+            let fragment = NSMutableAttributedString(attachment: attachment)
+            fragment.addAttributes([
+                .font: NSFont.systemFont(ofSize: 14, weight: weight),
+                .paragraphStyle: paragraph,
+                .chatSelectionText: bullet.selectionText
+            ], range: NSRange(location: 0, length: fragment.length))
+            result.append(fragment)
+        } else {
+        let runs = Array(content.runs)
+        let skippedCitations = runs.map { run -> Bool in
+            guard let url = run.link, ChatImageService.supports(url), run.imageURL == nil else { return false }
+            return ChatSourceTextView.isCitation(String(content[run.range].characters))
+        }
+        let citationSeparators = CharacterSet.whitespaces.union(CharacterSet(charactersIn: "、,，;；/"))
+        for (runIndex, run) in runs.enumerated() {
             let intent = run.inlinePresentationIntent ?? []
-            var font = monospaced ? NSFont.monospacedSystemFont(ofSize: 14, weight: .regular) : NSFont.systemFont(ofSize: 14, weight: weight)
+            var font = monospaced ? NSFont.monospacedSystemFont(ofSize: 14, weight: .regular)
+                : monospacedDigits ? NSFont.monospacedDigitSystemFont(ofSize: 14, weight: weight)
+                : NSFont.systemFont(ofSize: 14, weight: weight)
             if intent.contains(.stronglyEmphasized) { font = NSFont.systemFont(ofSize: 14, weight: .bold) }
             if intent.contains(.emphasized) { font = NSFontManager.shared.convert(font, toHaveTrait: .italicFontMask) }
             var attributes: [NSAttributedString.Key: Any] = [
@@ -372,8 +757,11 @@ private struct ChatInlineNativeText: NSViewRepresentable {
                 attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue
             }
             // Source labels remain plain text; the source action belongs at the end of this paragraph.
-            if let url = run.link, ChatImageService.supports(url), run.imageURL == nil,
-               ChatSourceTextView.isCitation(String(content[run.range].characters)) { continue }
+            if skippedCitations[runIndex] { continue }
+            if run.link == nil, run.imageURL == nil,
+               runIndex > 0, runIndex + 1 < runs.count,
+               skippedCitations[runIndex - 1], skippedCitations[runIndex + 1],
+               String(content[run.range].characters).trimmingCharacters(in: citationSeparators).isEmpty { continue }
             if intent.contains(.strikethrough) { attributes[.strikethroughStyle] = NSUnderlineStyle.single.rawValue }
             if let url = run.imageURL {
                 if let formula = ChatMath.formula(url) {
@@ -411,15 +799,14 @@ private struct ChatInlineNativeText: NSViewRepresentable {
         let sources = ChatSourceTextView.sources(in: content)
         if let first = sources.first {
             result.append(NSAttributedString(string: " ", attributes: [.font: NSFont.systemFont(ofSize: 14)]))
-            let attachment = NSTextAttachment()
             let name = sourceName?.trimmingCharacters(in: .whitespacesAndNewlines)
-            let badge = ChatSourceTextView.badge(name: name.flatMap { $0.isEmpty ? nil : $0 } ?? ChatSourceTextView.domain(first),
+            let attachment = ChatSourceTextView.badgeAttachment(
+                name: name.flatMap { $0.isEmpty ? nil : $0 } ?? ChatSourceTextView.domain(first),
                 count: sources.count, foreground: foreground, background: background)
-            attachment.image = badge.image
-            attachment.bounds = NSRect(x: 0, y: -badge.baseline, width: badge.image.size.width, height: badge.image.size.height)
             let fragment = NSMutableAttributedString(attachment: attachment)
             fragment.addAttributes([.link: first, .chatSources: sources], range: NSRange(location: 0, length: fragment.length))
             result.append(fragment)
+        }
         }
         if let selectable = view as? ChatSelectableTextView {
             selectable.quoteAction = quoteAction

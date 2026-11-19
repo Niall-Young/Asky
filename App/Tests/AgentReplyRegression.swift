@@ -105,6 +105,235 @@ enum AgentReplyRegression {
         print("Bubble widths passed: actual chat screenshot, short Chinese/emoji, styled text, long wrapping, bullet/numbered/nested lists in light/dark at 280/460 pt")
     }
 
+    static func tableFadePreview(app: AppModel) async throws {
+        let fitting = ChatTableScrollFade.resolve(visibleMinX: 0, visibleMaxX: 460, contentMinX: 0, contentMaxX: 320)
+        precondition(fitting == ChatTableScrollFade(leading: 0, trailing: 0), "Non-overflowing tables must not fade")
+        let start = ChatTableScrollFade.resolve(visibleMinX: 0, visibleMaxX: 460, contentMinX: 0, contentMaxX: 600)
+        precondition(start == ChatTableScrollFade(leading: 0, trailing: 1), "Unscrolled wide tables must fade only trailing edge")
+        let middle = ChatTableScrollFade.resolve(visibleMinX: 70, visibleMaxX: 530, contentMinX: 0, contentMaxX: 600)
+        precondition(middle == ChatTableScrollFade(leading: 1, trailing: 1), "Mid-scrolled wide tables must fade both edges")
+        let end = ChatTableScrollFade.resolve(visibleMinX: 140, visibleMaxX: 600, contentMinX: 0, contentMaxX: 600)
+        precondition(end == ChatTableScrollFade(leading: 1, trailing: 0), "End-scrolled wide tables must clear trailing fade")
+        let subpixel = ChatTableScrollFade.resolve(visibleMinX: 0.3, visibleMaxX: 599.7, contentMinX: 0, contentMaxX: 600)
+        precondition(subpixel == ChatTableScrollFade(leading: 0, trailing: 0), "Sub-pixel rounding must not trigger edge fades")
+        let ramp = ChatTableScrollFade.resolve(visibleMinX: 0, visibleMaxX: 595.5, contentMinX: 0, contentMaxX: 600)
+        precondition(abs(ramp.trailing - 0.5) < 0.01 && ramp.leading == 0, "Fade must ramp smoothly over the final 8 pt")
+
+        var lock = ChatTableScrollAxisLock()
+        precondition(lock.evaluate(dx: 0, dy: 0, phase: .mayBegin, momentumPhase: []) == .passThrough)
+        precondition(lock.evaluate(dx: 0, dy: 0, phase: .began, momentumPhase: []) == .passThrough)
+        precondition(lock.evaluate(dx: -8, dy: -1, phase: .changed, momentumPhase: []) == .lockHorizontal)
+        precondition(lock.evaluate(dx: -2, dy: -3, phase: .changed, momentumPhase: []) == .lockHorizontal,
+            "Mid-gesture vertical wobble must stay locked to horizontal")
+        precondition(lock.evaluate(dx: 0, dy: 2, phase: .changed, momentumPhase: []) == .lockHorizontal,
+            "Pausing or reversing horizontally must not leak vertical scroll")
+        precondition(lock.evaluate(dx: 0, dy: 0, phase: .ended, momentumPhase: []) == .lockHorizontal)
+        precondition(lock.evaluate(dx: -3, dy: -2, phase: [], momentumPhase: .changed) == .lockHorizontal,
+            "Momentum after a horizontal swipe must also strip vertical drift")
+        precondition(lock.evaluate(dx: 0, dy: 0, phase: [], momentumPhase: .ended) == .lockHorizontal)
+        precondition(!lock.isTrackingHorizontal, "Axis lock must reset after momentum ends")
+        precondition(lock.evaluate(dx: -1, dy: -8, phase: .began, momentumPhase: []) == .passThrough)
+        precondition(lock.evaluate(dx: -6, dy: -2, phase: .changed, momentumPhase: []) == .passThrough,
+            "Vertical gestures over a table must stay unlocked for transcript scrolling")
+        precondition(lock.evaluate(dx: 0, dy: -4, phase: [], momentumPhase: []) == .passThrough,
+            "Pure vertical discrete wheel must pass through to transcript")
+        precondition(lock.evaluate(dx: -10, dy: -2, phase: [], momentumPhase: []) == .lockHorizontal,
+            "Horizontal discrete wheel must strip vertical noise")
+
+        let wideTable = """
+        | 模型 | 输入 | 输出（含思考 token） | 缓存读取 | 上下文窗口 |
+        | --- | --- | --- | --- | --- |
+        | **Gemini 4 Hydrogen** | $1.50 | $7.50 | $0.375 | 1M |
+        | **Gemini 4 Carbon**（到 11/30） | $2.00 | $10.00 | $0.50 | 1M |
+        | **Gemini 4 Carbon**（12/1 起） | $4.00 | $20.00 | $1.00 | 1M |
+        | **Gemini 4 Neon** | $3.00 | $15.00 | $0.75 | 1M |
+
+        | 功能 | 状态 |
+        | --- | --- |
+        | Markdown | 支持 |
+        """
+
+        func scrollViews(_ node: NSView) -> [NSScrollView] {
+            var list: [NSScrollView] = []
+            if let scroll = node as? NSScrollView { list.append(scroll) }
+            for subview in node.subviews { list.append(contentsOf: scrollViews(subview)) }
+            return list
+        }
+
+        func textViews(_ node: NSView) -> [ChatSelectableTextView] {
+            var list: [ChatSelectableTextView] = []
+            if let text = node as? ChatSelectableTextView { list.append(text) }
+            for subview in node.subviews { list.append(contentsOf: textViews(subview)) }
+            return list
+        }
+
+        func observerViews(_ node: NSView) -> [ChatTableScrollObserver.ObserverView] {
+            var list: [ChatTableScrollObserver.ObserverView] = []
+            if let observer = node as? ChatTableScrollObserver.ObserverView { list.append(observer) }
+            for subview in node.subviews { list.append(contentsOf: observerViews(subview)) }
+            return list
+        }
+
+        func makeTrackpadScroll(dx: Double, dy: Double, phase: Int64) -> NSEvent {
+            let cg = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 2,
+                wheel1: Int32(dy), wheel2: Int32(dx), wheel3: 0)!
+            cg.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
+            cg.setDoubleValueField(.scrollWheelEventPointDeltaAxis1, value: dy)
+            cg.setDoubleValueField(.scrollWheelEventPointDeltaAxis2, value: dx)
+            cg.setDoubleValueField(.scrollWheelEventFixedPtDeltaAxis1, value: dy)
+            cg.setDoubleValueField(.scrollWheelEventFixedPtDeltaAxis2, value: dx)
+            cg.setIntegerValueField(.scrollWheelEventScrollPhase, value: phase)
+            cg.timestamp = DispatchTime.now().uptimeNanoseconds
+            return NSEvent(cgEvent: cg)!
+        }
+
+        // Verify in the real Agent chat window (nested inside the vertical transcript ScrollView + Liquid Glass).
+        let store = ConversationStore(app.store)
+        let cid = try store.create(title: "Table horizontal fade")
+        try store.append(conversationID: cid, role: "user", text: "对比一下几个模型的价格")
+        try store.append(conversationID: cid, role: "assistant", text: wideTable)
+        let model = AgentModel(app: app)
+        model.open(cid)
+        let controller = AgentWindowController(model: model, presentation: WindowPresentation())
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        controller.show()
+        let chatWindow = NSApplication.shared.windows.last { $0.title == "Asky AI" && $0.isVisible }!
+        chatWindow.makeKeyAndOrderFront(nil)
+        try await Task.sleep(for: .milliseconds(700))
+        let chatScrolls = scrollViews(chatWindow.contentView!).filter {
+            ($0.documentView?.bounds.width ?? 0) > $0.documentVisibleRect.width + 5
+        }
+        precondition(!chatScrolls.isEmpty, "Real chat window must host the horizontally overflowing table ScrollView")
+        let cellText = textViews(chatScrolls[0]).first { $0.string.contains("Gemini 4 Hydrogen") }!
+        cellText.setSelectedRange(NSRange(location: 0, length: 6))
+        precondition(cellText.selectedRange().length == 6, "Table cells inside masked ScrollView must remain selectable")
+        cellText.setSelectedRange(NSRange(location: 0, length: 0))
+        let surface = chatWindow.contentView!
+        let bitmap = surface.bitmapImageRepForCachingDisplay(in: surface.bounds)!
+        surface.cacheDisplay(in: surface.bounds, to: bitmap)
+        try bitmap.representation(using: .png, properties: [:])!.write(to: URL(filePath: "build/table-fade-chat.png"))
+        chatWindow.close()
+
+        // Verify horizontal table swipes with vertical wobble never jitter the enclosing transcript ScrollView.
+        let tallID = try store.create(title: "Table horizontal stability")
+        let fillerTop = String(repeating: "上文段落，用来让外层对话流具备上下滚动空间。\n\n", count: 6)
+        let fillerBottom = String(repeating: "下文段落，用来验证表上垂直滚动仍可正常驱动外层对话流。\n\n", count: 6)
+        try store.append(conversationID: tallID, role: "user", text: "对比一下几个模型的价格")
+        try store.append(conversationID: tallID, role: "assistant", text: fillerTop + wideTable + "\n\n" + fillerBottom)
+        let tallModel = AgentModel(app: app)
+        tallModel.open(tallID)
+        let tallController = AgentWindowController(model: tallModel, presentation: WindowPresentation())
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        tallController.show()
+        let tallWindow = NSApplication.shared.windows.last { $0.title == "Asky AI" && $0.isVisible }!
+        tallWindow.makeKeyAndOrderFront(nil)
+        defer { tallWindow.close() }
+        try await Task.sleep(for: .milliseconds(1100))
+        let tallTableScroll = scrollViews(tallWindow.contentView!).last {
+            ($0.documentView?.bounds.width ?? 0) > $0.documentVisibleRect.width + 5
+        }!
+        let outerScroll = tallTableScroll.enclosingScrollView!
+        let observer = observerViews(tallTableScroll).first!
+        let tallCell = textViews(tallTableScroll).first { $0.string.contains("Gemini 4 Hydrogen") }!
+        NotificationCenter.default.post(name: NSScrollView.willStartLiveScrollNotification, object: outerScroll)
+        let tableInDoc = outerScroll.documentView!.convert(tallTableScroll.bounds, from: tallTableScroll)
+        let startOuterY = max(0, tableInDoc.midY - outerScroll.contentView.bounds.height / 2)
+        outerScroll.contentView.scroll(to: NSPoint(x: 0, y: startOuterY))
+        outerScroll.reflectScrolledClipView(outerScroll.contentView)
+        try await Task.sleep(for: .milliseconds(150))
+
+        func dispatchFiltered(_ event: NSEvent) {
+            if !observer.consumeScrollEvent(event, hitView: tallCell) {
+                tallCell.scrollWheel(with: event)
+            }
+        }
+        // Swipe to the right edge (overscroll) and immediately swipe back with realistic vertical wobble.
+        dispatchFiltered(makeTrackpadScroll(dx: 0, dy: 0, phase: 128))
+        for i in 0..<24 {
+            let phase: Int64 = i == 0 ? 1 : (i == 23 ? 4 : 2)
+            dispatchFiltered(makeTrackpadScroll(dx: i == 23 ? 0 : -10, dy: 0, phase: phase))
+            try await Task.sleep(for: .milliseconds(12))
+        }
+        precondition(tallTableScroll.documentVisibleRect.minX > 40, "Horizontal table swipe must scroll the table")
+        let wobble: [(Double, Double)] = [
+            (8, -1), (8, -2), (6, -3), (4, -3), (2, -3), (1, -3),
+            (6, 2), (8, 3), (4, 3), (2, 3), (1, 3), (8, -2), (0, 0)
+        ]
+        dispatchFiltered(makeTrackpadScroll(dx: 0, dy: 0, phase: 128))
+        for (i, delta) in wobble.enumerated() {
+            let phase: Int64 = i == 0 ? 1 : (i == wobble.count - 1 ? 4 : 2)
+            dispatchFiltered(makeTrackpadScroll(dx: delta.0, dy: delta.1, phase: phase))
+            try await Task.sleep(for: .milliseconds(16))
+            precondition(abs(outerScroll.contentView.bounds.origin.y - startOuterY) < 0.01,
+                "Horizontal table swipe must not jitter outer transcript vertically: expected \(startOuterY), got \(outerScroll.contentView.bounds.origin.y)")
+        }
+        try await Task.sleep(for: .milliseconds(180))
+        precondition(abs(outerScroll.contentView.bounds.origin.y - startOuterY) < 0.01,
+            "Ending a horizontal table swipe must not trigger vertical transcript momentum: expected \(startOuterY), got \(outerScroll.contentView.bounds.origin.y)")
+        // Verify vertical scrolling over the table still scrolls the enclosing transcript.
+        dispatchFiltered(makeTrackpadScroll(dx: 0, dy: 0, phase: 128))
+        for i in 0..<6 {
+            let phase: Int64 = i == 0 ? 1 : (i == 5 ? 4 : 2)
+            dispatchFiltered(makeTrackpadScroll(dx: 0, dy: i == 5 ? 0 : -12, phase: phase))
+            try await Task.sleep(for: .milliseconds(16))
+        }
+        precondition(outerScroll.contentView.bounds.origin.y > startOuterY + 10,
+            "Vertical scrolling over a wide table must still scroll the outer transcript")
+
+        for (name, scheme) in [("light", ColorScheme.light), ("dark", .dark)] {
+            let content = VStack(alignment: .leading, spacing: 0) {
+                ChatMarkdownView(text: wideTable)
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 14)
+            .frame(width: 496, alignment: .topLeading)
+            .background(RoundedRectangle(cornerRadius: 16).fill(scheme == .dark ? Color.white.opacity(0.06) : Color.black.opacity(0.06)))
+            .padding(20)
+            .frame(width: 536, height: 360, alignment: .topLeading)
+            .background(scheme == .dark ? Color(white: 0.14) : Color(white: 0.94))
+            .environment(\.colorScheme, scheme)
+
+            let hosted = NSHostingView(rootView: content)
+            let window = NSWindow(contentRect: NSRect(x: 160, y: 200, width: 536, height: 360),
+                styleMask: [.titled, .fullSizeContentView], backing: .buffered, defer: false)
+            window.titleVisibility = .hidden
+            window.titlebarAppearsTransparent = true
+            window.appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
+            window.contentView = hosted
+            window.makeKeyAndOrderFront(nil)
+            defer { window.orderOut(nil) }
+            try await Task.sleep(for: .milliseconds(350))
+            hosted.layoutSubtreeIfNeeded()
+
+            let scrolls = scrollViews(hosted).filter { ($0.documentView?.bounds.width ?? 0) > $0.documentVisibleRect.width + 5 }
+            precondition(!scrolls.isEmpty, "Wide table must overflow horizontally in \(name) mode")
+            let wideScroll = scrolls[0]
+            let maxX = max(0, (wideScroll.documentView?.bounds.width ?? 0) - wideScroll.documentVisibleRect.width)
+            print("Table fade \(name): docWidth=\(wideScroll.documentView?.bounds.width ?? 0), visibleWidth=\(wideScroll.documentVisibleRect.width), maxX=\(maxX)")
+
+            func capture(_ suffix: String) throws {
+                let proc = Process()
+                proc.executableURL = URL(filePath: "/usr/sbin/screencapture")
+                proc.arguments = ["-x", "-o", "-l", String(window.windowNumber), "build/table-fade-\(name)-\(suffix).png"]
+                try proc.run(); proc.waitUntilExit()
+                precondition(proc.terminationStatus == 0)
+            }
+
+            try capture("start")
+
+            wideScroll.contentView.scroll(to: NSPoint(x: maxX * 0.5, y: 0))
+            wideScroll.reflectScrolledClipView(wideScroll.contentView)
+            try await Task.sleep(for: .milliseconds(250))
+            try capture("mid")
+
+            wideScroll.contentView.scroll(to: NSPoint(x: maxX, y: 0))
+            wideScroll.reflectScrolledClipView(wideScroll.contentView)
+            try await Task.sleep(for: .milliseconds(250))
+            try capture("end")
+        }
+        print("Table fade preview passed: real chat window, table selection, and light/dark start, mid, and end states")
+    }
+
     static func sourcesPreview() async throws {
         precondition(ChatSourceTextView.badgeLabel(name: "Cognition", count: 2) == "Cognition +1")
         precondition(ChatSourceTextView.badgeLabel(name: "Kimi", count: 4) == "Kimi +3")
@@ -163,7 +392,10 @@ enum AgentReplyRegression {
                 if let text = node as? ChatSourceTextView, let storage = text.textStorage {
                     var firstSource: Int?
                     storage.enumerateAttribute(.attachment, in: NSRange(location: 0, length: storage.length)) { value, range, _ in
-                        guard value is NSTextAttachment else { return }
+                        guard let attachment = value as? NSTextAttachment,
+                              storage.attribute(.chatSelectionText, at: range.location, effectiveRange: nil) == nil else { return }
+                        precondition(attachment.image == nil && attachment.attachmentCell != nil,
+                                     "Source badge must draw via vector attachment cell rather than resampled NSImage")
                         if sourceText == nil { sourceText = text }
                         badges += 1
                         if firstSource == nil { firstSource = range.location }
@@ -209,6 +441,8 @@ enum AgentReplyRegression {
                     try bitmap.representation(using: .png, properties: [:])!.write(to: URL(filePath: "build/source-card-" + name + ".png"))
                 }
                 text.preview?.close()
+                precondition(text.textView(text, willDisplayToolTip: "https://devin.ai/", forCharacterAt: linkRange.location) == nil,
+                             "Source tag must suppress the default raw URL tooltip")
                 precondition(text.textView(text, clickedOnLink: URL(string: "https://devin.ai/")!, at: linkRange.location),
                              "Clicking a grouped source tag opens its list rather than navigating to the first URL")
                 precondition(text.preview?.isShown == true)
@@ -216,17 +450,29 @@ enum AgentReplyRegression {
             }
 
         }
+        let sampleFavicon: Data = {
+            let image = NSImage(size: NSSize(width: 28, height: 28), flipped: false) { rect in
+                NSColor.systemBlue.setFill()
+                NSBezierPath(roundedRect: rect, xRadius: 6, yRadius: 6).fill()
+                NSColor.white.setFill()
+                NSBezierPath(ovalIn: rect.insetBy(dx: 7, dy: 7)).fill()
+                return true
+            }
+            let tiff = image.tiffRepresentation!
+            return NSBitmapImageRep(data: tiff)!.representation(using: .png, properties: [:])!
+        }()
         let kimi = URL(string: "https://platform.kimi.com/")!
+        let kr = URL(string: "https://m.36kr.com/p/4024942758268804")!
         for (name, scheme) in [("light", ColorScheme.light), ("dark", .dark)] {
             let rows = ChatSourcePreview(sources: [kimi], metadata: [kimi: .init(
-                title: "Kimi K3.1 Pro - Kimi API 开放平台", siteName: "Kimi API 开放平台")])
+                title: "Kimi K3.1 Pro - Kimi API 开放平台", siteName: "Kimi API 开放平台", favicon: sampleFavicon)])
                 .environment(\.colorScheme, scheme)
             let size = SurfacePanel.fittingSize(of: rows, maxWidth: ChatSourcePreview.width)
             precondition(size.width == 300 && size.height < 76, "Single-source card should remain compact")
             let host = NSHostingView(rootView: rows)
             host.frame = NSRect(origin: .zero, size: size)
             window.appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
-            window.contentView = WindowSurface.glassContentView(host, cornerRadius: 12)
+            window.contentView = WindowSurface.glassContentView(host, cornerRadius: ChatSourcePreview.cornerRadius)
             window.setContentSize(size)
             try await Task.sleep(for: .milliseconds(200))
             let surface = window.contentView!
@@ -235,6 +481,24 @@ enum AgentReplyRegression {
             surface.cacheDisplay(in: surface.bounds, to: bitmap)
             try bitmap.representation(using: .png, properties: [:])!.write(
                 to: URL(filePath: "build/source-card-kimi-" + name + ".png"))
+
+            // Also capture a two-item card showing favicon+siteName+title+date alongside a fallback globe icon.
+            let twoRows = ChatSourcePreview(sources: [kimi, kr], metadata: [
+                kimi: .init(title: "Kimi K3.1 Pro - Kimi API 开放平台", siteName: "Kimi API 开放平台", publishedAt: "2026-11-18", favicon: sampleFavicon),
+                kr: .init(title: "刚刚，谷歌Gemini 4 Argon上线，API价格限时五折-36氪", siteName: "36氪", publishedAt: "2026-11-19")
+            ]).environment(\.colorScheme, scheme)
+            let twoSize = SurfacePanel.fittingSize(of: twoRows, maxWidth: ChatSourcePreview.width)
+            let twoHost = NSHostingView(rootView: twoRows)
+            twoHost.frame = NSRect(origin: .zero, size: twoSize)
+            window.contentView = WindowSurface.glassContentView(twoHost, cornerRadius: ChatSourcePreview.cornerRadius)
+            window.setContentSize(twoSize)
+            try await Task.sleep(for: .milliseconds(200))
+            let twoSurface = window.contentView!
+            twoSurface.layoutSubtreeIfNeeded()
+            let twoBitmap = twoSurface.bitmapImageRepForCachingDisplay(in: twoSurface.bounds)!
+            twoSurface.cacheDisplay(in: twoSurface.bounds, to: twoBitmap)
+            try twoBitmap.representation(using: .png, properties: [:])!.write(
+                to: URL(filePath: "build/source-card-list-" + name + ".png"))
         }
         window.setContentSize(NSSize(width: 640, height: 440))
         let many = (0..<12).map { URL(string: "https://example.com/article/\($0)")! }
@@ -2054,6 +2318,10 @@ enum AgentReplyRegression {
         let app = try AppModel(root: root)
         if CommandLine.arguments.contains("--bubble-width-preview") {
             try await bubbleWidthPreview(app: app)
+            return
+        }
+        if CommandLine.arguments.contains("--table-fade-preview") {
+            try await tableFadePreview(app: app)
             return
         }
         try await reactionRegression(app: app, capture: CommandLine.arguments.contains("--reactions-preview"))
