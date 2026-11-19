@@ -688,6 +688,19 @@ server.serve_forever()
         #expect(system.contains(reminder))
         #expect(system.hasSuffix(reminder + "\n自定义人设。"))
     }
+
+    @Test func antiDefensiveDisclaimerGuidancePresentAcrossLayers() throws {
+        #expect(NativeAgentPrompt.defaultSystemPrompt.contains("直接为自己的判断负责"))
+        #expect(NativeAgentPrompt.defaultSystemPrompt.contains("我得先承认"))
+        #expect(NativeAgentPrompt.defaultSystemPrompt.contains("私密群聊"))
+        #expect(NativeAgentPrompt.defaultSystemPrompt.contains("不是查证结论"))
+        #expect(!NativeAgentPrompt.defaultSystemPrompt.contains("信息不全或不确定时坦白说不清楚"))
+        #expect(!NativeAgentPrompt.runtimeProtocolPrompt.contains("区分来源事实、推断和未核实内容"))
+        #expect(NativeAgentPrompt.runtimeProtocolPrompt.contains("这是判断不是结论"))
+        let reminder = try #require(NativeAgentPrompt.webSearchCapabilities(hasWebSearch: true))
+        #expect(reminder.contains("私密群聊"))
+        #expect(!reminder.contains("确实查不到时再坦白说明"))
+    }
 }
 
 private actor PromptBox {
