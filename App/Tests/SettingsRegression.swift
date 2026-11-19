@@ -116,6 +116,14 @@ enum SettingsRegression {
                     try await Task.sleep(for: .milliseconds(300))
                     let editor = promptEditor(in: window.contentView!)!
                     precondition(editor.string == NativeAgentPrompt.defaultSystemPrompt)
+                    if let host = editor.enclosingScrollView, let container = editor.textContainer,
+                       let layout = editor.layoutManager {
+                        layout.ensureLayout(for: container)
+                        let needed = layout.usedRect(for: container).height + editor.textContainerInset.height * 2
+                        precondition(!host.hasVerticalScroller, "Prompt editor must not show its own scroller")
+                        precondition(host.contentSize.height + 1 >= needed,
+                                     "Prompt editor must expand to full text height (\(host.contentSize.height) < \(needed))")
+                    }
                     let collapseButton = button(titled: NSLocalizedString("收起", comment: ""), in: window.contentView!)
                     precondition(collapseButton != nil)
                     let saveButton = button(titled: NSLocalizedString("保存", comment: ""), in: window.contentView!)!
@@ -160,6 +168,14 @@ enum SettingsRegression {
                     precondition(model.settings.agentSystemPrompt == nil)
                     precondition(!model.settings.hasCustomAgentSystemPrompt)
                     precondition(editor.string == NativeAgentPrompt.defaultSystemPrompt)
+                    if let host = editor.enclosingScrollView, let container = editor.textContainer,
+                       let layout = editor.layoutManager {
+                        layout.ensureLayout(for: container)
+                        let needed = layout.usedRect(for: container).height + editor.textContainerInset.height * 2
+                        precondition(!host.hasVerticalScroller, "Prompt editor must not show its own scroller")
+                        precondition(host.contentSize.height + 1 >= needed,
+                                     "Prompt editor must expand to full text height (\(host.contentSize.height) < \(needed))")
+                    }
 
                     // Collapse hides editor again.
                     let collapse = button(titled: NSLocalizedString("收起", comment: ""), in: window.contentView!)!

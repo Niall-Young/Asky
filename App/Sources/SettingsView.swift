@@ -841,8 +841,9 @@ private struct AgentPromptSettings: View {
                 VStack(alignment: .leading, spacing: 12) {
                     SettingsMultilineTextEditor(text: $draft, isFocused: $editorFocused,
                                                 accessibilityLabel: NSLocalizedString("系统提示词", comment: ""),
-                                                accessibilityIdentifier: "agentSystemPromptEditor")
-                        .frame(height: 176)
+                                                accessibilityIdentifier: "agentSystemPromptEditor",
+                                                minHeight: 176)
+                        .fixedSize(horizontal: false, vertical: true)
                         .clipShape(RoundedRectangle(cornerRadius: 10))
                         .settingsInputChrome(scheme: scheme, focused: editorFocused, cornerRadius: 10)
                     if isDraftBlank {

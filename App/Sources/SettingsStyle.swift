@@ -615,6 +615,13 @@ private final class SettingsPromptTextView: NSTextView {
     }
 }
 
+/// Hosts the expanding prompt editor without scrolling itself; wheel events go to the Settings page.
+final class SettingsPassthroughScrollView: NSScrollView {
+    override func scrollWheel(with event: NSEvent) {
+        nextResponder?.scrollWheel(with: event)
+    }
+}
+
 /// Multi-line plain-text editor sharing the Settings translucent input surface.
 struct SettingsMultilineTextEditor: NSViewRepresentable {
     @Binding var text: String
@@ -626,11 +633,15 @@ struct SettingsMultilineTextEditor: NSViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
+    /// Shortest editor height; taller content expands the editor instead of scrolling inside it.
+    var minHeight: CGFloat = 120
+
     func makeNSView(context: Context) -> NSScrollView {
-        let scroll = NSScrollView()
+        let scroll = SettingsPassthroughScrollView()
         scroll.drawsBackground = false
         scroll.borderType = .noBorder
-        scroll.hasVerticalScroller = true
+        scroll.hasVerticalScroller = false
+        scroll.verticalScrollElasticity = .none
         scroll.hasHorizontalScroller = false
         scroll.autohidesScrollers = true
 
@@ -691,6 +702,24 @@ struct SettingsMultilineTextEditor: NSViewRepresentable {
                      refreshStorageAttributes: shouldReplace || (schemeChanged && !editor.hasMarkedText()))
     }
 
+    /// Sizes the editor to its full text height so the surrounding Settings page owns scrolling.
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView scroll: NSScrollView, context: Context) -> CGSize? {
+        guard let editor = scroll.documentView as? NSTextView,
+              let container = editor.textContainer,
+              let layout = editor.layoutManager else { return nil }
+        let width = proposal.width ?? scroll.frame.width
+        guard width.isFinite, width > 0 else { return nil }
+        if editor.string != text, !editor.hasMarkedText() {
+            applyStyling(to: editor, replacingText: true, refreshStorageAttributes: true)
+        }
+        let inset = editor.textContainerInset
+        container.containerSize = NSSize(width: max(width - inset.width * 2, 1),
+                                         height: CGFloat.greatestFiniteMagnitude)
+        layout.ensureLayout(for: container)
+        let contentHeight = ceil(layout.usedRect(for: container).height + inset.height * 2)
+        return CGSize(width: width, height: max(minHeight, contentHeight))
+    }
+
     private func applyStyling(to editor: NSTextView, replacingText: Bool, refreshStorageAttributes: Bool) {
         let font = NSFont.systemFont(ofSize: 14)
         let color = NSColor(ThemeColor.kText.color(for: colorScheme))
@@ -727,6 +756,11 @@ struct SettingsMultilineTextEditor: NSViewRepresentable {
         func textDidChange(_ notification: Notification) {
             guard let editor else { return }
             parent.text = editor.string
+            // Once SwiftUI has grown the editor, keep the caret visible in the outer Settings scroll.
+            DispatchQueue.main.async { [weak editor] in
+                guard let editor else { return }
+                editor.scrollRangeToVisible(editor.selectedRange())
+            }
         }
     }
 }
