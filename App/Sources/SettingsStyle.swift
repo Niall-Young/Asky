@@ -598,3 +598,135 @@ struct SettingsRadioGroup: NSViewRepresentable {
         @objc func choose(_ sender: NSButton) { selection.wrappedValue = sender.title }
     }
 }
+
+private final class SettingsPromptTextView: NSTextView {
+    var focusChanged: (Bool) -> Void = { _ in }
+
+    override func becomeFirstResponder() -> Bool {
+        let accepted = super.becomeFirstResponder()
+        if accepted { focusChanged(true) }
+        return accepted
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let accepted = super.resignFirstResponder()
+        if accepted { focusChanged(false) }
+        return accepted
+    }
+}
+
+/// Multi-line plain-text editor sharing the Settings translucent input surface.
+struct SettingsMultilineTextEditor: NSViewRepresentable {
+    @Binding var text: String
+    @Binding var isFocused: Bool
+    var accessibilityLabel: String
+    var accessibilityIdentifier: String = ""
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.isEnabled) private var enabled
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scroll = NSScrollView()
+        scroll.drawsBackground = false
+        scroll.borderType = .noBorder
+        scroll.hasVerticalScroller = true
+        scroll.hasHorizontalScroller = false
+        scroll.autohidesScrollers = true
+
+        let editor = SettingsPromptTextView()
+        editor.isRichText = false
+        editor.allowsUndo = true
+        editor.importsGraphics = false
+        editor.drawsBackground = false
+        editor.isAutomaticQuoteSubstitutionEnabled = false
+        editor.isAutomaticDashSubstitutionEnabled = false
+        editor.isAutomaticTextReplacementEnabled = false
+        editor.isAutomaticSpellingCorrectionEnabled = false
+        editor.isAutomaticLinkDetectionEnabled = false
+        editor.isAutomaticDataDetectionEnabled = false
+        editor.textContainerInset = NSSize(width: 8, height: 10)
+        editor.textContainer?.lineFragmentPadding = 4
+        editor.isVerticallyResizable = true
+        editor.isHorizontallyResizable = false
+        editor.autoresizingMask = [.width]
+        editor.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        editor.textContainer?.widthTracksTextView = true
+        editor.delegate = context.coordinator
+        editor.focusChanged = { [weak coordinator = context.coordinator] focused in
+            DispatchQueue.main.async { coordinator?.parent.isFocused = focused }
+        }
+        editor.setAccessibilityLabel(accessibilityLabel)
+        if !accessibilityIdentifier.isEmpty {
+            editor.setAccessibilityIdentifier(accessibilityIdentifier)
+        }
+
+        scroll.documentView = editor
+        context.coordinator.editor = editor
+        context.coordinator.lastColorScheme = colorScheme
+        applyStyling(to: editor, replacingText: true, refreshStorageAttributes: true)
+        return scroll
+    }
+
+    func updateNSView(_ scroll: NSScrollView, context: Context) {
+        guard let editor = scroll.documentView as? SettingsPromptTextView else { return }
+        context.coordinator.parent = self
+        editor.isEditable = enabled
+        editor.setAccessibilityLabel(accessibilityLabel)
+        if !accessibilityIdentifier.isEmpty {
+            editor.setAccessibilityIdentifier(accessibilityIdentifier)
+        }
+        let width = scroll.contentSize.width
+        let height = scroll.contentSize.height
+        if height > 0 {
+            editor.minSize = NSSize(width: 0, height: height)
+        }
+        if width > 0, abs(editor.frame.width - width) > 0.5 {
+            editor.setFrameSize(NSSize(width: width, height: max(height, editor.frame.height)))
+        }
+        let shouldReplace = editor.string != text && !editor.hasMarkedText()
+        let schemeChanged = context.coordinator.lastColorScheme != colorScheme
+        if schemeChanged { context.coordinator.lastColorScheme = colorScheme }
+        applyStyling(to: editor, replacingText: shouldReplace,
+                     refreshStorageAttributes: shouldReplace || (schemeChanged && !editor.hasMarkedText()))
+    }
+
+    private func applyStyling(to editor: NSTextView, replacingText: Bool, refreshStorageAttributes: Bool) {
+        let font = NSFont.systemFont(ofSize: 14)
+        let color = NSColor(ThemeColor.kText.color(for: colorScheme))
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineSpacing = 3
+        paragraph.paragraphSpacing = 6
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: color,
+            .paragraphStyle: paragraph
+        ]
+        editor.font = font
+        editor.textColor = color
+        editor.insertionPointColor = color
+        editor.defaultParagraphStyle = paragraph
+        editor.typingAttributes = attributes
+
+        if replacingText {
+            editor.string = text
+        }
+        if refreshStorageAttributes, let storage = editor.textStorage, storage.length > 0 {
+            let fullRange = NSRange(location: 0, length: storage.length)
+            storage.beginEditing()
+            storage.addAttributes(attributes, range: fullRange)
+            storage.endEditing()
+        }
+    }
+
+    @MainActor final class Coordinator: NSObject, NSTextViewDelegate {
+        var parent: SettingsMultilineTextEditor
+        weak var editor: NSTextView?
+        var lastColorScheme: ColorScheme?
+        init(_ parent: SettingsMultilineTextEditor) { self.parent = parent }
+        func textDidChange(_ notification: Notification) {
+            guard let editor else { return }
+            parent.text = editor.string
+        }
+    }
+}

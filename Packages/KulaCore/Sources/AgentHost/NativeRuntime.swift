@@ -38,6 +38,7 @@ private actor NativeAgentEngine {
     var config: RuntimeLaunchConfig?
     var tools: [ToolDefinition] = []
     var guidance: [String] = []
+    var systemPrompt: String?
     var maxToolCalls = 50
     var jobs: [String: Task<Void, Never>] = [:]
     var pending: [String: CheckedContinuation<JSONValue, Never>] = [:]
@@ -90,10 +91,10 @@ private actor NativeAgentEngine {
             case "prompt":
                 let request = try JSONDecoder().decode(AgentRequest.self, from: (value["request"] ?? [:]).canonicalData())
                 guard let config else { throw AgentHostError.notConfigured }
-                let catalogue = tools, guidance = guidance, limit = maxToolCalls
+                let catalogue = tools, guidance = guidance, systemPrompt = systemPrompt, limit = maxToolCalls
                 jobs[request.taskID] = Task {
                     await run(request, legacy: value["sessionFile"]?.stringValue, config: config,
-                              catalogue: catalogue, guidance: guidance, limit: limit)
+                              catalogue: catalogue, guidance: guidance, systemPrompt: systemPrompt, limit: limit)
                     jobs[request.taskID] = nil
                 }
             case "toolResult":
@@ -107,6 +108,7 @@ private actor NativeAgentEngine {
     func resources(_ value: JSONValue) throws {
         tools = try JSONDecoder().decode([ToolDefinition].self, from: (value["tools"] ?? []).canonicalData()).filter(\.agentExposable)
         guidance = value["pluginGuidance"]?.arrayValue?.compactMap(\.stringValue) ?? []
+        systemPrompt = value["systemPrompt"]?.stringValue
     }
     func cancel(_ id: String) {
         jobs[id]?.cancel()
@@ -121,7 +123,7 @@ private actor NativeAgentEngine {
         let active = Array(jobs.values)
         for id in Array(jobs.keys) { cancel(id) }
         for job in active { await job.value }
-        config = nil; tools = []; guidance = []
+        config = nil; tools = []; guidance = []; systemPrompt = nil
         stopped = true
         events.finish()
         exitWaiters.forEach { $0.resume(returning: 0) }; exitWaiters.removeAll()
@@ -154,7 +156,7 @@ private actor NativeAgentEngine {
             "tool": call["function"]?["name"] ?? "", "arguments": .object(params), "intent": "aiSuggested"], id: callID)
     }
 
-    func run(_ request: AgentRequest, legacy: String?, config: RuntimeLaunchConfig, catalogue: [ToolDefinition], guidance: [String], limit: Int) async {
+    func run(_ request: AgentRequest, legacy: String?, config: RuntimeLaunchConfig, catalogue: [ToolDefinition], guidance: [String], systemPrompt: String?, limit: Int) async {
         let id = request.taskID
         var messages: [JSONValue] = []
         var file: String?
@@ -164,7 +166,7 @@ private actor NativeAgentEngine {
             messages.append(["role": "user", "content": try await storage.input(request)])
             file = try await storage.save(sessionID: request.sessionID, messages: messages)
             state(id, .running, file: file)
-            let system: JSONValue = ["role": "system", "content": .string(NativeAgentPrompt.system(guidance: guidance))]
+            let system: JSONValue = ["role": "system", "content": .string(NativeAgentPrompt.system(basePrompt: systemPrompt, guidance: guidance))]
             let available = definitions(catalogue)
             let imageCapabilities = NativeAgentPrompt.imageCapabilities(
                 hasPageReader: catalogue.contains { $0.name == "web_read_page" })

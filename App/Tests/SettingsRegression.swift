@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import Adapters
+import AgentHost
 import DirectActions
 import LocalStore
 import Router
@@ -60,6 +61,114 @@ enum SettingsRegression {
                 let model = try AppModel(root: root)
                 if CommandLine.arguments.contains("--command-reset") {
                     try await assertCommandReset(model, root: root)
+                    exit(0)
+                }
+                if CommandLine.arguments.contains("--agent-prompt") {
+                    defer { try? FileManager.default.removeItem(at: root) }
+                    precondition(SettingsPage.data.title == NSLocalizedString("智能体", comment: ""))
+                    precondition(SettingsPage.data.iconAsset == "MingCute-brain")
+                    precondition(model.settings.agentSystemPrompt == nil)
+                    precondition(!model.settings.hasCustomAgentSystemPrompt)
+                    precondition(model.settings.effectiveAgentSystemPrompt == NativeAgentPrompt.defaultSystemPrompt)
+                    model.settingsTab = SettingsPage.data.rawValue
+                    let window = SettingsWindow.make(app: model)
+                    let presentation = WindowPresentation()
+                    presentation.show(window)
+                    try await Task.sleep(for: .milliseconds(350))
+
+                    @MainActor func allButtons(in view: NSView) -> [NSButton] {
+                        var result: [NSButton] = []
+                        if let button = view as? NSButton { result.append(button) }
+                        for child in view.subviews { result += allButtons(in: child) }
+                        return result
+                    }
+                    @MainActor func button(titled title: String, in view: NSView) -> NSButton? {
+                        allButtons(in: view).first { $0.title == title }
+                    }
+                    @MainActor func promptEditor(in view: NSView) -> NSTextView? {
+                        if let textView = view as? NSTextView,
+                           textView.accessibilityIdentifier() == "agentSystemPromptEditor" {
+                            return textView
+                        }
+                        return view.subviews.lazy.compactMap { promptEditor(in: $0) }.first
+                    }
+                    @MainActor func capture(_ name: String) throws {
+                        window.contentView?.layoutSubtreeIfNeeded()
+                        let view = window.contentView!
+                        guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { fatalError("capture") }
+                        view.cacheDisplay(in: view.bounds, to: bitmap)
+                        try bitmap.representation(using: .png, properties: [:])!.write(to: URL(filePath: "build/\(name).png"))
+                    }
+
+                    // Collapsed by default.
+                    precondition(promptEditor(in: window.contentView!) == nil, "Prompt editor must be collapsed by default")
+                    for appearance in ["light", "dark"] {
+                        model.preferences.appearance = appearance
+                        try await Task.sleep(for: .milliseconds(300))
+                        try capture("settings-agent-collapsed-\(appearance)")
+                    }
+                    model.preferences.appearance = "light"
+                    try await Task.sleep(for: .milliseconds(250))
+
+                    // Click 编辑 to expand below.
+                    let editButton = button(titled: NSLocalizedString("编辑", comment: ""), in: window.contentView!)!
+                    _ = editButton.sendAction(editButton.action, to: editButton.target)
+                    try await Task.sleep(for: .milliseconds(300))
+                    let editor = promptEditor(in: window.contentView!)!
+                    precondition(editor.string == NativeAgentPrompt.defaultSystemPrompt)
+                    let collapseButton = button(titled: NSLocalizedString("收起", comment: ""), in: window.contentView!)
+                    precondition(collapseButton != nil)
+                    let saveButton = button(titled: NSLocalizedString("保存", comment: ""), in: window.contentView!)!
+                    precondition(!saveButton.isEnabled, "Save must start disabled when unchanged")
+                    let restoreButton = button(titled: NSLocalizedString("恢复默认", comment: ""), in: window.contentView!)!
+                    precondition(!restoreButton.isEnabled, "Restore default must start disabled when using default")
+
+                    for appearance in ["light", "dark"] {
+                        model.preferences.appearance = appearance
+                        try await Task.sleep(for: .milliseconds(300))
+                        try capture("settings-agent-expanded-\(appearance)")
+                    }
+                    model.preferences.appearance = "light"
+                    try await Task.sleep(for: .milliseconds(250))
+
+                    // Blank prompt cannot be saved.
+                    editor.string = "   \n  "
+                    editor.didChangeText()
+                    try await Task.sleep(for: .milliseconds(150))
+                    precondition(!button(titled: NSLocalizedString("保存", comment: ""), in: window.contentView!)!.isEnabled)
+
+                    // Edit and save custom prompt.
+                    let customPrompt = "你是定制版 Asky，只用极简短句回复。"
+                    editor.string = customPrompt
+                    editor.didChangeText()
+                    try await Task.sleep(for: .milliseconds(150))
+                    let activeSave = button(titled: NSLocalizedString("保存", comment: ""), in: window.contentView!)!
+                    precondition(activeSave.isEnabled)
+                    _ = activeSave.sendAction(activeSave.action, to: activeSave.target)
+                    try await Task.sleep(for: .milliseconds(150))
+                    precondition(model.settings.agentSystemPrompt == customPrompt)
+                    precondition(model.settings.hasCustomAgentSystemPrompt)
+                    let reloaded = try AppModel(root: root)
+                    precondition(reloaded.settings.agentSystemPrompt == customPrompt)
+                    precondition(reloaded.settings.effectiveAgentSystemPrompt == customPrompt)
+
+                    // Restore default clears custom override.
+                    let activeRestore = button(titled: NSLocalizedString("恢复默认", comment: ""), in: window.contentView!)!
+                    precondition(activeRestore.isEnabled)
+                    _ = activeRestore.sendAction(activeRestore.action, to: activeRestore.target)
+                    try await Task.sleep(for: .milliseconds(150))
+                    precondition(model.settings.agentSystemPrompt == nil)
+                    precondition(!model.settings.hasCustomAgentSystemPrompt)
+                    precondition(editor.string == NativeAgentPrompt.defaultSystemPrompt)
+
+                    // Collapse hides editor again.
+                    let collapse = button(titled: NSLocalizedString("收起", comment: ""), in: window.contentView!)!
+                    _ = collapse.sendAction(collapse.action, to: collapse.target)
+                    try await Task.sleep(for: .milliseconds(300))
+                    precondition(promptEditor(in: window.contentView!) == nil, "Prompt editor must collapse on click")
+
+                    print("Agent prompt settings: default collapsed, expand, validation, persistence, restore default and collapse passed")
+                    window.close()
                     exit(0)
                 }
                 if CommandLine.arguments.contains("--conversation-retention") {

@@ -564,6 +564,71 @@ server.serve_forever()
         #expect(events.contains(.taskState(taskID: "t", .completed)))
         await agent.shutdown()
     }
+
+    @Test func customSystemPromptUpdatesLiveAndRevertsToDefault() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let script = ModelScript([NativeCompletion(text: "一"), NativeCompletion(text: "二"), NativeCompletion(text: "三"), NativeCompletion(text: "四")])
+        let promptBox = PromptBox()
+        let storage = AgentSessionStorage(root: root)
+        let agent = AgentHost(
+            launcher: { NativeRuntime(storage: storage, client: NativeModelClient(transport: { request, delta in try await script.respond(request, delta: delta) })) },
+            configProvider: { RuntimeLaunchConfig(baseURL: "https://example.test/v1", model: "mock", apiKey: "secret") },
+            toolsProvider: { [] },
+            guidanceProvider: { ["插件附加说明"] },
+            systemPromptProvider: { await promptBox.value },
+            toolHandler: { .failure($0.requestID, .adapterFailure, "unexpected tool") }
+        )
+
+        _ = await collect(agent, AgentRequest(sessionID: "s1", text: "第一轮"))
+        await promptBox.set("你是精简版个人助理。")
+        _ = await collect(agent, AgentRequest(sessionID: "s2", text: "第二轮"))
+        await promptBox.set("   \n  ")
+        _ = await collect(agent, AgentRequest(sessionID: "s3", text: "第三轮"))
+        await promptBox.set(nil)
+        _ = await collect(agent, AgentRequest(sessionID: "s4", text: "第四轮"))
+        await agent.shutdown()
+
+        let requests = await script.requests
+        try #require(requests.count == 4)
+        let systems = requests.compactMap { $0["messages"]?.arrayValue?.first?["content"]?.stringValue }
+        try #require(systems.count == 4)
+        let expectedDefault = NativeAgentPrompt.defaultSystemPrompt + "\n插件附加说明"
+        #expect(systems[0] == expectedDefault)
+        #expect(systems[1] == "你是精简版个人助理。\n插件附加说明")
+        #expect(systems[2] == expectedDefault)
+        #expect(systems[3] == expectedDefault)
+    }
+
+    @Test func webCitationGuidancePreservedAcrossFormattingAndTerminalImages() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        #expect(NativeAgentPrompt.defaultSystemPrompt.contains("渲染为来源标签"))
+        #expect(NativeAgentPrompt.defaultSystemPrompt.contains("不能只给配图附来源"))
+        let capabilities = try #require(NativeAgentPrompt.imageCapabilities(hasPageReader: true))
+        #expect(capabilities.contains("渲染为来源标签"))
+        #expect(capabilities.contains("不能只给配图附来源"))
+
+        let script = ModelScript([
+            NativeCompletion(calls: [call("web_read_page", ["imagesOnly": true])]),
+            NativeCompletion(text: "结论。[来源](https://example.com/article)")
+        ])
+        let definition = ToolDefinition(name: "web_read_page", summary: "read", source: .web, effect: .read, confirmation: .never, externallyExposable: false)
+        let agent = host(root: root, script: script, tools: [definition]) { request in
+            ExecutionResult(requestID: request.requestID, status: .completed, output: ["images": []])
+        }
+        _ = await collect(agent, AgentRequest(sessionID: "s", text: "比较几个模型"))
+        await agent.shutdown()
+
+        let finalMessages = try #require(await script.requests.last?["messages"]?.arrayValue)
+        let tailSystems = finalMessages.compactMap { $0["role"] == "system" ? $0["content"]?.stringValue : nil }.dropFirst()
+        #expect(tailSystems.contains { $0.contains("imagesOnly") && $0.contains("不能只给配图附来源") && $0.contains("[来源](url)") })
+    }
+}
+
+private actor PromptBox {
+    var value: String?
+    func set(_ next: String?) { value = next }
 }
 
 private actor WebOverlapProbe {

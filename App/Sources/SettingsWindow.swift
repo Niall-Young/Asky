@@ -14,7 +14,7 @@ enum SettingsPage: String, CaseIterable, Identifiable {
         case .general: NSLocalizedString("通用", comment: "")
         case .model: NSLocalizedString("模型配置", comment: "")
         case .mcp: "MCP"
-        case .data: NSLocalizedString("数据管理", comment: "")
+        case .data: NSLocalizedString("智能体", comment: "")
         case .hotkey: NSLocalizedString("触发快捷键", comment: "")
         case .aliases: NSLocalizedString("别名与快捷指令", comment: "")
         case .keywords: NSLocalizedString("指令", comment: "")
@@ -33,7 +33,7 @@ enum SettingsPage: String, CaseIterable, Identifiable {
         case .general: "gearshape"
         case .model: "sparkles"
         case .mcp: "link"
-        case .data: "externaldrive.badge.checkmark"
+        case .data: "brain"
         case .hotkey: "keyboard"
         case .aliases: "command"
         case .keywords: "command.square"
@@ -48,7 +48,7 @@ enum SettingsPage: String, CaseIterable, Identifiable {
     var iconAsset: String {
         switch self {
         case .mcp: "MingCute-link"
-        case .data: "MingCute-storage"
+        case .data: "MingCute-brain"
         default: "Settings-" + rawValue
         }
     }
@@ -252,7 +252,7 @@ private struct SettingsSidebar: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 sidebarGroup("Settings", pages: [.general, .search, .clipboard, .hotkey, .permissions])
-                sidebarGroup("智能配置", pages: [.model, .mcp, .data, .sources])
+                sidebarGroup("智能配置", pages: [.model, .data, .sources, .mcp])
                 sidebarGroup("Tools", pages: [.aliases, .keywords, .terminal, .plugins])
                 sidebarGroup("Others", pages: [.about, .author])
             }

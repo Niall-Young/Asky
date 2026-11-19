@@ -3,6 +3,7 @@ import Carbon.HIToolbox
 import Contracts
 import LocalStore
 import DirectActions
+import AgentHost
 import Memory
 import MCPGateway
 import Adapters
@@ -23,6 +24,7 @@ struct SettingsView: View {
             case .data: SettingsForm {
                 ConversationHistorySettings(app: app)
                 MemorySettings(app: app)
+                AgentPromptSettings(app: app)
             }
             case .hotkey: HotKeySettings(app: app)
             case .aliases: AliasSettings(app: app)
@@ -762,6 +764,140 @@ private struct MemorySettings: View {
             }
             .buttonStyle(.plain)
         }
+    }
+}
+
+// MARK: Agent Prompt
+
+private struct AgentPromptSettings: View {
+    @Bindable var app: AppModel
+    @State private var isEditing = false
+    @State private var draft = ""
+    @State private var loadedDraft = false
+    @State private var editorFocused = false
+    @State private var saved = false
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var savedPrompt: String {
+        app.settings.effectiveAgentSystemPrompt
+    }
+
+    private var hasUnsavedChanges: Bool {
+        loadedDraft && draft != savedPrompt
+    }
+
+    private var isDraftBlank: Bool {
+        draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var canSave: Bool {
+        hasUnsavedChanges && !isDraftBlank
+    }
+
+    private var canRestoreDefault: Bool {
+        app.settings.hasCustomAgentSystemPrompt || (loadedDraft && draft != NativeAgentPrompt.defaultSystemPrompt)
+    }
+
+    private var statusText: String {
+        if hasUnsavedChanges { return NSLocalizedString("有未保存的更改", comment: "") }
+        return NSLocalizedString(app.settings.hasCustomAgentSystemPrompt ? "已自定义" : "使用默认提示词", comment: "")
+    }
+
+    var body: some View {
+        Section(NSLocalizedString("提示词", comment: "")) {
+            LabeledContent {
+                SettingsButton(NSLocalizedString(isEditing ? "收起" : "编辑", comment: "")) {
+                    toggleEditing()
+                }
+            } label: {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(NSLocalizedString("系统提示词", comment: ""))
+                    Text(statusText)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .onAppear {
+                if !loadedDraft {
+                    draft = savedPrompt
+                    loadedDraft = true
+                }
+            }
+            .onChange(of: app.settings.agentSystemPrompt) { _, _ in
+                if !isEditing {
+                    draft = savedPrompt
+                    loadedDraft = true
+                }
+            }
+            .onChange(of: draft) { _, _ in
+                if saved && hasUnsavedChanges { saved = false }
+            }
+            .task(id: saved) {
+                guard saved else { return }
+                do { try await Task.sleep(for: .milliseconds(1500)); saved = false }
+                catch { }
+            }
+            if isEditing {
+                VStack(alignment: .leading, spacing: 12) {
+                    SettingsMultilineTextEditor(text: $draft, isFocused: $editorFocused,
+                                                accessibilityLabel: NSLocalizedString("系统提示词", comment: ""),
+                                                accessibilityIdentifier: "agentSystemPromptEditor")
+                        .frame(height: 176)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .settingsInputChrome(scheme: scheme, focused: editorFocused, cornerRadius: 10)
+                    if isDraftBlank {
+                        Text(NSLocalizedString("提示词不能为空", comment: ""))
+                            .font(.system(size: 12))
+                            .foregroundStyle(ThemeColor.kTextNegative)
+                    }
+                    HStack(spacing: 12) {
+                        SettingsButton(NSLocalizedString("恢复默认", comment: "")) {
+                            restoreDefault()
+                        }
+                        .disabled(!canRestoreDefault)
+                        Spacer()
+                        if hasUnsavedChanges {
+                            SettingsButton(NSLocalizedString("取消", comment: "")) {
+                                draft = savedPrompt
+                                saved = false
+                            }
+                        }
+                        SettingsButton(NSLocalizedString("保存", comment: ""), isComplete: saved) {
+                            save()
+                        }
+                        .disabled(!canSave || saved)
+                        .accessibilityLabel(saved ? NSLocalizedString("已保存", comment: "") : NSLocalizedString("保存", comment: ""))
+                    }
+                }
+            }
+        }
+    }
+
+    private func toggleEditing() {
+        if !isEditing, !hasUnsavedChanges {
+            draft = savedPrompt
+            loadedDraft = true
+        }
+        if reduceMotion {
+            isEditing.toggle()
+        } else {
+            withAnimation(.easeInOut(duration: 0.18)) {
+                isEditing.toggle()
+            }
+        }
+    }
+
+    private func save() {
+        guard canSave else { return }
+        app.settings.agentSystemPrompt = draft == NativeAgentPrompt.defaultSystemPrompt ? nil : draft
+        saved = true
+    }
+
+    private func restoreDefault() {
+        draft = NativeAgentPrompt.defaultSystemPrompt
+        loadedDraft = true
+        app.settings.agentSystemPrompt = nil
+        saved = false
     }
 }
 

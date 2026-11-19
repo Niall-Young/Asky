@@ -47,6 +47,8 @@ struct AppSettings: Codable, Equatable, Sendable {
     var messagesLookbackDays: Int?
     /// Global AI-conversation approval mode; nil (settings saved before this option) means auto review.
     var approvalMode: ApprovalMode?
+    /// User-edited AI system prompt; nil uses `NativeAgentPrompt.defaultSystemPrompt`.
+    var agentSystemPrompt: String?
 
     static let key = "app.settings"
     static let messagesLookbackChoices = [3, 7, 30]
@@ -58,6 +60,18 @@ struct AppSettings: Codable, Equatable, Sendable {
     var terminalCommandKeyword: String {
         terminalKeyword.flatMap { LauncherInputState.isValidTerminalKeyword($0) ? $0 : nil }
             ?? LauncherInputState.defaultTerminalKeyword
+    }
+
+    var effectiveAgentSystemPrompt: String {
+        agentSystemPrompt.flatMap {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0
+        } ?? NativeAgentPrompt.defaultSystemPrompt
+    }
+
+    var hasCustomAgentSystemPrompt: Bool {
+        guard let prompt = agentSystemPrompt,
+              !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        return prompt != NativeAgentPrompt.defaultSystemPrompt
     }
 }
 
@@ -374,7 +388,9 @@ final class AppModel {
             return RuntimeLaunchConfig(baseURL: cfg.baseURL.absoluteString, model: cfg.modelName, apiKey: key)
         }, toolsProvider: {
             await tools.definitions(for: .agent(sessionID: ""))
-        }, guidanceProvider: { await tools.plugins.guidance() }, toolHandler: { request in
+        }, guidanceProvider: { await tools.plugins.guidance() }, systemPromptProvider: {
+            SettingsReader(store: store).load().agentSystemPrompt
+        }, toolHandler: { request in
             await tools.submit(request)
         })
     }

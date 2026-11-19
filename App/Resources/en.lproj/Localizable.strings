@@ -938,7 +938,13 @@
 "撤销 MCP 授权" = "Revoke";
 
 "模型配置" = "Model Configuration";
-"数据管理" = "Data Management";
+"智能体" = "Agent";
+"提示词" = "Prompt";
+"系统提示词" = "System Prompt";
+"使用默认提示词" = "Using default prompt";
+"已自定义" = "Customized";
+"收起" = "Collapse";
+"提示词不能为空" = "Prompt cannot be empty.";
 
 /* Reply reference navigation */
 "查看原回复" = "View original reply";
