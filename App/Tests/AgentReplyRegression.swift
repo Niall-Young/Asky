@@ -1465,6 +1465,135 @@ enum AgentReplyRegression {
         print("Scroll stability passed: repeated scrolling, visible text, native older/newer buttons, reading anchor and latest jump")
     }
 
+    static func scrollPerfRegression(app: AppModel) async throws {
+        let store = ConversationStore(app.store)
+        let cid = try store.create(title: "Scroll perf")
+        for index in 0..<120 {
+            if index.isMultiple(of: 2) {
+                try store.append(conversationID: cid, role: "user", text: "第 \(index) 轮问题：请结合代码说明 SwiftUI 和 AppKit 混排时的渲染开销，以及需要注意哪些细节？")
+            } else {
+                let md = """
+                第 \(index) 轮分析如下：
+
+                - **主线程布局**：检查 `updateNSView` 和 `sizeThatFits` 是否在滚动时被重复调用。
+                - **图层合成**：检查 `CABackdropLayer` 与 `.glassEffect` 的合成面积。
+                - **追踪区域**：确认 `NSTrackingArea` 与 `.onHover` 是否触发额外重绘。
+
+                ```swift
+                func measure() -> Int {
+                    return \(index) * 2
+                }
+                ```
+
+                | 项目 | 指标 | 说明 |
+                | --- | --- | --- |
+                | 帧耗时 | < 8.3ms | 120Hz 目标 |
+                | 状态隔离 | 独立 Observable | 避免重建子树 |
+                """
+                try store.append(conversationID: cid, role: "assistant", text: md)
+            }
+        }
+        let model = AgentModel(app: app)
+        let controller = AgentWindowController(model: model, presentation: WindowPresentation())
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        controller.show()
+        let window = NSApplication.shared.windows.last { $0.title == "Asky AI" && $0.isVisible }!
+        window.makeKeyAndOrderFront(nil)
+        defer { window.orderOut(nil) }
+        try await Task.sleep(for: .milliseconds(800))
+        model.loadOlder()
+        try await Task.sleep(for: .milliseconds(500))
+        model.loadOlder()
+        try await Task.sleep(for: .milliseconds(1200))
+
+        func allViews(_ root: NSView) -> [NSView] {
+            [root] + root.subviews.flatMap(allViews)
+        }
+        func findScroll(_ view: NSView) -> NSScrollView? {
+            if let scroll = view as? NSScrollView, scroll.contentSize.height > 200 { return scroll }
+            return view.subviews.compactMap(findScroll).first
+        }
+        let scroll = findScroll(window.contentView!)!
+        let views = allViews(scroll)
+        let textViews = views.compactMap { $0 as? NSTextView }
+        let trackingAreas = views.reduce(0) { $0 + $1.trackingAreas.count }
+        print("PERF STATS: items=\(model.items.count), totalNSViews=\(views.count), textViews=\(textViews.count), trackingAreas=\(trackingAreas), docHeight=\(scroll.documentView!.bounds.height), startY=\(scroll.contentView.bounds.minY)")
+
+        // Measure main-thread tick jitter during active trackpad-style scroll events
+        var frameIntervals: [Double] = []
+        var eventDurationsMs: [Double] = []
+        var lastTick = ProcessInfo.processInfo.systemUptime
+        final class LinkObserver: NSObject {
+            var onTick: (() -> Void)?
+            @objc func step(_ link: CADisplayLink) { onTick?() }
+        }
+        let observer = LinkObserver()
+        observer.onTick = {
+            let now = ProcessInfo.processInfo.systemUptime
+            frameIntervals.append((now - lastTick) * 1000.0)
+            lastTick = now
+        }
+        let link = window.displayLink(target: observer, selector: #selector(LinkObserver.step(_:)))
+        link.add(to: .main, forMode: .common)
+        defer { link.invalidate() }
+
+        let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 900
+        let cgLocation = CGPoint(x: window.frame.midX, y: mainScreenHeight - window.frame.midY)
+        func makeWheel(dy: Double, phase: Int64, momentum: Int64 = 0) -> NSEvent {
+            let cg = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 2,
+                wheel1: Int32(dy), wheel2: 0, wheel3: 0)!
+            cg.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
+            cg.setDoubleValueField(.scrollWheelEventPointDeltaAxis1, value: dy)
+            cg.setDoubleValueField(.scrollWheelEventFixedPtDeltaAxis1, value: dy)
+            cg.setIntegerValueField(.scrollWheelEventScrollPhase, value: phase)
+            cg.setIntegerValueField(.scrollWheelEventMomentumPhase, value: momentum)
+            cg.location = cgLocation
+            cg.timestamp = DispatchTime.now().uptimeNanoseconds
+            return NSEvent(cgEvent: cg)!
+        }
+
+        let centerInWindow = NSPoint(x: window.contentView!.bounds.midX, y: window.contentView!.bounds.midY)
+        // Scroll up (positive dy) then down (negative dy) via hit-tested view inside scroll
+        for pass in 0..<4 {
+            let dy: Double = pass.isMultiple(of: 2) ? 45 : -45
+            if let target = scroll.contentView.hitTest(scroll.contentView.convert(centerInWindow, from: nil)) {
+                target.scrollWheel(with: makeWheel(dy: 0, phase: 128))
+            }
+            for i in 0..<80 {
+                let phase: Int64 = i == 0 ? 1 : (i == 79 ? 4 : 2)
+                let ev = makeWheel(dy: i == 79 ? 0 : dy, phase: phase)
+                let t0 = ProcessInfo.processInfo.systemUptime
+                if let target = scroll.contentView.hitTest(scroll.contentView.convert(centerInWindow, from: nil)) {
+                    target.scrollWheel(with: ev)
+                } else {
+                    scroll.scrollWheel(with: ev)
+                }
+                if let move = NSEvent.mouseEvent(with: .mouseMoved, location: centerInWindow, modifierFlags: [],
+                    timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                    context: nil, eventNumber: i + 1, clickCount: 0, pressure: 0) {
+                    window.sendEvent(move)
+                }
+                let dt = (ProcessInfo.processInfo.systemUptime - t0) * 1000.0
+                eventDurationsMs.append(dt)
+                try await Task.sleep(for: .milliseconds(8))
+            }
+            print("PERF PASS \(pass) endY=\(scroll.contentView.bounds.minY)")
+            try await Task.sleep(for: .milliseconds(250))
+        }
+        let sortedFrames = frameIntervals.dropFirst().sorted()
+        let p50Frame = sortedFrames[sortedFrames.count / 2]
+        let p95Frame = sortedFrames[Int(Double(sortedFrames.count) * 0.95)]
+        let maxFrame = sortedFrames.last ?? 0
+        let droppedOver16 = sortedFrames.filter { $0 > 16.7 }.count
+        let droppedOver33 = sortedFrames.filter { $0 > 33.3 }.count
+        let sortedEv = eventDurationsMs.sorted()
+        let p50Ev = sortedEv[sortedEv.count / 2]
+        let p95Ev = sortedEv[Int(Double(sortedEv.count) * 0.95)]
+        let maxEv = sortedEv.last ?? 0
+        print(String(format: "PERF RESULT: frames=%d, p50=%.2fms, p95=%.2fms, max=%.2fms, >16.7ms=%d, >33.3ms=%d | event p50=%.2fms, p95=%.2fms, max=%.2fms",
+                     sortedFrames.count, p50Frame, p95Frame, maxFrame, droppedOver16, droppedOver33, p50Ev, p95Ev, maxEv))
+    }
+
     static func restoredTranscriptRegression(app: AppModel) async throws {
         let store = ConversationStore(app.store)
         let cid = try store.create(title: "Restored transcript")
@@ -2366,6 +2495,10 @@ enum AgentReplyRegression {
         }
         if CommandLine.arguments.contains("--scroll-stability") {
             try await scrollStabilityRegression(app: app)
+            return
+        }
+        if CommandLine.arguments.contains("--scroll-perf") {
+            try await scrollPerfRegression(app: app)
             return
         }
         if CommandLine.arguments.contains("--restored-transcript") {

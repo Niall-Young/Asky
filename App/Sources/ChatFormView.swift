@@ -13,7 +13,7 @@ struct ChatReplyView: View {
         VStack(alignment: .leading, spacing: 16) {
             ForEach(ChatFormParser.parse(text, streaming: isStreaming)) { part in
                 switch part.content {
-                case .markdown(let text): ChatMarkdownView(text: text)
+                case .markdown(let text): ChatMarkdownView(text: text).equatable()
                 case .form(let form):
                     if !isStreaming { ChatFormView(form: form, values: values, active: active, submit: submit) }
                 }

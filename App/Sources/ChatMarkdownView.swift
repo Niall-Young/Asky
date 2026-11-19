@@ -5,10 +5,12 @@ import Theme
 import ToolService
 
 /// Shared by live replies and reopened history; the stored content remains Markdown source.
-struct ChatMarkdownView: View {
+struct ChatMarkdownView: View, Equatable {
     let text: String
     @State private var selectionGroup = ChatSelectionGroup()
     @Environment(\.colorScheme) private var colorScheme
+
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool { lhs.text == rhs.text }
 
     private static let bodyStyle = TextStyle(size: 14, weight: 400, mode: .default)
 
@@ -348,6 +350,60 @@ private struct ChatMarkdownTable<Content: View>: View {
     }
 }
 
+@MainActor
+private final class ChatTableScrollMonitor {
+    static let shared = ChatTableScrollMonitor()
+    private struct Entry { weak var observer: ChatTableScrollObserver.ObserverView? }
+    private var entries: [Entry] = []
+    private weak var activeObserver: ChatTableScrollObserver.ObserverView?
+    nonisolated(unsafe) private var monitor: Any?
+
+    func register(_ observer: ChatTableScrollObserver.ObserverView) {
+        entries.removeAll { $0.observer == nil || $0.observer === observer }
+        entries.append(Entry(observer: observer))
+        if monitor == nil {
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+                let consumed = MainActor.assumeIsolated {
+                    self?.handle(event) ?? false
+                }
+                return consumed ? nil : event
+            }
+        }
+    }
+
+    func unregister(_ observer: ChatTableScrollObserver.ObserverView) {
+        entries.removeAll { $0.observer == nil || $0.observer === observer }
+        if activeObserver === observer { activeObserver = nil }
+        if entries.isEmpty, let monitor {
+            NSEvent.removeMonitor(monitor)
+            self.monitor = nil
+        }
+    }
+
+    private func handle(_ event: NSEvent) -> Bool {
+        entries.removeAll { $0.observer == nil }
+        guard let window = event.window else { return false }
+        if let activeObserver, activeObserver.window === window, activeObserver.isTrackingHorizontal {
+            let consumed = activeObserver.consumeScrollEvent(event)
+            if !activeObserver.isTrackingHorizontal { self.activeObserver = nil }
+            if consumed { return true }
+        }
+        guard entries.contains(where: { $0.observer?.window === window }),
+              let hitView = window.contentView?.hitTest(event.locationInWindow) else {
+            return false
+        }
+        for entry in entries {
+            guard let observer = entry.observer, observer.window === window,
+                  let scroll = observer.enclosingScrollView,
+                  hitView.isDescendant(of: scroll) else { continue }
+            let consumed = observer.consumeScrollEvent(event, hitView: hitView)
+            activeObserver = observer.isTrackingHorizontal ? observer : nil
+            return consumed
+        }
+        return false
+    }
+}
+
 /// Observes the enclosing horizontal ScrollView so edge fades track overflow and horizontal gestures stay vertically steady.
 struct ChatTableScrollObserver: NSViewRepresentable {
     var onChange: (ChatTableScrollFade) -> Void
@@ -356,7 +412,7 @@ struct ChatTableScrollObserver: NSViewRepresentable {
 
     func updateNSView(_ view: ObserverView, context: Context) {
         view.onChange = onChange
-        view.scheduleUpdate()
+        if view.needsInitialAttach { view.scheduleUpdate() }
     }
 
     final class ObserverView: NSView {
@@ -365,7 +421,10 @@ struct ChatTableScrollObserver: NSViewRepresentable {
         private weak var observedDocument: NSView?
         private var updateScheduled = false
         private var axisLock = ChatTableScrollAxisLock()
-        nonisolated(unsafe) private var scrollMonitor: Any?
+        private var passingThroughVertical = false
+
+        var needsInitialAttach: Bool { observedScroll == nil }
+        var isTrackingHorizontal: Bool { axisLock.isTrackingHorizontal }
 
         override func viewWillMove(toWindow newWindow: NSWindow?) {
             if newWindow == nil { stopScrollMonitor() }
@@ -374,37 +433,26 @@ struct ChatTableScrollObserver: NSViewRepresentable {
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
-            if window != nil { startScrollMonitor() } else { stopScrollMonitor() }
+            if window != nil { ChatTableScrollMonitor.shared.register(self) }
+            else { stopScrollMonitor() }
             scheduleUpdate()
         }
 
         override func viewDidMoveToSuperview() { super.viewDidMoveToSuperview(); scheduleUpdate() }
         override func layout() { super.layout(); scheduleUpdate() }
 
-        private func startScrollMonitor() {
-            guard scrollMonitor == nil else { return }
-            scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
-                let consumed = MainActor.assumeIsolated {
-                    self?.consumeScrollEvent(event) ?? false
-                }
-                return consumed ? nil : event
-            }
-        }
-
         private func stopScrollMonitor() {
-            if let scrollMonitor {
-                NSEvent.removeMonitor(scrollMonitor)
-                self.scrollMonitor = nil
-            }
+            ChatTableScrollMonitor.shared.unregister(self)
             axisLock.reset()
+            passingThroughVertical = false
         }
 
         /// Strips unintentional vertical wobble during locked horizontal table scrolling so the outer transcript stays still.
         func consumeScrollEvent(_ event: NSEvent, hitView overrideHitView: NSView? = nil) -> Bool {
             guard let scroll = enclosingScrollView,
-                  let document = scroll.documentView,
-                  document.bounds.width > scroll.documentVisibleRect.width + 0.5 else {
+                  let document = scroll.documentView else {
                 axisLock.reset()
+                passingThroughVertical = false
                 return false
             }
             if overrideHitView == nil {
@@ -413,12 +461,24 @@ struct ChatTableScrollObserver: NSViewRepresentable {
             let startsNewGesture = event.phase.contains(.mayBegin)
                 || event.phase.contains(.began)
                 || (event.phase.isEmpty && event.momentumPhase.isEmpty)
-            if startsNewGesture || !axisLock.isTrackingHorizontal {
+            if startsNewGesture || (!axisLock.isTrackingHorizontal && !passingThroughVertical) {
                 let target = overrideHitView ?? window?.contentView?.hitTest(event.locationInWindow)
                 guard let target, target.isDescendant(of: scroll) else {
-                    if startsNewGesture { axisLock.reset() }
+                    if startsNewGesture {
+                        axisLock.reset()
+                        passingThroughVertical = false
+                    }
                     return false
                 }
+            }
+            if document.bounds.width <= scroll.documentVisibleRect.width + 0.5 {
+                axisLock.reset()
+                guard let outer = scroll.enclosingScrollView,
+                      abs(event.scrollingDeltaY) > abs(event.scrollingDeltaX) || abs(event.deltaY) > abs(event.deltaX) else {
+                    return false
+                }
+                outer.scrollWheel(with: event)
+                return true
             }
             let decision = axisLock.evaluate(
                 dx: event.scrollingDeltaX,
@@ -426,7 +486,20 @@ struct ChatTableScrollObserver: NSViewRepresentable {
                 phase: event.phase,
                 momentumPhase: event.momentumPhase
             )
-            guard decision == .lockHorizontal else { return false }
+            if decision == .passThrough {
+                if let outer = scroll.enclosingScrollView,
+                   (event.scrollingDeltaY != 0 || event.deltaY != 0 || passingThroughVertical) {
+                    if event.phase.contains(.ended) || event.phase.contains(.cancelled) || event.momentumPhase.contains(.ended) || event.momentumPhase.contains(.cancelled) {
+                        passingThroughVertical = false
+                    } else if event.scrollingDeltaY != 0 || event.deltaY != 0 {
+                        passingThroughVertical = true
+                    }
+                    outer.scrollWheel(with: event)
+                    return true
+                }
+                return false
+            }
+            passingThroughVertical = false
             guard event.scrollingDeltaY != 0 || event.deltaY != 0 else { return false }
             guard let horizontalOnly = Self.horizontalOnlyEvent(from: event) else { return false }
             scroll.scrollWheel(with: horizontalOnly)
@@ -480,7 +553,7 @@ struct ChatTableScrollObserver: NSViewRepresentable {
         }
 
         deinit {
-            if let scrollMonitor { NSEvent.removeMonitor(scrollMonitor) }
+            MainActor.assumeIsolated { ChatTableScrollMonitor.shared.unregister(self) }
             NotificationCenter.default.removeObserver(self)
         }
     }
@@ -658,10 +731,27 @@ private struct ChatInlineNativeText: NSViewRepresentable {
 
     @MainActor
     final class Measurement {
+        struct RenderKey: Equatable {
+            let content: AttributedString
+            let monospaced: Bool
+            let monospacedDigits: Bool
+            let weight: NSFont.Weight
+            let bullet: ChatListBullet?
+            let images: [URL: Data]
+            let sourceName: String?
+            let foreground: NSColor
+            let background: NSColor
+            let linkColor: NSColor
+        }
+
         let storage = NSTextStorage()
         let manager = NSLayoutManager()
         let container = NSTextContainer(size: .zero)
         private(set) var naturalWidth: CGFloat = 2
+        private(set) var monospacedWidth: CGFloat = 200
+        var lastRenderKey: RenderKey?
+        private var cachedWidth: CGFloat?
+        private var cachedHeight: CGFloat = 0
         private var cachedBullet: ChatListBullet?
         private var cachedBulletColor: NSColor?
         private var cachedBulletAttachment: NSTextAttachment?
@@ -683,18 +773,29 @@ private struct ChatInlineNativeText: NSViewRepresentable {
             return attachment
         }
 
-        func update(_ content: NSAttributedString) {
+        func update(_ content: NSAttributedString, monospaced: Bool) {
             guard !storage.isEqual(to: content) else { return }
             storage.setAttributedString(content)
+            cachedWidth = nil
             container.containerSize = NSSize(width: 100_000, height: CGFloat.greatestFiniteMagnitude)
             manager.ensureLayout(for: container)
             naturalWidth = ceil(manager.usedRect(for: container).width) + 2
+            if monospaced {
+                let font = NSFont.monospacedSystemFont(ofSize: 14, weight: .regular)
+                monospacedWidth = max(200, (content.string.components(separatedBy: "\n").map {
+                    ($0 as NSString).size(withAttributes: [.font: font]).width
+                }.max() ?? 200) + 2)
+            }
         }
 
         func height(for width: CGFloat) -> CGFloat {
+            if let cachedWidth, abs(cachedWidth - width) < 0.01 { return cachedHeight }
             container.containerSize = NSSize(width: width, height: .greatestFiniteMagnitude)
             manager.ensureLayout(for: container)
-            return ceil(manager.usedRect(for: container).height) + 4
+            let h = ceil(manager.usedRect(for: container).height) + 4
+            cachedWidth = width
+            cachedHeight = h
+            return h
         }
     }
 
@@ -722,9 +823,25 @@ private struct ChatInlineNativeText: NSViewRepresentable {
     }
 
     func updateNSView(_ view: NSTextView, context: Context) {
+        if let selectable = view as? ChatSelectableTextView {
+            selectable.quoteAction = quoteAction
+            selectable.selectionGroup = selectionGroup
+            selectionGroup?.register(selectable)
+            selectable.selectedTextAttributes = [.backgroundColor: NSColor(selectionColor).withAlphaComponent(0.45)]
+        }
+        view.linkTextAttributes = [.foregroundColor: linkColor, .underlineStyle: NSUnderlineStyle.single.rawValue]
+        let renderKey = Measurement.RenderKey(
+            content: content, monospaced: monospaced, monospacedDigits: monospacedDigits,
+            weight: weight, bullet: bullet, images: images, sourceName: sourceName,
+            foreground: foreground, background: background, linkColor: linkColor
+        )
+        guard context.coordinator.lastRenderKey != renderKey else { return }
+        context.coordinator.lastRenderKey = renderKey
+
         let result = NSMutableAttributedString()
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineSpacing = TextStyle(size: 14, weight: 400, mode: .default).lineHeight - 14 * 1.2
+        var hasSources = false
         if let bullet {
             let attachment = context.coordinator.bulletAttachment(for: bullet, color: foreground)
             let fragment = NSMutableAttributedString(attachment: attachment)
@@ -798,6 +915,7 @@ private struct ChatInlineNativeText: NSViewRepresentable {
         }
         let sources = ChatSourceTextView.sources(in: content)
         if let first = sources.first {
+            hasSources = true
             result.append(NSAttributedString(string: " ", attributes: [.font: NSFont.systemFont(ofSize: 14)]))
             let name = sourceName?.trimmingCharacters(in: .whitespacesAndNewlines)
             let attachment = ChatSourceTextView.badgeAttachment(
@@ -808,14 +926,10 @@ private struct ChatInlineNativeText: NSViewRepresentable {
             result.append(fragment)
         }
         }
-        if let selectable = view as? ChatSelectableTextView {
-            selectable.quoteAction = quoteAction
-            selectable.selectionGroup = selectionGroup
-            selectionGroup?.register(selectable)
-            selectable.selectedTextAttributes = [.backgroundColor: NSColor(selectionColor).withAlphaComponent(0.45)]
+        if let sourceView = view as? ChatSourceTextView {
+            sourceView.hasSourceBadges = hasSources
         }
-        view.linkTextAttributes = [.foregroundColor: linkColor, .underlineStyle: NSUnderlineStyle.single.rawValue]
-        context.coordinator.update(result)
+        context.coordinator.update(result, monospaced: monospaced)
         if view.textStorage?.isEqual(to: result) != true { view.textStorage?.setAttributedString(result) }
     }
 
@@ -828,9 +942,7 @@ private struct ChatInlineNativeText: NSViewRepresentable {
         }
         let proposedWidth: CGFloat?
         if monospaced {
-            proposedWidth = max(200, (view.string.components(separatedBy: "\n").map {
-                ($0 as NSString).size(withAttributes: [.font: NSFont.monospacedSystemFont(ofSize: 14, weight: .regular)]).width
-            }.max() ?? 200) + 2)
+            proposedWidth = context.coordinator.monospacedWidth
         } else if shrinkToFit {
             // Never measure natural width with the live NSTextView's layout manager:
             // AppKit can retain its rendered line width and add the 2 pt inset again
