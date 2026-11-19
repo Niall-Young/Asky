@@ -11,7 +11,3 @@
 
 ## 未运行
 - 未在新构建的实际窗口中目视确认悬停与按压效果，需要人工检查。
-
-## 追加：局部光斑（2026-11-19 17:56）
-- 用户反馈整行平铺提亮像“容器”，范围过大。`GlassRowButtonStyle` 改为跟随指针的径向光斑（固定半径 56 pt，悬停 0.08、按下 0.20，`plusLighter`，按行圆角裁剪），对齐顶部胶囊 `GlassCapsuleIllumination` 的局部提亮。
-- 重新运行 `xcodegen generate` 与 Debug `xcodebuild`：BUILD SUCCEEDED。未在实际窗口目视确认。
