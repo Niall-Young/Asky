@@ -26,9 +26,10 @@ enum NativeWebContext {
                 webIndices.insert(index)
             }
         }
-        let count = webIndices.count
-        guard count > 0 else { return messages }
-        let allowance = min(perResultBudget, proseBudget / count)
+        guard !webIndices.isEmpty else { return messages }
+        // Allocate prose budget sequentially so earlier web tool results never mutate
+        // when subsequent web calls arrive in the same turn, preserving prompt prefix cache.
+        var remainingBudget = proseBudget
         return messages.enumerated().map { index, message in
             guard webIndices.contains(index),
                   let content = message["content"]?.stringValue,
@@ -36,21 +37,38 @@ enum NativeWebContext {
                   var output = result["output"]?.objectValue,
                   var projected = message.objectValue else { return message }
             var changed = false
-            if let text = output["text"]?.stringValue, text.utf8.count > allowance {
-                output["text"] = .string(prefix(text, bytes: allowance))
-                output["truncated"] = true
-                changed = true
+            var resultAllowance = min(perResultBudget, remainingBudget)
+            if let text = output["text"]?.stringValue {
+                if text.utf8.count > resultAllowance {
+                    let kept = prefix(text, bytes: resultAllowance)
+                    output["text"] = .string(kept)
+                    output["truncated"] = true
+                    changed = true
+                    remainingBudget = max(0, remainingBudget - kept.utf8.count)
+                    resultAllowance = max(0, resultAllowance - kept.utf8.count)
+                } else {
+                    remainingBudget = max(0, remainingBudget - text.utf8.count)
+                    resultAllowance = max(0, resultAllowance - text.utf8.count)
+                }
             }
             if let rows = output["results"]?.arrayValue, !rows.isEmpty {
-                let perRow = allowance / rows.count
+                let perRow = resultAllowance / rows.count
+                var keptSnippetsBytes = 0
                 output["results"] = .array(rows.map { row in
-                    guard var fields = row.objectValue, let text = fields["snippet"]?.stringValue,
-                          text.utf8.count > perRow else { return row }
-                    fields["snippet"] = .string(prefix(text, bytes: perRow))
-                    fields["truncated"] = true
-                    changed = true
-                    return .object(fields)
+                    guard var fields = row.objectValue, let text = fields["snippet"]?.stringValue else { return row }
+                    if text.utf8.count > perRow {
+                        let kept = prefix(text, bytes: perRow)
+                        fields["snippet"] = .string(kept)
+                        fields["truncated"] = true
+                        changed = true
+                        keptSnippetsBytes += kept.utf8.count
+                        return .object(fields)
+                    } else {
+                        keptSnippetsBytes += text.utf8.count
+                        return row
+                    }
                 })
+                remainingBudget = max(0, remainingBudget - keptSnippetsBytes)
             }
             guard changed else { return message }
             output["contextTruncated"] = true

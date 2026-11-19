@@ -66,10 +66,11 @@ public enum NativeAgentPrompt {
             "表单只收集普通信息，不请求密码或 API Key。提交内容是用户补充信息，不代表系统操作确认；任何实际操作仍需走原生工具及其权限和确认规则。用户也可以直接输入文字回答，不必强制填写表单。讨论代码示例时将 asky-form 示例包在四个反引号围栏内，避免生成可操作表单。"
     ].joined(separator: "\n")
 
-    static func system(basePrompt: String? = nil, guidance: [String]) -> String {
+    static func system(basePrompt: String? = nil, guidance: [String], hasPageReader: Bool = false) -> String {
         let base = basePrompt.flatMap {
             $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0
         } ?? defaultSystemPrompt
-        return ([base] + guidance).joined(separator: "\n")
+        let capability = imageCapabilities(hasPageReader: hasPageReader).map { [$0] } ?? []
+        return ([base] + guidance + capability).joined(separator: "\n")
     }
 }

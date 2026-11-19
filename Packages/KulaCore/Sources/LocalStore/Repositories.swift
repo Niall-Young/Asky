@@ -356,6 +356,72 @@ public struct ConversationStore: Sendable {
         return rows.reversed().map(Self.decode)
     }
 
+    public static let historyAnchorSettingKey = "agent.historyAnchorMessageID"
+
+    /// UTF-8 byte cost used to bound history context snippets.
+    public static func contextByteCount(_ message: StoredMessage) -> Int {
+        message.text.utf8.count + MessageQuote.contextText(message.presentation?.quotes ?? []).utf8.count
+    }
+
+    /// Most recent user/assistant messages across the global timeline in chronological order.
+    public func recentDialogue(limit: Int = 80) -> [StoredMessage] {
+        let rows = (try? db.query("""
+            SELECT * FROM messages WHERE role IN ('user', 'assistant')
+            ORDER BY created_at DESC, id DESC LIMIT ?
+            """, [limit])) ?? []
+        return rows.reversed().map(Self.decode)
+    }
+
+    /// Chronological user/assistant messages starting at and including `anchor`.
+    public func dialogue(from anchor: StoredMessage, limit: Int = 200) -> [StoredMessage] {
+        let rows = (try? db.query("""
+            SELECT * FROM messages WHERE role IN ('user', 'assistant')
+              AND (created_at > ? OR (created_at = ? AND id >= ?))
+            ORDER BY created_at ASC, id ASC LIMIT ?
+            """, [anchor.createdAt, anchor.createdAt, anchor.id, limit])) ?? []
+        return rows.map(Self.decode)
+    }
+
+    /// Append-only history window for prompt prefix caching.
+    /// Keeps the starting anchor fixed across consecutive turns until the window exceeds `maxBytes`
+    /// or `maxMessages`, then rolls the anchor forward in one batch to leave headroom for future appends.
+    public func anchoredDialogue(
+        in store: LocalStore,
+        maxBytes: Int = 40_000,
+        rolloverBytes: Int = 20_000,
+        maxMessages: Int = 80,
+        rolloverMessages: Int = 40
+    ) -> [StoredMessage] {
+        if let anchorID = store.setting(Self.historyAnchorSettingKey),
+           let anchor = message(anchorID),
+           anchor.role == "user" || anchor.role == "assistant" {
+            let current = dialogue(from: anchor, limit: maxMessages + 1)
+            let bytes = current.reduce(0) { $0 + Self.contextByteCount($1) }
+            if !current.isEmpty, current.count <= maxMessages, bytes <= maxBytes {
+                return current
+            }
+        }
+        let recent = recentDialogue(limit: maxMessages)
+        var selected: [StoredMessage] = []
+        var bytes = 0
+        for item in recent.reversed() {
+            let size = Self.contextByteCount(item)
+            if selected.isEmpty {
+                guard size <= maxBytes else { continue }
+                selected.append(item)
+                bytes += size
+            } else if selected.count < rolloverMessages, bytes + size <= rolloverBytes {
+                selected.append(item)
+                bytes += size
+            } else {
+                break
+            }
+        }
+        selected.reverse()
+        store.setSetting(Self.historyAnchorSettingKey, selected.first?.id)
+        return selected
+    }
+
     /// Adjacent newer page, including presentation-only records, in transcript order.
     public func newerMessages(conversationID: String, afterSeq: Int, limit: Int) -> [StoredMessage] {
         ((try? db.query("SELECT * FROM messages WHERE conversation_id = ? AND seq > ? ORDER BY seq ASC LIMIT ?",

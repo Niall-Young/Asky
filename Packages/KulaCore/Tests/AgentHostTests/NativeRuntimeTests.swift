@@ -143,7 +143,8 @@ private func host(root: URL, script: ModelScript, tools: [ToolDefinition] = [],
         let events = await collect(agent, AgentRequest(sessionID: "s", text: "介绍珠峰"))
         #expect(events.filter { if case .toolCall = $0 { true } else { false } }.count == 1)
         #expect(events.contains { if case .message(_, good) = $0 { true } else { false } })
-        #expect(await script.requests.last?["tools"]?.arrayValue?.count == 1)
+        let requests = await script.requests
+        #expect(requests.first?["tools"] == requests.last?["tools"], "Tools stay frozen to preserve prompt cache")
         await agent.shutdown()
     }
 
@@ -183,7 +184,7 @@ private func host(root: URL, script: ModelScript, tools: [ToolDefinition] = [],
         let events = await collect(agent, AgentRequest(sessionID: "s", text: "比较这些景点"))
         #expect(events.filter { if case .toolCall = $0 { true } else { false } }.count == 2)
         let requests = await script.requests
-        #expect(requests[1]["tools"]?.arrayValue?.count == 1) // only ask_user remains
+        #expect(requests[1]["tools"] == requests[0]["tools"], "Tools stay frozen to preserve prompt cache")
         #expect(events.contains { if case .message(_, "文字资料支持的区别") = $0 { true } else { false } })
         await agent.shutdown()
     }
@@ -219,7 +220,7 @@ private func host(root: URL, script: ModelScript, tools: [ToolDefinition] = [],
         let events = await collect(agent, AgentRequest(sessionID: "s", text: "介绍"))
         #expect(events.filter { if case .toolCall = $0 { true } else { false } }.count == 1)
         let requests = await script.requests
-        #expect(requests[1]["tools"]?.arrayValue?.count == 1) // ask_user remains available
+        #expect(requests[1]["tools"] == requests[0]["tools"], "Tools stay frozen to preserve prompt cache")
         #expect(events.contains { if case .message(_, "已有资料") = $0 { true } else { false } })
         await agent.shutdown()
     }
@@ -339,16 +340,33 @@ private func host(root: URL, script: ModelScript, tools: [ToolDefinition] = [],
         #expect(requests.count == 2)
         for request in requests {
             let messages = try #require(request["messages"]?.arrayValue)
-            #expect(messages.filter { $0["role"] == "system" }.count == (hasPageReader ? 2 : 1))
-            if hasPageReader {
-                #expect(messages.last?["role"] == "system")
-                #expect(messages.last?["content"]?.stringValue?.contains("includeImages:true") == true)
-            }
+            #expect(messages.filter { $0["role"] == "system" }.count == 1)
+            #expect(messages.first?["role"] == "system")
+            let systemContent = try #require(messages.first?["content"]?.stringValue)
+            #expect(systemContent.contains("本轮能力核对：") == hasPageReader)
         }
+        #expect(requests[0]["messages"]?.arrayValue?.first == requests[1]["messages"]?.arrayValue?.first)
         let stored = try await AgentSessionStorage(root: root).load(sessionID: "s", legacyPath: nil)
         #expect(!stored.contains { $0["role"] == "system" })
         #expect(stored.last?["content"] == "回复")
         await agent.shutdown()
+    }
+
+    @Test func webProjectionPreservesEarlierResultsAcrossAppendedWebCalls() throws {
+        let longText = String(repeating: "网页正文片段。", count: 3_000)
+        func makeRound(_ id: String) -> [JSONValue] {
+            let output: JSONValue = ["status": "completed", "output": ["text": .string(longText), "url": .string("https://example.com/\(id)")]]
+            return [
+                NativeCompletion(calls: [call("web_read_page", id: id)]).message,
+                ["role": "tool", "tool_call_id": .string(id), "content": .string(String(decoding: output.canonicalData(), as: UTF8.self))]
+            ]
+        }
+        let firstFour = (0..<4).flatMap { makeRound("p\($0)") }
+        let projectedFour = NativeWebContext.messages(firstFour)
+        let withFifth = firstFour + makeRound("p4")
+        let projectedFive = NativeWebContext.messages(withFifth)
+        #expect(Array(projectedFive.prefix(projectedFour.count)) == projectedFour,
+                "Appending a fifth web tool result must not mutate earlier projected messages")
     }
 
     @Test func streamsReplyAndPublishesOnlyTheFinalMessage() async throws {
