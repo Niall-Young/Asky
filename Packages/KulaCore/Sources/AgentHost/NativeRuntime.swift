@@ -166,8 +166,9 @@ private actor NativeAgentEngine {
             messages.append(["role": "user", "content": try await storage.input(request)])
             file = try await storage.save(sessionID: request.sessionID, messages: messages)
             state(id, .running, file: file)
+            let hasWebSearch = catalogue.contains { $0.name == "web_search" }
             let hasPageReader = catalogue.contains { $0.name == "web_read_page" }
-            let system: JSONValue = ["role": "system", "content": .string(NativeAgentPrompt.system(basePrompt: systemPrompt, guidance: guidance, hasPageReader: hasPageReader))]
+            let system: JSONValue = ["role": "system", "content": .string(NativeAgentPrompt.system(basePrompt: systemPrompt, guidance: guidance, hasWebSearch: hasWebSearch, hasPageReader: hasPageReader))]
             let compactionSystem: JSONValue = ["role": "system", "content": .string(NativeAgentPrompt.system(basePrompt: systemPrompt, guidance: guidance))]
             let available = definitions(catalogue)
             var phase = ModelRequestPhase.initial

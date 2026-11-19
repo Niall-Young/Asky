@@ -659,6 +659,35 @@ server.serve_forever()
         let tailSystems = finalMessages.compactMap { $0["role"] == "system" ? $0["content"]?.stringValue : nil }.dropFirst()
         #expect(tailSystems.contains { $0.contains("imagesOnly") && $0.contains("不能只给配图附来源") && $0.contains("[来源](url)") })
     }
+
+    @Test func webSearchCapabilityInjectedOutsidePersona() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        #expect(!NativeAgentPrompt.defaultSystemPrompt.contains("web_search"))
+        #expect(NativeAgentPrompt.webSearchCapabilities(hasWebSearch: false) == nil)
+        let reminder = try #require(NativeAgentPrompt.webSearchCapabilities(hasWebSearch: true))
+        let assembled = NativeAgentPrompt.system(basePrompt: "自定义人设。", guidance: [], hasWebSearch: true)
+        #expect(assembled.contains(reminder))
+        #expect(assembled.hasSuffix(reminder + "\n自定义人设。"))
+
+        let script = ModelScript([NativeCompletion(text: "ok")])
+        let definition = ToolDefinition(name: "web_search", summary: "search", source: .web, effect: .read, confirmation: .never, externallyExposable: false)
+        let storage = AgentSessionStorage(root: root)
+        let agent = AgentHost(
+            launcher: { NativeRuntime(storage: storage, client: NativeModelClient(transport: { request, delta in try await script.respond(request, delta: delta) })) },
+            configProvider: { RuntimeLaunchConfig(baseURL: "https://example.test/v1", model: "mock", apiKey: "secret") },
+            toolsProvider: { [definition] },
+            guidanceProvider: { [] },
+            systemPromptProvider: { "自定义人设。" },
+            toolHandler: { ExecutionResult(requestID: $0.requestID, status: .completed) }
+        )
+        _ = await collect(agent, AgentRequest(sessionID: "s", text: "我觉得 6.2 反馈很差"))
+        await agent.shutdown()
+
+        let system = try #require(await script.requests.first?["messages"]?.arrayValue?.first?["content"]?.stringValue)
+        #expect(system.contains(reminder))
+        #expect(system.hasSuffix(reminder + "\n自定义人设。"))
+    }
 }
 
 private actor PromptBox {

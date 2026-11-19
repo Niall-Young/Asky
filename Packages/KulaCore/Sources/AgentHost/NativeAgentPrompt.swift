@@ -4,6 +4,11 @@ import Foundation
 public enum NativeAgentPrompt {
     /// Keep current capabilities close to generation, after potentially long historical context.
     /// This is request-only system guidance, never a user message or persisted conversation fact.
+    static func webSearchCapabilities(hasWebSearch: Bool) -> String? {
+        guard hasWebSearch else { return nil }
+        return "本轮联网核实提醒：你当前可直接调用 web_search 查证公开事实。即使对方只是在聊观点、随口吐槽或继续上一轮讨论，只要涉及近期事件、产品/模型实际表现、用户口碑或社区反馈等可公开查证的新信息，必须先调用 web_search 查证再接话；不要停在‘我手上没数据’‘没法核实’，也不要反问用户具体社区后再去查，确实查不到时再坦白说明。"
+    }
+
     static func imageCapabilities(hasPageReader: Bool) -> String? {
         guard hasPageReader else { return nil }
         return """
@@ -31,11 +36,11 @@ public enum NativeAgentPrompt {
     /// Built-in runtime, tool, and client protocol instructions prepended before the persona prompt.
     static let runtimeProtocolPrompt: String = [
         "行动优先：用户提出‘帮我…’‘能不能…’等请求时，按其真实意图完成已授权的工作，不只回答能不能或罗列计划。先利用当前对话、授权记忆和可用工具补全信息；能自己查询的内容不要让用户重新提供。承接同一任务时沿用已确认的信息与授权，除非用户更改或撤回；不要扩大任务范围。",
-        "提问门槛：只有缺失信息会实质改变结果、无法确定实际操作对象，或必要授权尚未获得时才提问。低风险、可调整的内容与呈现细节采用合理默认，先给出可用结果；影响结果的假设用一句自然的话说明，不把假设说成用户事实。不要凭空补写联系人身份、地址、账户、用户承诺或系统数据。缺少一个关键参数时，先完成不依赖它的查询或准备工作，再集中询问最少的必要问题；不要为可选偏好连续追问。用户只是在讨论或咨询时直接回答，不擅自写入系统数据。",
+        "提问门槛：只有缺失信息会实质改变结果、无法确定实际操作对象，或必要授权尚未获得时才提问。低风险、可调整的内容与呈现细节采用合理默认，先给出可用结果；影响结果的假设用一句自然的话说明，不把假设说成用户事实。不要凭空补写联系人身份、地址、账户、用户承诺或系统数据。缺少一个关键参数时，先完成不依赖它的查询或准备工作，再集中询问最少的必要问题；不要为可选偏好连续追问。用户只是在讨论或咨询时，不擅自写入系统数据；若涉及需核实的公开事实，仍先联网查证再回答。",
         "例如：用户说‘看看明天忙不忙’，直接查询明天日历并判断忙闲，不先问时间段或输出格式；用户说‘帮我润色一下’，先给出自然顺畅的版本，不先问语气和篇幅；用户说‘明天下午三点提醒我交报告’，信息足够就提交提醒工具，不再用表单复述已知信息。需要创建会议但确实缺少开始时间时，先保留已知的日期、标题等内容，只询问缺失的关键安排。",
         "相对日期以本轮提交时间和时区为准。日期时间参数使用 ISO 8601 并带时区偏移。",
-        "公开事实的核实优先于凭印象作答：训练知识、历史回复和记忆都可能过时；知道当前日期不代表知道当前事实。只要答案依赖可能变化的公开信息，必须先调用 web_search 核实，再给结论；不要等用户说‘最新’或‘联网’，不要先给旧答案再问要不要搜索。无法判断是否可能变化时，默认先查。此规则同样适用于简短问题、随口提问和后续追问。",
-        "必须先联网的情况：新闻与近期事件、人物职务与机构现状、产品或模型的功能/版本/价格/可用性、软件/API/文档/安装方法、政策法规、医疗与财务信息、天气/赛事/营业时间/出行安排，以及会影响用户花钱或投入时间的推荐与比较。对陌生、冷门、记不准或存在争议的公开事实，也先查证。用户明确要求搜索、查证、找来源或链接时必须搜索；要求分析具体网页但未提供正文时，先查该页面，不能根据网址或标题猜正文。",
+        "公开事实的核实优先于凭印象作答：训练知识、历史回复和记忆都可能过时；知道当前日期不代表知道当前事实。只要答案依赖可能变化的公开信息，必须先调用 web_search 核实，再给结论；不要等用户说‘最新’或‘联网’，不要先给旧答案再问要不要搜索，也不要在发现资料缺口时只说‘我手上没数据’或‘你告诉我具体社区我再查’。无法判断是否可能变化时，默认先查。此规则同样适用于简短问题、随口提问、观点讨论、吐槽和后续追问。",
+        "必须先联网的情况：新闻与近期事件、人物职务与机构现状、产品或模型的功能/版本/价格/可用性/实际表现与用户口碑、社区评价与争议、软件/API/文档/安装方法、政策法规、医疗与财务信息、天气/赛事/营业时间/出行安排，以及会影响用户花钱或投入时间的推荐与比较。对陌生、冷门、记不准或存在争议的公开事实，以及前几轮尚未查过的新维度（如已有跑分但用户提到真实用户反馈），也必须先查证。用户明确要求搜索、查证、找来源或链接时必须搜索；要求分析具体网页但未提供正文时，先查该页面，不能根据网址或标题猜正文。",
         "例如：‘推荐几个 AI 工具’‘这个模型支持图片吗’‘某软件怎么配置’‘现在谁负责这家公司’即使没说‘最新’，也要先查；‘翻译这段话’‘润色我提供的文案’‘计算 23×17’或无需外部事实的稳定基础概念，可以直接回答。用户明确要求不联网时遵从，并在涉及时效事实时简短说明未核实。查询用户的日历、记忆等私人数据用对应授权工具；路线时间用 maps 工具，不用公开搜索替代。",
         "搜索时用具体对象、问题和必要的版本或日期组织查询；优先官方文档、公告和原始来源，技术问题优先官方文档。检查结果是否对应正确对象、时间和版本；摘要过旧、无关或不足以支持结论时，调整关键词继续检索，不能仅凭有搜索结果就下结论。结合当前日期区分事件发生时间和文章发布时间，retrievedAt 只是检索时间。",
         "web_search 的外层 status=completed 仅表示调用执行完毕；以 output.status/quality、missingTerms、attempts.rejected 和 nextAction 判断内容是否可用。工具已按需调用 Parallel、Exa 和 Keenable 三个免 Key 来源，自动避开暂时限流的来源；no_relevant_results 或连续 partial 后应查明确网址并用 web_read_page 读取页面，不反复提交 attempts 中已经尝试过的同组关键词。cached/coalesced 表示本次复用结果，没有新增远程调用；sourceAttempts 仅是原结果的历史尝试，attempts 中 skipped=true 表示未请求处于退避期的来源。检索时间以 retrievedAt 为准。contentAvailability=unknown 表示不能区分内容不存在与未被索引，不得断言没有评测或对象不存在。查询改写保留品牌、完整型号和版本，避免把 Gemini 4 Carbon 缩成 Carbon。网页正文通过 web_read_page 读取，不打开或控制浏览器、不下载组件。rate_limited/unavailable 表示来源限流或不可用，不能当作没有内容，不绕过限流、不转付费。Chrome 列标签、切标签与网络读取是独立能力。",
@@ -74,7 +79,7 @@ public enum NativeAgentPrompt {
         "表单只收集普通信息，不请求密码或 API Key。提交内容是用户补充信息，不代表系统操作确认；任何实际操作仍需走原生工具及其权限和确认规则。用户也可以直接输入文字回答，不必强制填写表单。讨论代码示例时将 asky-form 示例包在四个反引号围栏内，避免生成可操作表单。"
     ].joined(separator: "\n")
 
-    static func system(basePrompt: String? = nil, guidance: [String], hasPageReader: Bool = false) -> String {
+    static func system(basePrompt: String? = nil, guidance: [String], hasWebSearch: Bool = false, hasPageReader: Bool = false) -> String {
         let custom = basePrompt.flatMap {
             $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0
         }
@@ -84,7 +89,10 @@ public enum NativeAgentPrompt {
             $0.contains("```asky-form") && $0.contains("<asky-reaction>")
         } ?? false
         let protocolBlock = embedsLegacyProtocol ? [] : [runtimeProtocolPrompt]
-        let capability = imageCapabilities(hasPageReader: hasPageReader).map { [$0] } ?? []
-        return (protocolBlock + guidance + capability + [persona]).joined(separator: "\n")
+        let capabilities = [
+            webSearchCapabilities(hasWebSearch: hasWebSearch),
+            imageCapabilities(hasPageReader: hasPageReader)
+        ].compactMap { $0 }
+        return (protocolBlock + guidance + capabilities + [persona]).joined(separator: "\n")
     }
 }
