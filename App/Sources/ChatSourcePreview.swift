@@ -62,6 +62,13 @@ final class ChatSourceTextView: ChatSelectableTextView, NSTextViewDelegate {
     private var sourceURL: URL?
     private var sourceTrackingArea: NSTrackingArea?
     private(set) var preview: ChatSourcePopover?
+    var hasSourceBadges = false {
+        didSet {
+            guard hasSourceBadges != oldValue else { return }
+            if !hasSourceBadges { cancelPendingHover() }
+            if window != nil { updateTrackingAreas() }
+        }
+    }
 
     static func isCitation(_ label: String) -> Bool {
         let label = label.trimmingCharacters(in: CharacterSet(charactersIn: "[]【】 "))
@@ -141,7 +148,11 @@ final class ChatSourceTextView: ChatSelectableTextView, NSTextViewDelegate {
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
-        if let sourceTrackingArea { removeTrackingArea(sourceTrackingArea) }
+        if let sourceTrackingArea {
+            removeTrackingArea(sourceTrackingArea)
+            self.sourceTrackingArea = nil
+        }
+        guard hasSourceBadges else { return }
         let area = NSTrackingArea(rect: .zero, options: [.cursorUpdate, .mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self)
         sourceTrackingArea = area
         addTrackingArea(area)
@@ -177,7 +188,7 @@ final class ChatSourceTextView: ChatSelectableTextView, NSTextViewDelegate {
     }
 
     override func cursorUpdate(with event: NSEvent) {
-        if source(at: event.locationInWindow) != nil { NSCursor.arrow.set() }
+        if hasSourceBadges, source(at: event.locationInWindow) != nil { NSCursor.arrow.set() }
         else { super.cursorUpdate(with: event) }
     }
 
@@ -189,6 +200,7 @@ final class ChatSourceTextView: ChatSelectableTextView, NSTextViewDelegate {
             return
         }
         super.mouseMoved(with: event)
+        guard hasSourceBadges else { return }
         cursorUpdate(with: event)
         guard let (index, sources) = source(at: event.locationInWindow), let url = sources.first else {
             cancelPendingHover(); return

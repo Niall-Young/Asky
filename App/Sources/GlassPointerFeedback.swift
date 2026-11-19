@@ -154,12 +154,16 @@ struct ActionArrowCursor: NSViewRepresentable {
             if let cursorTrackingArea { removeTrackingArea(cursorTrackingArea) }
             // SwiftUI's unclipped native backgrounds can have a visibleRect larger
             // than their bounds. Never let an action claim that surrounding text.
-            let area = NSTrackingArea(rect: bounds.intersection(visibleRect),
+            let activeRect = bounds.intersection(visibleRect)
+            let area = NSTrackingArea(rect: activeRect,
                 options: [.cursorUpdate, .mouseEnteredAndExited, .mouseMoved, .activeAlways],
                 owner: self, userInfo: nil)
             addTrackingArea(area)
             cursorTrackingArea = area
-            Self.refreshCursor()
+            if let window, window.isVisible, !activeRect.isEmpty,
+               activeRect.contains(convert(window.mouseLocationOutsideOfEventStream, from: nil)) {
+                Self.refreshCursor()
+            }
         }
 
         override func cursorUpdate(with event: NSEvent) { Self.refreshCursor() }
@@ -171,6 +175,7 @@ struct ActionArrowCursor: NSViewRepresentable {
             regions.removeAll { $0.view == nil }
             return regions.contains { entry in
                 guard let view = entry.view, view.window === window,
+                      !view.visibleRect.isEmpty,
                       !view.isHiddenOrHasHiddenAncestor else { return false }
                 return view.bounds.intersection(view.visibleRect).contains(view.convert(location, from: nil))
             }
