@@ -313,21 +313,22 @@ private final class ChatTableScrollFadeState {
 
 private struct ChatTableScrollFadeMask: View {
     let state: ChatTableScrollFadeState
+    // Size-only tracking: a GeometryReader in scroll content re-evaluates on every scroll frame.
+    @State private var width: CGFloat = 1
 
     var body: some View {
-        GeometryReader { geometry in
-            let width = max(1, geometry.size.width)
-            let fadeFraction = min(36, width * 0.2) / width
-            let fade = state.fade
-            LinearGradient(stops: [
-                .init(color: .black.opacity(1 - fade.leading), location: 0),
-                .init(color: .black.opacity(1 - fade.leading * 0.45), location: fadeFraction * 0.45),
-                .init(color: .black, location: fadeFraction),
-                .init(color: .black, location: 1 - fadeFraction),
-                .init(color: .black.opacity(1 - fade.trailing * 0.45), location: 1 - fadeFraction * 0.45),
-                .init(color: .black.opacity(1 - fade.trailing), location: 1)
-            ], startPoint: .leading, endPoint: .trailing)
-        }
+        let width = max(1, width)
+        let fadeFraction = min(36, width * 0.2) / width
+        let fade = state.fade
+        LinearGradient(stops: [
+            .init(color: .black.opacity(1 - fade.leading), location: 0),
+            .init(color: .black.opacity(1 - fade.leading * 0.45), location: fadeFraction * 0.45),
+            .init(color: .black, location: fadeFraction),
+            .init(color: .black, location: 1 - fadeFraction),
+            .init(color: .black.opacity(1 - fade.trailing * 0.45), location: 1 - fadeFraction * 0.45),
+            .init(color: .black.opacity(1 - fade.trailing), location: 1)
+        ], startPoint: .leading, endPoint: .trailing)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { self.width = $0 }
     }
 }
 

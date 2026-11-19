@@ -9,6 +9,7 @@ private struct GlassPointerFeedback<S: Shape>: ViewModifier {
     var illumination: Bool
     var scales: Bool = true
     @State private var hovered = false
+    @State private var size = CGSize.zero
     @Environment(\.isEnabled) private var enabled
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -24,12 +25,11 @@ private struct GlassPointerFeedback<S: Shape>: ViewModifier {
                         .accessibilityHidden(true)
                 }
             }
-            .visualEffect { effect, geometry in
-                // Desktop feedback is deliberately subtler than the touch reference.
-                // Cap both relative growth and the total increase of a wide capsule.
-                let growth = min(0.06, 3 / max(geometry.size.width, geometry.size.height, 1))
-                return effect.scaleEffect(active && animatesScale ? 1 + growth : 1)
-            }
+            // Desktop feedback is deliberately subtler than the touch reference.
+            // Cap both relative growth and the total increase of a wide capsule.
+            // Track size only: a visualEffect proxy also reruns on every scroll offset change.
+            .scaleEffect(active && animatesScale ? 1 + min(0.06, 3 / max(size.width, size.height, 1)) : 1)
+            .onGeometryChange(for: CGSize.self) { $0.size } action: { size = $0 }
             .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: hovered)
             .animation(reduceMotion ? nil : active
                        ? .easeOut(duration: 0.10)
