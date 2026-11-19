@@ -18,7 +18,7 @@ final class WindowPresentation: NSObject {
         }
     }
 
-    func show(_ window: NSWindow, afterActivation: Bool = false, level: NSWindow.Level = .normal) {
+    func show(_ window: NSWindow, level: NSWindow.Level = .normal) {
         if pendingWindow !== window { cancelPending() }
         window.level = level
         window.hidesOnDeactivate = false
@@ -26,18 +26,13 @@ final class WindowPresentation: NSObject {
         pendingWindow = window
         // Accessory-app activation needs an ordered window. Keep a newly opened
         // glass surface transparent until it has the active key appearance.
-        if afterActivation && !window.isVisible && pendingAlpha == nil {
+        if !window.isVisible && pendingAlpha == nil {
             pendingAlpha = window.alphaValue
             window.alphaValue = 0
+            window.orderFrontRegardless()
         }
-        window.orderFrontRegardless()
-        if afterActivation {
-            // This is an explicit user request to open chat. Cooperative
-            // activate() may be declined, leaving the prepared window invisible.
-            NSApp.activate(ignoringOtherApps: true)
-        } else {
-            NSApp.activate()
-        }
+        // An explicit foreground request must also work from accessory mode.
+        NSApp.activate(ignoringOtherApps: true)
         if NSApp.isActive { didBecomeActive() }
     }
 

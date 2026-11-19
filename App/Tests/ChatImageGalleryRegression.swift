@@ -84,7 +84,7 @@ struct ChatImageGalleryRegression {
         host.frame = NSRect(x: 0, y: 0, width: 500, height: 300)
         window.contentView = WindowSurface.glassContentView(host, cornerRadius: 16)
         let presentation = WindowPresentation()
-        presentation.show(window, afterActivation: true)
+        presentation.show(window)
         withExtendedLifetime((window, presentation)) { app.run() }
     }
 

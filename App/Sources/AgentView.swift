@@ -84,7 +84,7 @@ final class AgentWindowController {
 
     private func bringToFront() {
         guard let window else { return }
-        presentation.show(window, afterActivation: true, level: window.level)
+        presentation.show(window, level: window.level)
     }
 }
 

@@ -27,7 +27,7 @@ final class ContentPreviewWindow: NSWindowController, NSWindowDelegate {
         let window = self.window ?? makeWindow()
         window.title = label.isEmpty ? NSLocalizedString("图片预览", comment: "") : label
         install(PreviewImage(image: image, label: label), in: window)
-        presentation.show(window, afterActivation: true, level: level)
+        presentation.show(window, level: level)
     }
 
     func show(file: PreviewFile, label: String, from owner: NSPanel, shortcut: LauncherActionShortcut,

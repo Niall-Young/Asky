@@ -76,6 +76,7 @@ enum SettingsWindow {
         let window = SettingsEditingWindow(contentRect: NSRect(origin: .zero, size: initialSize),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                               backing: .buffered, defer: false)
+        window.animationBehavior = .none
         window.isOpaque = false
         window.backgroundColor = .clear
         window.contentViewController = controller

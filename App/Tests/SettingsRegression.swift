@@ -138,10 +138,10 @@ enum SettingsRegression {
                     model.settingsTab = "keywords"
                     let window = SettingsWindow.make(app: model)
                     window.isReleasedWhenClosed = false
+                    let presentation = WindowPresentation()
                     for appearance in ["light", "dark"] {
                         model.preferences.appearance = appearance
-                        NSApp.activate()
-                        window.makeKeyAndOrderFront(nil)
+                        presentation.show(window)
                         try await Task.sleep(for: .milliseconds(400))
                         try await assertSettingsChrome(window, appearance: appearance)
                     }
@@ -274,9 +274,31 @@ enum SettingsRegression {
                     dock.showDockIcon = model.preferences.showDockIcon
                     precondition(application.activationPolicy() == .accessory)
                     let window = SettingsWindow.make(app: model)
+                    window.isReleasedWhenClosed = false
                     let presentation = WindowPresentation()
-                    presentation.show(window)
-                    try await Task.sleep(for: .milliseconds(600))
+                    @MainActor func openAndCheckFocus() async throws {
+                        precondition(!window.isVisible, "Exercise opening a hidden settings window")
+                        let observer = NotificationCenter.default.addObserver(
+                            forName: NSWindow.didBecomeKeyNotification, object: window, queue: .main
+                        ) { _ in
+                            MainActor.assumeIsolated {
+                                precondition(window.alphaValue == 0, "Settings must acquire focus before being revealed")
+                            }
+                        }
+                        defer { NotificationCenter.default.removeObserver(observer) }
+                        presentation.show(window)
+                        precondition(window.alphaValue == 0 || (application.isActive && window.isKeyWindow))
+                        for _ in 0..<50 where !window.isKeyWindow || window.alphaValue == 0 {
+                            try await Task.sleep(for: .milliseconds(20))
+                        }
+                        precondition(application.isActive && window.isKeyWindow && window.alphaValue == 1)
+                    }
+                    application.deactivate()
+                    for _ in 0..<50 where application.isActive {
+                        try await Task.sleep(for: .milliseconds(20))
+                    }
+                    precondition(!application.isActive, "Exercise the first open from the background")
+                    try await openAndCheckFocus()
                     precondition(application.activationPolicy() == .accessory)
                     precondition(window.isVisible && window.isKeyWindow)
                     if let view = window.contentView,
@@ -290,8 +312,7 @@ enum SettingsRegression {
                     precondition(enabled)
                     window.close()
                     precondition(application.activationPolicy() == .regular)
-                    presentation.show(window)
-                    try await Task.sleep(for: .milliseconds(600))
+                    try await openAndCheckFocus()
                     precondition(application.activationPolicy() == .regular)
                     precondition(window.isVisible && window.isKeyWindow)
                     model.preferences.showDockIcon = false
