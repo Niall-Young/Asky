@@ -62,7 +62,7 @@ brew install --cask niall-young/asky/asky
 | --- | --- |
 | 快速搜索 | 菜单栏图标 / 自定义全局快捷键，`Return` 打开结果 |
 | 剪贴板历史 | `Ctrl + Shift + C`；`Return` 粘贴，`⌘ Return` 仅复制 |
-| 快速预览 | 在快速搜索或剪贴板历史中选中图片或单个 Markdown 文件，按 `Ctrl + 空格`；再按一次或按 `Esc` 关闭 |
+| 快速预览 | 在快速搜索或剪贴板历史中选中图片、Markdown 或单个文本文件（如 CSV、JSON、配置文件和源码），按 `Ctrl + 空格`；再按一次或按 `Esc` 关闭 |
 | AI 对话 | `Ctrl + Shift + /` |
 | 分类检索 | `app ` / `file ` / `ql ` / `sc `（应用 / 文件 / 快捷方式 / 快捷指令） |
 | 文件夹浏览 | 选中文件夹后按 `Tab` |
@@ -156,7 +156,7 @@ Or download the DMG from [Releases](https://github.com/Niall-Young/Asky/releases
 | --- | --- |
 | Quick search | Menu bar icon / custom global hotkey; `Return` to open a result |
 | Clipboard history | `Ctrl + Shift + C`; `Return` to paste, `⌘ Return` to copy |
-| Quick preview | Select an image or one Markdown file in Quick Search or Clipboard History and press `Ctrl + Space`. Press it again or press `Esc` to close. |
+| Quick preview | Select an image, Markdown document, or text file (such as CSV, JSON, configuration, or source code) in Quick Search or Clipboard History and press `Ctrl + Space`. Press it again or press `Esc` to close. |
 | AI conversation | `Ctrl + Shift + /` |
 | Category search | `app ` / `file ` / `ql ` / `sc ` (apps / files / quick links / shortcuts) |
 | Folder browsing | Select a folder and press `Tab` |

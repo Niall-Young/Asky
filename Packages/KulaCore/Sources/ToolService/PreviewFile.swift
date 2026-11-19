@@ -7,15 +7,17 @@ import UniformTypeIdentifiers
 public enum PreviewFile: Sendable {
     case image(URL)
     case markdown(URL)
+    case plainText(URL)
 
     public enum Content: Sendable {
         case image(CGImage)
         case markdown(String, directory: URL)
+        case plainText(String)
     }
 
     public var url: URL {
         switch self {
-        case .image(let url), .markdown(let url): url
+        case .image(let url), .markdown(let url), .plainText(let url): url
         }
     }
 
@@ -23,13 +25,32 @@ public enum PreviewFile: Sendable {
         (try? url.resolvingSymlinksInPath().resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
     }
 
+    // Cover common formats even when no installed app has registered their type.
+    private static let textExtensions: Set<String> = [
+        "txt", "log", "csv", "tsv", "json", "jsonc", "jsonl", "ndjson", "xml", "yaml", "yml",
+        "toml", "ini", "conf", "cfg", "properties", "env", "editorconfig", "diff", "patch",
+        "c", "h", "cc", "cpp", "hpp", "m", "mm", "swift", "java", "kt", "kts", "scala",
+        "cs", "go", "rs", "py", "rb", "php", "lua", "r", "sql", "sh", "bash", "zsh", "fish",
+        "html", "htm", "css", "scss", "sass", "less", "js", "jsx", "mjs", "cjs", "ts", "tsx",
+        "mts", "cts", "vue", "svelte", "dart", "proto", "graphql", "cmake"
+    ]
+    private static let textNames: Set<String> = [
+        "dockerfile", "containerfile", "makefile", "gemfile", "rakefile", "readme", "license",
+        ".env", ".gitignore", ".gitattributes", ".editorconfig", ".dockerignore", ".npmrc",
+        ".bashrc", ".zshrc", ".zprofile"
+    ]
+
     public init?(url: URL) {
         guard url.isFileURL else { return nil }
         let ext = url.pathExtension.lowercased()
+        let type = UTType(filenameExtension: ext)
         if ["md", "markdown", "mdown", "mkd", "mkdn", "mdwn"].contains(ext) {
             self = .markdown(url)
-        } else if UTType(filenameExtension: ext)?.conforms(to: .image) == true {
+        } else if type?.conforms(to: .image) == true {
             self = .image(url)
+        } else if Self.textExtensions.contains(ext) || Self.textNames.contains(url.lastPathComponent.lowercased())
+                    || type?.conforms(to: .plainText) == true || type?.conforms(to: .sourceCode) == true {
+            self = .plainText(url)
         } else {
             return nil
         }
@@ -60,7 +81,7 @@ public enum PreviewFile: Sendable {
                     throw CocoaError(.fileReadCorruptFile)
                 }
                 return .image(image)
-            case .markdown:
+            case .markdown, .plainText:
                 let limit = 2 * 1024 * 1024
                 let handle = try FileHandle(forReadingFrom: url)
                 defer { try? handle.close() }
@@ -68,10 +89,13 @@ public enum PreviewFile: Sendable {
                 guard data.count <= limit else { throw CocoaError(.fileReadTooLarge) }
                 let encoding: String.Encoding = data.starts(with: [0xFF, 0xFE]) || data.starts(with: [0xFE, 0xFF])
                     ? .utf16 : .utf8
-                guard let markdown = String(data: data, encoding: encoding) else {
+                guard let text = String(data: data, encoding: encoding), !text.utf8.contains(0) else {
                     throw CocoaError(.fileReadInapplicableStringEncoding)
                 }
-                return .markdown(markdown, directory: url.deletingLastPathComponent())
+                if case .markdown = self {
+                    return .markdown(text, directory: url.deletingLastPathComponent())
+                }
+                return .plainText(text)
             }
         }
     }

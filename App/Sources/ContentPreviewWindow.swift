@@ -181,6 +181,9 @@ private struct PreviewFileView: View {
                 PreviewImage(image: NSImage(cgImage: image, size: .zero), label: label)
             case .success(.markdown(let text, let directory)):
                 PreviewMarkdown(text: text, directory: directory)
+            case .success(.plainText(let text)):
+                PreviewPlainText(text: text)
+                    .padding(.top, 34)
             case .failure:
                 Text(NSLocalizedString("无法预览此文件", comment: ""))
             case nil:
@@ -221,6 +224,35 @@ private struct PreviewImage: View {
             .accessibilityLabel(label)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding(16).padding(.top, 28)
+    }
+}
+
+private struct PreviewPlainText: NSViewRepresentable {
+    let text: String
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scroll = NSTextView.scrollableTextView()
+        scroll.drawsBackground = false
+        scroll.hasHorizontalScroller = true
+        scroll.autohidesScrollers = true
+        let view = scroll.documentView as! NSTextView
+        view.drawsBackground = false
+        view.isEditable = false
+        view.isSelectable = true
+        view.isRichText = false
+        view.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
+        view.textColor = .labelColor
+        view.textContainerInset = NSSize(width: 19, height: 12)
+        view.isHorizontallyResizable = true
+        view.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        view.textContainer?.widthTracksTextView = false
+        view.textContainer?.containerSize = view.maxSize
+        return scroll
+    }
+
+    func updateNSView(_ scroll: NSScrollView, context: Context) {
+        guard let view = scroll.documentView as? NSTextView, view.string != text else { return }
+        view.string = text
     }
 }
 

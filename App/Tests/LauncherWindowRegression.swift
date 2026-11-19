@@ -124,11 +124,20 @@ enum LauncherWindowRegression {
         let markdown = root.appending(path: "Preview.MD")
         let image = root.appending(path: "Preview.png")
         let clipboardImage = root.appending(path: "clipboard.img")
-        let other = root.appending(path: "Preview.txt")
+        let other = root.appending(path: "Preview.zip")
+        let csv = root.appending(path: "Preview.csv")
+        let json = root.appending(path: "Preview.JSON")
+        let source = root.appending(path: "Preview.swift")
+        let csvText = "name,city\r\nAsky,上海\r\n"
+        let jsonText = "{\n  \"name\": \"Asky\"\n}"
+        let sourceText = "import Foundation\n\nfunc greet(_ name: String) -> String {\n    \"Hello, \\(name)\"\n}\n"
         let folder = root.appending(path: "Preview.folder.md", directoryHint: .isDirectory)
         let document = "# Project notes\n\n**Images** and Markdown share a preview.\n\n- One\n- Two\n\n![Example](Preview.png)\n\n```swift\nlet name = \"Asky\"\n```"
         try Data(document.utf8).write(to: markdown)
-        try Data("Unsupported plain text".utf8).write(to: other)
+        try Data([0x50, 0x4b, 0x03, 0x04]).write(to: other)
+        try Data(csvText.utf8).write(to: csv)
+        try jsonText.data(using: .utf16)!.write(to: json)
+        try Data(sourceText.utf8).write(to: source)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
         let bitmap = NSImage(size: NSSize(width: 320, height: 180), flipped: false) { frame in
             NSGradient(starting: .systemBlue, ending: .systemTeal)?.draw(in: frame, angle: 0)
@@ -213,8 +222,23 @@ enum LauncherWindowRegression {
             return preview
         }
 
+        func checkText(_ expected: String, in window: NSWindow) async throws {
+            func textView(in view: NSView) -> NSTextView? {
+                if let text = view as? NSTextView { return text }
+                return view.subviews.lazy.compactMap { textView(in: $0) }.first
+            }
+            for _ in 0..<30 {
+                if let content = window.contentView, let view = textView(in: content), view.string == expected {
+                    try require(view.isSelectable && !view.isEditable, "preview text is selectable and read-only")
+                    return
+                }
+                try await Task.sleep(for: .milliseconds(50))
+            }
+            try require(false, "the preview displays the original text of \(window.title)")
+        }
+
         func checkLauncherPreview() async throws {
-            let results = [markdown, image, other, folder].map { url in
+            let results = [markdown, image, csv, json, source, other, folder].map { url in
                 SearchResult(source: .file, target: TargetRef(kind: "file", identifier: url.path),
                              title: url.lastPathComponent, actions: [.open, .revealInFinder], score: 100)
             }
@@ -240,12 +264,15 @@ enum LauncherWindowRegression {
                 model.selection = index
             }
 
-            for url in [markdown, image] {
+            for url in [markdown, image, csv, json, source] {
                 try selectLauncherFile(url)
                 try require(model.secondaryActions.first?.title == "快速预览" &&
                             model.secondaryActions.first?.shortcut == "⌃ Space",
                             "supported files show Quick Preview first with its shortcut")
                 let preview = try await open(url.lastPathComponent, from: launcherPanel)
+                if let expected = [csv: csvText, json: jsonText, source: sourceText][url] {
+                    try await checkText(expected, in: preview)
+                }
                 key(53, [], in: preview)
                 try await Task.sleep(for: .milliseconds(100))
                 try require(!preview.isVisible && launcherPanel.isKeyWindow, "Escape restores the search field")
@@ -271,7 +298,7 @@ enum LauncherWindowRegression {
             try await Task.sleep(for: .milliseconds(100))
             try selectLauncherFile(other)
             key(35, [.control, .shift], in: launcherPanel)
-            try require(ContentPreviewWindow.quick.window?.isVisible == false, "plain files have no preview")
+            try require(ContentPreviewWindow.quick.window?.isVisible == false, "archives have no preview")
             for url in [other, folder] {
                 try selectLauncherFile(url)
                 try require(!model.secondaryActions.contains { $0.title == "快速预览" },
@@ -286,6 +313,7 @@ enum LauncherWindowRegression {
         let entries = [
             ClipboardItem(kind: .image, filePath: clipboardImage.path, byteSize: png.count, contentHash: "image"),
             ClipboardItem(kind: .file, text: markdown.lastPathComponent, filePaths: [markdown.path], byteSize: 1, contentHash: "markdown"),
+            ClipboardItem(kind: .file, text: csv.lastPathComponent, filePaths: [csv.path], byteSize: 1, contentHash: "csv"),
             ClipboardItem(kind: .file, text: "Multiple", filePaths: [image.path, markdown.path], byteSize: 1, contentHash: "multi"),
             ClipboardItem(kind: .text, text: "Clipboard text", byteSize: 14, contentHash: "text"),
             ClipboardItem(kind: .file, text: folder.lastPathComponent, filePaths: [folder.path], byteSize: 1, contentHash: "folder")
@@ -304,20 +332,21 @@ enum LauncherWindowRegression {
             throw NSError(domain: "AskyFilePreview", code: 2,
                           userInfo: [NSLocalizedDescriptionKey: "Clipboard and history fixtures must be visible before testing"])
         }
-        for (item, title) in zip(entries, [entries[0].imageTitle, markdown.lastPathComponent]) {
+        for (item, title) in zip(entries, [entries[0].imageTitle, markdown.lastPathComponent, csv.lastPathComponent]) {
             clipboard.select(item)
             try require(clipboard.actionKinds == [.preview, .copy, .delete, .clearAll],
-                        "clipboard images and Markdown show Quick Preview first")
+                        "supported clipboard entries show Quick Preview first")
             let preview = try await open(title, from: clipboardPanel)
+            if item.filePaths == [csv.path] { try await checkText(csvText, in: preview) }
             try await previewShortcut(49, .control, in: preview)
             try await Task.sleep(for: .milliseconds(100))
             try require(!preview.isVisible && clipboardPanel.isKeyWindow && clipboard.selectedItem?.id == item.id,
                         "Control-Space closes the preview and restores the clipboard selection")
         }
-        clipboard.select(entries[2])
+        clipboard.select(entries[3])
         key(49, .control, in: clipboardPanel)
         try require(ContentPreviewWindow.quick.window?.isVisible == false, "a batch of files has no single-file preview")
-        for item in entries.dropFirst(2) {
+        for item in entries.dropFirst(3) {
             clipboard.select(item)
             try require(clipboard.actionKinds == [.copy, .delete, .clearAll],
                         "clipboard multi-file records, text and folders omit Quick Preview")
