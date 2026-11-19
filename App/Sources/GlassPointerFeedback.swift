@@ -7,13 +7,14 @@ private struct GlassPointerFeedback<S: Shape>: ViewModifier {
     let pressed: Bool
     let shape: S
     var illumination: Bool
+    var scales: Bool = true
     @State private var hovered = false
     @Environment(\.isEnabled) private var enabled
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func body(content: Content) -> some View {
         let active = pressed && enabled
-        let animatesScale = !reduceMotion
+        let animatesScale = scales && !reduceMotion
         content
             .overlay {
                 if illumination {
@@ -46,8 +47,21 @@ extension View {
         }
     }
 
-    func glassPointerFeedback<S: Shape>(pressed: Bool, in shape: S, illumination: Bool = true) -> some View {
-        modifier(GlassPointerFeedback(pressed: pressed, shape: shape, illumination: illumination))
+    func glassPointerFeedback<S: Shape>(pressed: Bool, in shape: S, illumination: Bool = true, scales: Bool = true) -> some View {
+        modifier(GlassPointerFeedback(pressed: pressed, shape: shape, illumination: illumination, scales: scales))
+    }
+}
+
+/// Rows inside a glass container (menus, source cards) light up in place like the
+/// selection actions: hover and press only brighten the row; it never grows.
+struct GlassRowButtonStyle: ButtonStyle {
+    var cornerRadius: CGFloat = 8
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .frame(maxWidth: .infinity)
+            .contentShape(.rect(cornerRadius: cornerRadius))
+            .glassPointerFeedback(pressed: configuration.isPressed, in: RoundedRectangle(cornerRadius: cornerRadius), scales: false)
     }
 }
 

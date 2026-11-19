@@ -2012,19 +2012,10 @@ private struct ApprovalModeRow: View {
             .foregroundStyle(tint)
             .padding(.horizontal, 10).frame(height: 36)
         }
-        .buttonStyle(ApprovalModeRowButtonStyle())
+        .buttonStyle(GlassRowButtonStyle())
         .accessibilityLabel(ApprovalModePicker.title(option))
         .accessibilityIdentifier(option == .fullAccess ? "approval-mode-full" : "approval-mode-auto")
         .accessibilityAddTraits(selected ? .isSelected : [])
-    }
-}
-
-private struct ApprovalModeRowButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .frame(maxWidth: .infinity)
-            .contentShape(.rect(cornerRadius: 8))
-            .glassPointerFeedback(pressed: configuration.isPressed, in: RoundedRectangle(cornerRadius: 8))
     }
 }
 
@@ -2044,7 +2035,7 @@ private struct ApprovalMenuPresentation<Menu: View>: ViewModifier {
                     GeometryReader { geometry in
                         let trigger = geometry[anchor]
                         menu()
-                            .nativeGlassBackground(in: RoundedRectangle(cornerRadius: 14), interactive: true)
+                            .nativeGlassBackground(in: RoundedRectangle(cornerRadius: 14))
                             .background(ViewReader(box: menuView).allowsHitTesting(false))
                             .fixedSize()
                             // Present in the full window, outside the composer's glass/hover bounds.

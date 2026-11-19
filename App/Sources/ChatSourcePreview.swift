@@ -428,7 +428,7 @@ struct ChatSourcePreview: View {
                         }
                     }.multilineTextAlignment(.leading).frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 8).padding(.vertical, 6)
-                }.buttonStyle(AgentIconButtonStyle(cornerRadius: Self.rowCornerRadius))
+                }.buttonStyle(GlassRowButtonStyle(cornerRadius: Self.rowCornerRadius))
             }
         }.padding(Self.outerPadding)
             .frame(width: Self.width, alignment: .leading)
