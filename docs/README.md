@@ -1,6 +1,6 @@
 # Asky 文档索引
 
-**想学习如何使用 Asky？先读[使用教程](https://asky.niallyoung2002.workers.dev/docs)。** 本页其余内容主要面向产品与开发工作。
+**想学习如何使用 Asky？先读[使用教程](https://asky.niallspace.workers.dev/docs)。** 本页其余内容主要面向产品与开发工作。
 
 更新日期：2026 年 10 月 9 日。状态：V1 代码已按 M0–M4 实现，可以构建；自动化测试通过，DeepSeek 基础对话与历史重开已验证，见 [DeepSeek 验证记录](validation/2026-10-09-deepseek.md)。完整 UI、真实系统权限及其他模型能力验收尚未完成，见 [M0 验证记录](validation/2026-10-09-m0.md)。
 
@@ -12,7 +12,7 @@ Asky 首先提供不依赖 AI 的 macOS 效率入口，再通过按需运行的 
 
 | 文档 | 权威内容 | 适用任务 |
 | --- | --- | --- |
-| [使用教程](https://asky.niallyoung2002.workers.dev/docs) | 安装、快捷键、日常场景、AI 配置、Markdown 记忆、权限与常见问题 | 首次使用及日常查阅 |
+| [使用教程](https://asky.niallspace.workers.dev/docs) | 安装、快捷键、日常场景、AI 配置、Markdown 记忆、权限与常见问题 | 首次使用及日常查阅 |
 | [V1 产品需求](PRD.md) | 产品范围、用户行为、默认设置、交付与验收 | 判断做什么、是否符合 V1 |
 | [产品框架与架构](framework.md) | 技术栈、模块、进程与主要接口 | 模块划分、进程边界、总体数据流 |
 | [原生界面与设计系统](design-system.md) | Figma 变量、Styles、原生控件、Liquid Glass | 页面、窗口、组件与主题 |
