@@ -142,7 +142,9 @@ final class AgentModel {
             let newer = timelineMode
                 ? store.newerTimeline(after: source, limit: Self.firstPage)
                 : store.newerMessages(conversationID: source.conversationID, afterSeq: source.seq, limit: Self.firstPage)
-            items = (older + [source] + newer).map(Self.item)
+            let combined = older + [source] + newer
+            seedSourcePreviews(for: combined)
+            items = combined.map(Self.item)
             hasOlder = older.count == Self.firstPage
             hasNewer = newer.count == Self.firstPage
             pruneFormValues()
@@ -198,11 +200,18 @@ final class AgentModel {
 
     func reloadConversations() { conversations = store.list(limit: Self.firstPage) }
 
+    private func seedSourcePreviews(for messages: [StoredMessage]) {
+        let ids = Array(Set(messages.map(\.conversationID)))
+        guard !ids.isEmpty else { return }
+        ToolService.seedChatLinkPreviews(conversationIDs: ids, in: app.store)
+    }
+
     func resumeTimeline() {
         guard !isRunning else { return }
         timelineMode = true
         hasNewer = false
         let page = store.timeline(limit: Self.firstPage)
+        seedSourcePreviews(for: page)
         items = page.map(Self.item)
         hasOlder = page.count == Self.firstPage
         conversationID = nil
@@ -219,6 +228,7 @@ final class AgentModel {
         hasNewer = false
         guard let id else { return }
         let page = store.messages(conversationID: id, limit: Self.firstPage)
+        seedSourcePreviews(for: page)
         items = page.map(Self.item)
         hasOlder = page.count == Self.firstPage
         if let ref = conversations.first(where: { $0.id == id })?.runtimeSessionRef, let agent = app.agent {
@@ -261,6 +271,7 @@ final class AgentModel {
         let page = timelineMode
             ? store.timeline(limit: Self.firstPage, before: cursor)
             : store.messages(conversationID: cursor.conversationID, limit: Self.firstPage, beforeSeq: cursor.seq)
+        seedSourcePreviews(for: page)
         items.insert(contentsOf: page.map(Self.item), at: 0)
         hasOlder = page.count == Self.firstPage
         if items.count > Self.window {
@@ -275,6 +286,7 @@ final class AgentModel {
         let page = timelineMode
             ? store.newerTimeline(after: cursor, limit: Self.firstPage)
             : store.newerMessages(conversationID: cursor.conversationID, afterSeq: cursor.seq, limit: Self.firstPage)
+        seedSourcePreviews(for: page)
         items.append(contentsOf: page.map(Self.item))
         hasNewer = page.count == Self.firstPage
         if items.count > Self.window {

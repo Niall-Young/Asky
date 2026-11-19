@@ -59,6 +59,30 @@ public struct ExecutionStore: Sendable {
                         [limit])) ?? []).map(Self.decode)
     }
 
+    /// Completed web_search / web_read_page outputs for the given origins, newest first.
+    public func completedWebOutputs(origins: [String], limit: Int = 80) -> [(tool: String, output: JSONValue)] {
+        let unique = Array(Set(origins.filter { !$0.isEmpty }))
+        guard !unique.isEmpty, limit > 0 else { return [] }
+        let placeholders = Array(repeating: "?", count: unique.count).joined(separator: ",")
+        let sql = """
+            SELECT tool, result FROM executions
+            WHERE origin IN (\(placeholders))
+              AND tool IN ('web_search', 'web_read_page')
+              AND status = 'completed'
+              AND result IS NOT NULL
+            ORDER BY updated_at DESC LIMIT ?
+            """
+        var bindings: [(any SQLBindable)?] = unique
+        bindings.append(limit)
+        guard let rows = try? db.query(sql, bindings) else { return [] }
+        return rows.compactMap { row in
+            guard let tool = row.string("tool"),
+                  let result = JSONText.decode(row.string("result"), as: ExecutionResult.self),
+                  let output = result.output else { return nil }
+            return (tool, output)
+        }
+    }
+
     static func decode(_ row: Row) -> ExecutionRecord {
         ExecutionRecord(requestID: row.string("request_id") ?? "", tool: row.string("tool") ?? "",
                         argumentsDigest: row.string("args_digest") ?? "", origin: row.string("origin") ?? "",

@@ -1,6 +1,7 @@
 import Foundation
 import Contracts
 import LocalStore
+import os
 
 /// What an adapter returns after a successful write or read.
 public struct AdapterOutput: Sendable, Hashable {
@@ -300,7 +301,30 @@ public actor ToolService {
 
     private func record(_ request: ActionRequest, _ result: ExecutionResult) -> ExecutionResult {
         persist(request, status: result.status, result: result)
+        if result.status == .completed {
+            ChatLinkService.shared.seed(fromTool: request.tool, output: result.output)
+        }
         return result
+    }
+
+    private static let seededWebPreviewConversations = OSAllocatedUnfairLock(initialState: Set<String>())
+
+    /// Hydrate ChatLinkService from saved web_search / web_read_page results for the opened conversations.
+    public static func seedChatLinkPreviews(conversationIDs: [String], in store: LocalStore, into service: ChatLinkService = .shared) {
+        let pending: [String]
+        if service === ChatLinkService.shared {
+            pending = seededWebPreviewConversations.withLock { seen in
+                let fresh = conversationIDs.filter { !$0.isEmpty && seen.insert($0).inserted }
+                return fresh
+            }
+        } else {
+            pending = Array(Set(conversationIDs.filter { !$0.isEmpty }))
+        }
+        guard !pending.isEmpty else { return }
+        let origins = pending.map { "agent:\($0)" }
+        for entry in ExecutionStore(store).completedWebOutputs(origins: origins) {
+            service.seed(fromTool: entry.tool, output: entry.output)
+        }
     }
 
     private nonisolated func failure(_ request: ActionRequest, _ error: Error) -> ExecutionResult {

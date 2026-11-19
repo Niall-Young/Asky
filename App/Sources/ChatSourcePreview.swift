@@ -8,6 +8,54 @@ extension NSAttributedString.Key {
     static let chatSources = NSAttributedString.Key("AskySourceGroup")
 }
 
+/// Draws the source badge directly in the text view's graphics context so text and pill edges
+/// stay aligned to physical pixels across 1x and Retina displays instead of resampling an NSImage.
+private final class ChatSourceBadgeAttachmentCell: NSTextAttachmentCell {
+    private let line: CTLine
+    private let background: NSColor
+    private let badgeSize: NSSize
+    private let baseline: CGFloat
+
+    init(line: CTLine, background: NSColor, size: NSSize, baseline: CGFloat) {
+        self.line = line
+        self.background = background
+        self.badgeSize = size
+        self.baseline = baseline
+        super.init(textCell: "")
+    }
+
+    @available(*, unavailable)
+    required init(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func cellSize() -> NSSize { badgeSize }
+
+    override func cellBaselineOffset() -> NSPoint { NSPoint(x: 0, y: -baseline) }
+
+    override func draw(withFrame cellFrame: NSRect, in controlView: NSView?) {
+        guard let graphics = NSGraphicsContext.current else { return }
+        let context = graphics.cgContext
+        let deviceUnit = context.convertToDeviceSpace(CGSize(width: 1, height: 1))
+        let scaleY = max(1, abs(deviceUnit.height))
+        let deviceOrigin = context.convertToDeviceSpace(cellFrame.origin)
+        let alignedOrigin = context.convertToUserSpace(CGPoint(x: round(deviceOrigin.x), y: round(deviceOrigin.y)))
+        let alignedFrame = NSRect(origin: alignedOrigin, size: badgeSize)
+        let alignedBaseline = round(baseline * scaleY) / scaleY
+
+        context.saveGState()
+        background.setFill()
+        NSBezierPath(roundedRect: alignedFrame, xRadius: 12, yRadius: 12).fill()
+        if graphics.isFlipped {
+            context.textMatrix = CGAffineTransform(scaleX: 1, y: -1)
+            context.textPosition = CGPoint(x: alignedFrame.minX + 10, y: alignedFrame.maxY - alignedBaseline)
+        } else {
+            context.textMatrix = .identity
+            context.textPosition = CGPoint(x: alignedFrame.minX + 10, y: alignedFrame.minY + alignedBaseline)
+        }
+        CTLineDraw(line, context)
+        context.restoreGState()
+    }
+}
+
 /// Source attachments are the only hover targets, regardless of the original Markdown label.
 final class ChatSourceTextView: ChatSelectableTextView, NSTextViewDelegate {
     private var hoverTask: Task<Void, Never>?
@@ -36,7 +84,7 @@ final class ChatSourceTextView: ChatSelectableTextView, NSTextViewDelegate {
         name + (count > 1 ? " +\(count - 1)" : "")
     }
 
-    static func badge(name: String, count: Int, foreground: NSColor, background: NSColor) -> (image: NSImage, baseline: CGFloat) {
+    static func badgeAttachment(name: String, count: Int, foreground: NSColor, background: NSColor) -> NSTextAttachment {
         let attributes: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 13), .foregroundColor: foreground.withAlphaComponent(0.75)
         ]
@@ -54,18 +102,14 @@ final class ChatSourceTextView: ChatSelectableTextView, NSTextViewDelegate {
         let width = CTLineGetTypographicBounds(line, &ascent, &descent, nil)
         // Share the drawn label's baseline with its inline attachment, including fallback fonts.
         let baseline = (24 - ascent - descent) / 2 + descent
-        let image = NSImage(size: NSSize(width: ceil(width) + 20, height: 24), flipped: false) { rect in
-            background.setFill()
-            NSBezierPath(roundedRect: rect, xRadius: 12, yRadius: 12).fill()
-            guard let context = NSGraphicsContext.current?.cgContext else { return false }
-            context.saveGState()
-            context.textMatrix = .identity
-            context.textPosition = CGPoint(x: 10, y: baseline)
-            CTLineDraw(line, context)
-            context.restoreGState()
-            return true
-        }
-        return (image, baseline)
+        let attachment = NSTextAttachment()
+        attachment.attachmentCell = ChatSourceBadgeAttachmentCell(
+            line: line,
+            background: background,
+            size: NSSize(width: ceil(width) + 20, height: 24),
+            baseline: baseline
+        )
+        return attachment
     }
 
     func textView(_ textView: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
@@ -76,6 +120,12 @@ final class ChatSourceTextView: ChatSelectableTextView, NSTextViewDelegate {
         }
         openSources(sources, at: charIndex)
         return true
+    }
+
+    func textView(_ textView: NSTextView, willDisplayToolTip tooltip: String, forCharacterAt characterIndex: Int) -> String? {
+        guard let storage = textStorage, characterIndex < storage.length else { return tooltip }
+        if storage.attribute(.chatSources, at: characterIndex, effectiveRange: nil) != nil { return nil }
+        return tooltip
     }
 
     private func openSources(_ sources: [URL], at index: Int) {
@@ -207,21 +257,41 @@ final class ChatSourcePopover {
         guard let parent = textView?.window else { return }
         Self.active?.close()
         Self.active = self
+        for url in sources {
+            if let cached = ChatLinkService.shared.cachedPreview(for: url) {
+                metadata[url] = cached
+            }
+        }
         panel.appearance = parent.effectiveAppearance
         update()
         parent.addChildWindow(panel, ordered: .above)
         panel.matchesActiveAppearance = parent.isKeyWindow
         panel.orderFront(nil)
-        metadataTask = Task { @MainActor [weak self, sources] in
-            await withTaskGroup(of: (URL, ChatLinkService.Preview?).self) { group in
-                var pending = sources.makeIterator()
-                for _ in 0..<min(4, sources.count) {
-                    if let url = pending.next() { group.addTask { (url, try? await ChatLinkService.shared.preview(for: url)) } }
-                }
-                for await (url, metadata) in group {
-                    guard !Task.isCancelled else { group.cancelAll(); return }
-                    if let metadata { self?.metadata[url] = metadata; self?.update() }
-                    if let next = pending.next() { group.addTask { (next, try? await ChatLinkService.shared.preview(for: next)) } }
+        let pendingSources = sources.filter { !ChatLinkService.shared.hasCompletedLookup(for: $0) }
+        if !pendingSources.isEmpty {
+            metadataTask = Task { @MainActor [weak self, pendingSources] in
+                await withTaskGroup(of: (URL, ChatLinkService.Preview?).self) { group in
+                    var pending = pendingSources.makeIterator()
+                    func enqueue(_ url: URL) {
+                        let apply: @MainActor @Sendable (ChatLinkService.Preview) -> Void = { [weak self] partial in
+                            guard let self, self.isShown else { return }
+                            self.applyPreview(partial, for: url)
+                        }
+                        group.addTask {
+                            let preview = try? await ChatLinkService.shared.preview(for: url) { partial in
+                                Task { @MainActor in apply(partial) }
+                            }
+                            return (url, preview)
+                        }
+                    }
+                    for _ in 0..<min(6, pendingSources.count) {
+                        if let url = pending.next() { enqueue(url) }
+                    }
+                    for await (url, metadata) in group {
+                        guard !Task.isCancelled else { group.cancelAll(); return }
+                        if let metadata { self?.applyPreview(metadata, for: url) }
+                        if let next = pending.next() { enqueue(next) }
+                    }
                 }
             }
         }
@@ -240,13 +310,29 @@ final class ChatSourcePopover {
         }
     }
 
+    private func applyPreview(_ preview: ChatLinkService.Preview, for url: URL) {
+        var changed = false
+        if metadata[url] != preview {
+            metadata[url] = preview
+            changed = true
+        }
+        // Propagate newly resolved origin favicons to sibling URLs on the same host immediately.
+        for source in sources where source != url {
+            if let cached = ChatLinkService.shared.cachedPreview(for: source), metadata[source] != cached {
+                metadata[source] = cached
+                changed = true
+            }
+        }
+        if changed { update() }
+    }
+
     private func update() {
         let rows = ChatSourcePreview(sources: sources, metadata: metadata)
         let measured = SurfacePanel.fittingSize(of: rows, maxWidth: ChatSourcePreview.width)
         let available = textView?.window?.screen?.visibleFrame.height ?? 700
         let size = NSSize(width: ChatSourcePreview.width, height: min(measured.height, min(460, available - 32)))
         let view = ScrollView { rows }.frame(width: size.width, height: size.height)
-            .windowSurfaceBackground(in: RoundedRectangle(cornerRadius: 12))
+            .windowSurfaceBackground(in: RoundedRectangle(cornerRadius: ChatSourcePreview.cornerRadius))
         if let host {
             // Preserve ScrollView identity and its offset as individual source metadata arrives.
             host.rootView = AnyView(view)
@@ -257,7 +343,7 @@ final class ChatSourcePopover {
             host.sizingOptions = []
             host.frame = NSRect(origin: .zero, size: size)
             panel.setContentSize(size)
-            panel.contentView = WindowSurface.glassContentView(host, cornerRadius: 12)
+            panel.contentView = WindowSurface.glassContentView(host, cornerRadius: ChatSourcePreview.cornerRadius)
             self.host = host
         }
         panel.invalidateShadow()
@@ -285,16 +371,23 @@ final class ChatSourcePopover {
 }
 struct ChatSourcePreview: View {
     static let width: CGFloat = 300
+    static let cornerRadius: CGFloat = 18
+    static let outerPadding: CGFloat = 6
+    static let rowCornerRadius: CGFloat = cornerRadius - outerPadding
     let sources: [URL]
     var metadata: [URL: ChatLinkService.Preview] = [:]
+
+    private static let dayParser: DateFormatter = {
+        let parser = DateFormatter()
+        parser.locale = Locale(identifier: "en_US_POSIX")
+        parser.dateFormat = "yyyy-MM-dd"
+        return parser
+    }()
 
     private static func date(_ source: String?) -> String? {
         guard let source else { return nil }
         let day = String(source.prefix(10))
-        let parser = DateFormatter()
-        parser.locale = Locale(identifier: "en_US_POSIX")
-        parser.dateFormat = "yyyy-MM-dd"
-        guard let date = parser.date(from: day) else { return nil }
+        guard let date = dayParser.date(from: day) else { return nil }
         return date.formatted(date: .abbreviated, time: .omitted)
     }
 
@@ -307,8 +400,14 @@ struct ChatSourcePreview: View {
                 }
                 Link(destination: url) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(metadata[url]?.siteName ?? ChatSourceTextView.domain(url))
-                            .font(.system(size: 13)).foregroundStyle(ThemeColor.kTextSubtle)
+                        HStack(spacing: 6) {
+                            ChatSourceFavicon(data: metadata[url]?.favicon)
+                            Text(metadata[url]?.siteName ?? ChatSourceTextView.domain(url))
+                                .font(.system(size: 13))
+                                .foregroundStyle(ThemeColor.kTextSubtle)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                        }
                         Text(metadata[url]?.title ?? url.absoluteString)
                             .font(.system(size: 15)).foregroundStyle(ThemeColor.kText)
                             .lineLimit(3).fixedSize(horizontal: false, vertical: true)
@@ -317,9 +416,29 @@ struct ChatSourcePreview: View {
                         }
                     }.multilineTextAlignment(.leading).frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 8).padding(.vertical, 6)
-                }.buttonStyle(AgentIconButtonStyle(cornerRadius: 8))
+                }.buttonStyle(AgentIconButtonStyle(cornerRadius: Self.rowCornerRadius))
             }
-        }.padding(4)
+        }.padding(Self.outerPadding)
             .frame(width: Self.width, alignment: .leading)
+    }
+}
+
+private struct ChatSourceFavicon: View {
+    let data: Data?
+
+    var body: some View {
+        Group {
+            if let data, let image = NSImage(data: data) {
+                Image(nsImage: image)
+                    .resizable()
+                    .interpolation(.high)
+                    .aspectRatio(contentMode: .fit)
+                    .clipShape(RoundedRectangle(cornerRadius: 3))
+            } else {
+                Image(mingCute: "globe", size: 13)
+                    .foregroundStyle(ThemeColor.kTextSubtle)
+            }
+        }
+        .frame(width: 14, height: 14)
     }
 }
