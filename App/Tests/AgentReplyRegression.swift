@@ -2571,27 +2571,69 @@ enum AgentReplyRegression {
     }
 
     static func firstOpenStabilityRegression() async throws {
-        let root = FileManager.default.temporaryDirectory.appending(path: "Asky-first-open-\(UUID())")
-        defer { try? FileManager.default.removeItem(at: root) }
-        let app = try AppModel(root: root)
-        let store = ConversationStore(app.store)
-        let cid = try store.create(title: "First open stability")
-        for i in 1...18 {
-            try store.append(conversationID: cid, role: "user", text: "第 \(i) 个问题：请帮我总结一下今天的工作重点和下一步安排。")
-            try store.append(conversationID: cid, role: "assistant", text: """
-            这是第 \(i) 条回复，包含多行内容与列表：
+        func buildStore(at root: URL, longLastReply: Bool, richMarkdown: Bool) throws -> AppModel {
+            let app = try AppModel(root: root)
+            let store = ConversationStore(app.store)
+            let cid = try store.create(title: "First open stability")
+            for i in 1...22 {
+                try store.append(conversationID: cid, role: "user", text: "第 \(i) 个问题：请帮我总结一下今天的工作重点和下一步安排。")
+                if richMarkdown {
+                    try store.append(conversationID: cid, role: "assistant", text: """
+                    这是第 \(i) 条回复，包含多行内容、表格、公式与代码块：
 
-            - 第一项：完成核心功能开发与自测
-            - 第二项：整理回归测试与性能基线
-            - 第三项：准备发布说明和安装包
+                    - 第一项：完成核心功能开发与自测
+                    - 第二项：整理回归测试与性能基线
+                    - 第三项：准备发布说明和安装包
 
-            `code_snippet_\(i)()` 已经验证通过。
-            """)
+                    | 模块 | 状态 | 备注 |
+                    | --- | --- | --- |
+                    | 启动器 | 完成 | 延迟 12ms |
+                    | 对话流 | 验证中 | 含 `code_snippet_\(i)()` |
+
+                    ```swift
+                    func step_\(i)(_ x: Int) -> Int {
+                        return x * \(i) + 1
+                    }
+                    ```
+
+                    $$\\int_0^1 x^2 dx = \\frac{1}{3}$$
+                    """)
+                } else {
+                    try store.append(conversationID: cid, role: "assistant", text: """
+                    这是第 \(i) 条回复，包含多行内容与列表：
+
+                    - 第一项：完成核心功能开发与自测
+                    - 第二项：整理回归测试与性能基线
+                    - 第三项：准备发布说明和安装包
+
+                    `code_snippet_\(i)()` 已经验证通过。
+                    """)
+                }
+            }
+            if longLastReply {
+                try store.append(conversationID: cid, role: "user", text: "请给出一份完整的架构梳理和迁移清单。")
+                let longAnswer = (1...16).map { idx in
+                    """
+                    ### 第 \(idx) 部分：状态与滚动稳定性
+
+                    这里详细描述了第 \(idx) 个阶段的设计原则、边界条件与回归测试覆盖范围，确保打开窗口时不会出现跳动。
+
+                    | 检查项 | 预期 |
+                    | --- | --- |
+                    | 阶段 \(idx) | 首帧即对齐 |
+                    """
+                }.joined(separator: "\n\n")
+                try store.append(conversationID: cid, role: "assistant", text: longAnswer)
+            } else {
+                try store.append(conversationID: cid, role: "user", text: "最后一条短问题？")
+                try store.append(conversationID: cid, role: "assistant", text: "这是一条简短的最终回复，用于验证首次打开时底部对齐。")
+            }
+            return app
         }
 
         let application = NSApplication.shared
 
-        func assertStableFirstOpen(activeBeforeShow: Bool) async throws {
+        func assertStableFirstOpen(label: String, app: AppModel, activeBeforeShow: Bool, expectsReplyTop: Bool) async throws -> [String] {
             let presentation = WindowPresentation()
             let controller = AgentWindowController(model: AgentModel(app: app), presentation: presentation)
             if activeBeforeShow {
@@ -2605,7 +2647,7 @@ enum AgentReplyRegression {
             }
             controller.show()
             let window = application.windows.first { $0.title == "Asky AI" }!
-            window.title = "First open \(activeBeforeShow ? "active" : "inactive")"
+            window.title = "First open \(label) \(activeBeforeShow ? "active" : "inactive")"
             defer { window.close() }
 
             if !activeBeforeShow {
@@ -2635,36 +2677,75 @@ enum AgentReplyRegression {
             let scroll = findTranscriptScroll(window.contentView!)
             let lastAssistantID = controller.model.items.last(where: { $0.kind == .assistant })?.id ?? ""
 
-            func sample() -> (scrollY: CGFloat, bottomY: CGFloat, markerScreenY: CGFloat?) {
+            func sample() -> (scrollY: CGFloat, bottomY: CGFloat, docH: CGFloat, markerScreenY: CGFloat?, replyClipMinY: CGFloat?) {
                 let sy = scroll?.contentView.bounds.minY ?? -1
                 let dh = scroll?.documentView?.bounds.height ?? -1
                 let vh = scroll?.contentView.bounds.height ?? 0
                 let by = max(0, dh - vh)
                 let marker = findLastReplyMarker(window.contentView!, id: lastAssistantID)
                 let my = marker.map { window.contentView!.convert($0.bounds, from: $0).minY }
-                return (sy, by, my)
+                let rc = marker.flatMap { m in scroll.map { $0.contentView.convert(m.bounds, from: m).minY - $0.contentView.bounds.minY } }
+                return (sy, by, dh, my, rc)
             }
 
             let first = sample()
-            let gapAtReveal = abs(first.scrollY - first.bottomY)
             var maxMarkerDrift: CGFloat = 0
+            var minMarkerY = first.markerScreenY ?? .greatestFiniteMagnitude
+            var maxMarkerY = first.markerScreenY ?? -.greatestFiniteMagnitude
             let baselineY = first.markerScreenY
+            var changes: [String] = [String(format: "t=0 sy=%.1f by=%.1f dh=%.1f my=%@ rc=%@", first.scrollY, first.bottomY, first.docH, first.markerScreenY.map { String(format: "%.1f", $0) } ?? "nil", first.replyClipMinY.map { String(format: "%.1f", $0) } ?? "nil")]
+            var prev = first
 
-            for _ in 1...40 {
+            for frame in 1...40 {
                 try await Task.sleep(for: .milliseconds(16))
                 let s = sample()
                 if let my = s.markerScreenY, let base = baselineY {
                     maxMarkerDrift = max(maxMarkerDrift, abs(my - base))
+                    minMarkerY = min(minMarkerY, my)
+                    maxMarkerY = max(maxMarkerY, my)
+                }
+                if abs(s.scrollY - prev.scrollY) > 0.5 || abs(s.docH - prev.docH) > 0.5 || abs((s.markerScreenY ?? -999) - (prev.markerScreenY ?? -999)) > 0.5 {
+                    changes.append(String(format: "t=%d sy=%.1f by=%.1f dh=%.1f my=%@ rc=%@", frame * 16, s.scrollY, s.bottomY, s.docH, s.markerScreenY.map { String(format: "%.1f", $0) } ?? "nil", s.replyClipMinY.map { String(format: "%.1f", $0) } ?? "nil"))
+                    prev = s
                 }
             }
-            precondition(baselineY != nil, "Last reply marker must already be mounted on first visible frame (active=\(activeBeforeShow))")
-            precondition(gapAtReveal <= 2, "First visible frame must already be aligned to bottom (active=\(activeBeforeShow), gap=\(gapAtReveal))")
-            precondition(maxMarkerDrift <= 2, "Visible reply must not jitter after first reveal (active=\(activeBeforeShow), drift=\(maxMarkerDrift))")
+            print("FIRST-OPEN [\(label) active=\(activeBeforeShow)]: drift=\(String(format: "%.1f", maxMarkerDrift)) changes=\(changes.joined(separator: " | "))")
+            var failures: [String] = []
+            if baselineY == nil {
+                failures.append("Last reply marker must already be mounted on first visible frame (\(label), active=\(activeBeforeShow))")
+            }
+            if expectsReplyTop {
+                let firstTopGap = abs((first.replyClipMinY ?? -999) - 90)
+                if firstTopGap > 2 {
+                    failures.append("First visible frame for long reply must already align to reply top (\(label), active=\(activeBeforeShow), gap=\(firstTopGap))")
+                }
+            } else {
+                let gapAtReveal = abs(first.scrollY - first.bottomY)
+                if gapAtReveal > 2 {
+                    failures.append("First visible frame must already be aligned to bottom (\(label), active=\(activeBeforeShow), gap=\(gapAtReveal))")
+                }
+            }
+            if maxMarkerDrift > 2 {
+                failures.append("Visible reply must not jitter after first reveal (\(label), active=\(activeBeforeShow), drift=\(maxMarkerDrift))")
+            }
+            return failures
         }
 
-        try await assertStableFirstOpen(activeBeforeShow: false)
-        try await assertStableFirstOpen(activeBeforeShow: true)
-        print("First open stability passed: inactive and active first reveal aligned with 0 drift")
+        let shortRoot = FileManager.default.temporaryDirectory.appending(path: "Asky-first-open-short-\(UUID())")
+        let longRoot = FileManager.default.temporaryDirectory.appending(path: "Asky-first-open-long-\(UUID())")
+        defer {
+            try? FileManager.default.removeItem(at: shortRoot)
+            try? FileManager.default.removeItem(at: longRoot)
+        }
+        let shortRich = try buildStore(at: shortRoot, longLastReply: false, richMarkdown: true)
+        let longRich = try buildStore(at: longRoot, longLastReply: true, richMarkdown: true)
+        var allFailures: [String] = []
+        allFailures += try await assertStableFirstOpen(label: "short-rich", app: shortRich, activeBeforeShow: false, expectsReplyTop: false)
+        allFailures += try await assertStableFirstOpen(label: "short-rich", app: shortRich, activeBeforeShow: true, expectsReplyTop: false)
+        allFailures += try await assertStableFirstOpen(label: "long-rich", app: longRich, activeBeforeShow: false, expectsReplyTop: true)
+        allFailures += try await assertStableFirstOpen(label: "long-rich", app: longRich, activeBeforeShow: true, expectsReplyTop: true)
+        precondition(allFailures.isEmpty, allFailures.joined(separator: "\n"))
+        print("First open stability passed: short-rich and long-rich (inactive and active) aligned with 0 drift")
     }
 
     static func main() async throws {

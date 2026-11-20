@@ -492,6 +492,16 @@ private final class TranscriptViewport {
     private var readingAnchor: (id: NSUserInterfaceItemIdentifier, offset: CGFloat)?
     private var anchorTask: Task<Void, Never>?
     private var animatingReply = false
+    private var initialized = false
+    private var isAligning = false
+
+    func prepareInitialAlignmentIfNeeded(replyID: String?) {
+        guard !initialized else { return }
+        initialized = true
+        readerMoved = false
+        followsLatestContent = true
+        self.replyID = replyID
+    }
 
     func preserveReadingPosition(_ update: () -> Void) {
         guard let scroll, let document = scroll.documentView else { update(); return }
@@ -571,9 +581,12 @@ private final class TranscriptViewport {
         return scroll.contentView.constrainBoundsRect(bounds).origin
     }
 
-    func alignLatestContent() -> Bool {
+    func alignLatestContent(layoutIfNeeded: Bool = true) -> Bool {
+        guard !isAligning else { return true }
         guard let scroll, let document = scroll.documentView else { return false }
-        document.layoutSubtreeIfNeeded()
+        isAligning = true
+        defer { isAligning = false }
+        if layoutIfNeeded { document.layoutSubtreeIfNeeded() }
         guard let bottomY else { return false }
         var bounds = scroll.contentView.bounds
         bounds.origin.y = bottomY
@@ -738,6 +751,7 @@ private func alignTranscriptContent(viewport: TranscriptViewport, replyID: Strin
     viewport.cancelReadingAnchor()
     viewport.replyID = replyID
     viewport.followsLatestContent = true
+    _ = viewport.alignLatestContent()
     return Task { @MainActor in
         // Let native Markdown settle before choosing bottom or reply start.
         for _ in 0..<30 {
@@ -798,7 +812,8 @@ private struct ModernTranscriptScroll<Content: View>: View {
     var body: some View {
         ScrollView {
             content.background {
-                TranscriptPosition(viewport: viewport, onChange: { [bottomState] in bottomState.update($0) },
+                TranscriptPosition(viewport: viewport, initialReplyID: isWaiting ? nil : completedReplyID,
+                                   onChange: { [bottomState] in bottomState.update($0) },
                                    onUserScroll: { bottomTask?.cancel(); submissionTask?.cancel(); replyTask?.cancel(); viewport.followsLatestContent = false; viewport.readerMoved = true })
             }
         }
@@ -868,6 +883,7 @@ private struct ModernTranscriptScroll<Content: View>: View {
 /// AppKit bounds notifications cover wheel events and programmatic scrolling on all supported systems.
 private struct TranscriptPosition: NSViewRepresentable {
     let viewport: TranscriptViewport
+    let initialReplyID: String?
     var onChange: (Bool) -> Void
     var onUserScroll: () -> Void
     func makeNSView(context: Context) -> ObserverView { ObserverView() }
@@ -875,6 +891,8 @@ private struct TranscriptPosition: NSViewRepresentable {
         view.onChange = onChange
         view.onUserScroll = onUserScroll
         view.viewport = viewport
+        view.initialReplyID = initialReplyID
+        view.attachAndSync(layoutIfNeeded: false)
         view.scheduleUpdate()
     }
 
@@ -882,11 +900,24 @@ private struct TranscriptPosition: NSViewRepresentable {
         var onChange: ((Bool) -> Void)?
         var onUserScroll: (() -> Void)?
         var viewport: TranscriptViewport?
+        var initialReplyID: String?
         private weak var observedScroll: NSScrollView?
         private var updateScheduled = false
 
-        override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); scheduleUpdate() }
-        override func viewDidMoveToSuperview() { super.viewDidMoveToSuperview(); scheduleUpdate() }
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            attachAndSync(layoutIfNeeded: false)
+            scheduleUpdate()
+        }
+        override func viewDidMoveToSuperview() {
+            super.viewDidMoveToSuperview()
+            attachAndSync(layoutIfNeeded: false)
+            scheduleUpdate()
+        }
+        override func layout() {
+            super.layout()
+            attachAndSync(layoutIfNeeded: false)
+        }
 
         /// Coalesces the per-frame bounds notifications of a scroll into one update per run loop turn.
         func scheduleUpdate() {
@@ -898,12 +929,21 @@ private struct TranscriptPosition: NSViewRepresentable {
             }
         }
 
-        @objc private func boundsChanged(_ notification: Notification) { scheduleUpdate() }
+        @objc private func boundsChanged(_ notification: Notification) {
+            syncAlignmentIfFollowing(layoutIfNeeded: false)
+            scheduleUpdate()
+        }
+        @objc private func documentFrameChanged(_ notification: Notification) {
+            syncAlignmentIfFollowing(layoutIfNeeded: false)
+            viewport?.restoreReadingPosition()
+            scheduleUpdate()
+        }
         @objc private func userScrolled(_ notification: Notification) { viewport?.cancelReadingAnchor(); onUserScroll?() }
 
-        private func updatePosition() {
+        func attachAndSync(layoutIfNeeded: Bool) {
             guard let scroll = enclosingScrollView, let document = scroll.documentView else { return }
             viewport?.scroll = scroll
+            viewport?.prepareInitialAlignmentIfNeeded(replyID: initialReplyID)
             if observedScroll !== scroll {
                 NotificationCenter.default.removeObserver(self)
                 observedScroll = scroll
@@ -913,14 +953,20 @@ private struct TranscriptPosition: NSViewRepresentable {
                 document.postsFrameChangedNotifications = true
                 NotificationCenter.default.addObserver(self, selector: #selector(boundsChanged(_:)),
                     name: NSView.boundsDidChangeNotification, object: scroll.contentView)
-                NotificationCenter.default.addObserver(self, selector: #selector(boundsChanged(_:)),
+                NotificationCenter.default.addObserver(self, selector: #selector(documentFrameChanged(_:)),
                     name: NSView.frameDidChangeNotification, object: document)
             }
-            // Native Markdown/form views can finish measuring after the first scroll task.
-            // Follow layout changes until the reader takes over; long replies remain capped at their start.
+            syncAlignmentIfFollowing(layoutIfNeeded: layoutIfNeeded)
+        }
+
+        private func syncAlignmentIfFollowing(layoutIfNeeded: Bool) {
             if let viewport, viewport.followsLatestContent, !viewport.readerMoved {
-                _ = viewport.alignLatestContent()
+                _ = viewport.alignLatestContent(layoutIfNeeded: layoutIfNeeded)
             }
+        }
+
+        private func updatePosition() {
+            attachAndSync(layoutIfNeeded: true)
             viewport?.restoreReadingPosition()
             onChange?(viewport?.isAtBottom ?? false)
         }
@@ -948,7 +994,8 @@ private struct LegacyTranscriptScroll<Content: View>: View {
     var body: some View {
         ScrollView {
             content.background {
-                TranscriptPosition(viewport: viewport, onChange: { [bottomState] in bottomState.update($0) },
+                TranscriptPosition(viewport: viewport, initialReplyID: isWaiting ? nil : completedReplyID,
+                                   onChange: { [bottomState] in bottomState.update($0) },
                                    onUserScroll: { bottomTask?.cancel(); submissionTask?.cancel(); replyTask?.cancel(); viewport.followsLatestContent = false; viewport.readerMoved = true })
             }
         }
