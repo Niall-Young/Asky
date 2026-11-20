@@ -123,6 +123,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             NSApp.terminate(nil)
             return
         }
+        WindowDiagnostics.shared.configure(root: model.store.root)
+        WindowDiagnostics.shared.record("app-launch", extra: [
+            ("dock", model.preferences.showDockIcon ? "1" : "0"),
+            ("menuBar", model.preferences.showMenuBarIcon ? "1" : "0"),
+            ("loginInit", model.preferences.hasInitializedLoginItem ? "1" : "0"),
+        ])
         do { try model.initializeLaunchAtLogin() }
         catch { NSLog("Unable to initialize launch at login: %@", error.localizedDescription) }
         model.onOpenSettings = { [weak self] in self?.openSettings() }
@@ -235,6 +241,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         guard model != nil else { return true }
+        WindowDiagnostics.shared.record("app-reopen", window: settingsWindow, extra: [
+            ("hasVisible", flag ? "1" : "0"),
+            ("settingsVisible", settingsWindow?.isVisible == true ? "1" : "0"),
+        ])
         if let settingsWindow, settingsWindow.isVisible {
             windowPresentation.show(settingsWindow)
         } else {
@@ -431,6 +441,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func openSettings() {
+        let created = settingsWindow == nil
+        WindowDiagnostics.shared.record("open-settings", window: settingsWindow, includeEvent: true,
+                                        includeStack: true, extra: [("created", created ? "1" : "0")])
         if settingsWindow == nil {
             let w = SettingsWindow.make(app: model)
             w.level = .normal

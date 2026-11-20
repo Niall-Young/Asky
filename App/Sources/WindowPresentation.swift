@@ -20,6 +20,7 @@ final class WindowPresentation: NSObject {
 
     func show(_ window: NSWindow, level: NSWindow.Level = .normal) {
         if pendingWindow !== window { cancelPending() }
+        let wasVisible = window.isVisible
         window.level = level
         window.hidesOnDeactivate = false
         if window.isMiniaturized { window.deminiaturize(nil) }
@@ -31,6 +32,10 @@ final class WindowPresentation: NSObject {
             window.alphaValue = 0
             window.orderFrontRegardless()
         }
+        WindowDiagnostics.shared.record("wp-show", window: window, extra: [
+            ("wasVis", wasVisible ? "1" : "0"),
+            ("pendingAlpha", pendingAlpha != nil ? "1" : "0"),
+        ])
         // An explicit foreground request must also work from accessory mode.
         NSApp.activate(ignoringOtherApps: true)
         if NSApp.isActive { didBecomeActive() }
@@ -48,6 +53,9 @@ final class WindowPresentation: NSObject {
         pendingWindow = nil
         pendingAlpha = nil
         guard let window else { return }
+        WindowDiagnostics.shared.record("wp-did-become-active", window: window, extra: [
+            ("hadAlpha", alpha != nil ? "1" : "0"),
+        ])
         guard window.isVisible, !window.isMiniaturized else {
             if let alpha { window.alphaValue = alpha }
             return
@@ -67,6 +75,11 @@ final class WindowPresentation: NSObject {
         let alpha = pendingAlpha
         pendingWindow = nil
         pendingAlpha = nil
+        if let window {
+            WindowDiagnostics.shared.record("wp-cancel-pending", window: window, extra: [
+                ("hadAlpha", alpha != nil ? "1" : "0"),
+            ])
+        }
         if let window, let alpha {
             window.orderOut(nil)
             window.alphaValue = alpha

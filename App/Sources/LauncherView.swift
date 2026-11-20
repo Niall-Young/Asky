@@ -233,6 +233,10 @@ final class LauncherController {
 
     func show(on targetScreen: NSScreen? = nil) {
         LauncherPresentationTrace.record("show-request", panel: panel)
+        let isFirstOpen = hosting == nil
+        WindowDiagnostics.shared.record("launcher-show-start", window: panel, includeEvent: true, extra: [
+            ("first", isFirstOpen ? "1" : "0"),
+        ])
         // Menu/Dock reopen requests can arrive while the launcher is visible.
         // Resetting the spring then would leave the unchanged chrome at alpha 0.
         guard !panel.isVisible else {
@@ -315,6 +319,9 @@ final class LauncherController {
         LauncherPresentationTrace.record("layout-ready", panel: panel)
         panel.makeKeyAndOrderFront(nil)
         LauncherPresentationTrace.record("ordered-front", panel: panel)
+        if isFirstOpen {
+            WindowDiagnostics.shared.recordLauncherFirstOpen(panel: panel)
+        }
         updateOutsideClickDismissal()
     }
 
