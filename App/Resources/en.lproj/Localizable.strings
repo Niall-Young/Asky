@@ -1016,3 +1016,14 @@
 "上一步" = "Back";
 "继续" = "Continue";
 "开始使用 Asky" = "Start Using Asky";
+"开始设置" = "Get Started";
+"跳过" = "Skip";
+"开启常用权限" = "Enable Essential Permissions";
+"只申请必要能力，日历和备忘录会在首次使用时再询问" = "Only essential access now. Calendar and Notes ask on first use.";
+"必备" = "Essential";
+"开机自动在菜单栏就绪，随时用快捷键呼出" = "Start automatically in the menu bar so your shortcut is always ready";
+"已开启" = "Enabled";
+"一切就绪" = "You’re All Set";
+"随时按快捷键呼出 Asky，AI 助手可在需要时再配置" = "Summon Asky anytime with a shortcut. You can set up AI whenever you’re ready.";
+"不配置模型也能畅用搜索、剪贴板与预览" = "Search, clipboard, and preview work offline without a model";
+"现在配置" = "Set Up Now";
