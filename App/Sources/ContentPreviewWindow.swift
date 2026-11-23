@@ -79,7 +79,8 @@ final class ContentPreviewWindow: NSWindowController, NSWindowDelegate {
 
     func releaseShortcut(in panel: NSPanel) {
         guard shortcutWindow === panel else { return }
-        shortcutCapture?.setEnabled(false)
+        shortcutCapture?.invalidate()
+        shortcutCapture = nil
         shortcutWindow = nil
         shouldRouteShortcut = nil
     }

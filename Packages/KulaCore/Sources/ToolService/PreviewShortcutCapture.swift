@@ -19,7 +19,7 @@ public final class PreviewShortcutCapture {
                 guard let context else { return Unmanaged.passUnretained(event) }
                 if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
                     let capture = Unmanaged<PreviewShortcutCapture>.fromOpaque(context).takeUnretainedValue()
-                    MainActor.assumeIsolated { capture.setEnabled(capture.enabled) }
+                    MainActor.assumeIsolated { capture.handleTapDisabled(type) }
                     return nil
                 }
                 let modifiers: CGEventFlags = [.maskControl, .maskAlternate, .maskShift, .maskCommand]
@@ -41,12 +41,36 @@ public final class PreviewShortcutCapture {
     }
 
     public func setEnabled(_ enabled: Bool) {
+        guard self.enabled != enabled else { return }
         self.enabled = enabled
         if let port { CGEvent.tapEnable(tap: port, enable: enabled) }
     }
 
+    public func invalidate() {
+        enabled = false
+        if let source {
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
+            self.source = nil
+        }
+        if let port {
+            CFMachPortInvalidate(port)
+            self.port = nil
+        }
+    }
+
+    /// Re-enables only after a system timeout while the caller still wants capture active.
+    /// Calling `tapEnable(false)` on `.tapDisabledByUserInput` makes WindowServer emit
+    /// `.tapDisabledByUserInput` again, spinning both processes in a Mach IPC loop.
+    static func shouldReenable(after type: CGEventType, desiredEnabled: Bool) -> Bool {
+        type == .tapDisabledByTimeout && desiredEnabled
+    }
+
+    private func handleTapDisabled(_ type: CGEventType) {
+        guard Self.shouldReenable(after: type, desiredEnabled: enabled), let port else { return }
+        CGEvent.tapEnable(tap: port, enable: true)
+    }
+
     isolated deinit {
-        if let source { CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes) }
-        if let port { CFMachPortInvalidate(port) }
+        invalidate()
     }
 }
