@@ -148,10 +148,15 @@ final class AppModel {
     }
     let launchLanguage: ApplicationLanguage
     @ObservationIgnored var onOpenSettings: (() -> Void)?
+    @ObservationIgnored var onOpenOnboarding: (() -> Void)?
 
     func openSettings(permissions: Bool = false) {
         if permissions { settingsTab = "permissions" }
         onOpenSettings?()
+    }
+
+    func openOnboarding() {
+        onOpenOnboarding?()
     }
 
     private(set) var chromeBookmarkAccessState: ChromeBookmarkService.AccessState?

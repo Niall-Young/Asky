@@ -58,11 +58,11 @@ brew install --cask niall-young/asky/asky
 
 也可从 [Releases](https://github.com/Niall-Young/Asky/releases) 下载 DMG，将 `Asky.app` 拖入“应用程序”。应用内自动更新默认开启，可在“设置 › 关于 Asky › 软件更新”中管理；更新前会核对 ZIP 的 SHA-256 校验文件和开发者团队签名。
 
-首次启动：
+首次启动会自动打开欢迎引导窗口，帮助完成基础配置（后续可随时在“设置 › 关于 Asky › 欢迎引导”重新打开）：
 
-1. 打开 Asky，菜单栏出现搜索图标。
+1. 了解快速搜索、剪贴板历史与 AI 助手的核心入口；Asky 常驻菜单栏。
 2. 按提示授予辅助功能权限；自动粘贴和窗口搜索需要该权限。
-3. 需要使用 AI 时，在“设置 › 智能配置 › 模型配置”填写 API Key，或配置兼容 OpenAI 的 Base URL 与模型名。
+3. 确认或录制全局快捷键；需要使用 AI 时，在引导中或“设置 › 智能配置 › 模型配置”填写 API Key，或配置兼容 OpenAI 的 Base URL 与模型名。
 
 不配置模型也能使用搜索、剪贴板与预览。日历、提醒事项、备忘录等系统功能会在首次使用时申请授权。Agent 不依赖 Node.js 或 Pi；只有旧版 JavaScript 插件需要本机 Node.js 22+，详见[插件开发](docs/plugins.md)。
 
@@ -163,11 +163,11 @@ brew install --cask niall-young/asky/asky
 
 Or download the DMG from [Releases](https://github.com/Niall-Young/Asky/releases) and drag `Asky.app` into Applications. In-app automatic updates are enabled by default and can be managed in Settings › About Asky › Software Update; before installing, Asky verifies the ZIP against its SHA-256 checksum file and checks the developer team signature.
 
-First launch:
+First launch automatically opens a welcome guide to walk you through initial setup (reopen it anytime from Settings › About Asky › Welcome Guide):
 
-1. Open Asky; the search icon appears in the menu bar.
+1. Review Quick Search, Clipboard History, and AI Assistant; Asky stays in the menu bar.
 2. Grant Accessibility access when prompted; automatic pasting and window search require it.
-3. To use AI, enter your API key or an OpenAI-compatible Base URL and model name in Settings › AI Settings › Model Configuration.
+3. Confirm or record global shortcuts; to use AI, enter your API key in the guide or in Settings › AI Settings › Model Configuration, or configure an OpenAI-compatible Base URL and model name.
 
 Search, clipboard, and preview work without a model. Calendar, Reminders, Notes, and other system integrations request authorization on first use. The Agent requires neither Node.js nor Pi; only legacy JavaScript plugins need local Node.js 22+, as described in the [plugin guide](docs/plugins.md).
 

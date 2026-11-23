@@ -32,6 +32,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var newAgentHotKey: HotKey?
     private var statusItem: NSStatusItem?
     private var settingsWindow: NSWindow?
+    private var onboardingWindow: NSWindow?
     private var pressure: MemoryPressureMonitor?
     private let termination = ApplicationTermination()
     private let dockVisibility = DockVisibilityController()
@@ -132,6 +133,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         do { try model.initializeLaunchAtLogin() }
         catch { NSLog("Unable to initialize launch at login: %@", error.localizedDescription) }
         model.onOpenSettings = { [weak self] in self?.openSettings() }
+        model.onOpenOnboarding = { [weak self] in self?.openOnboarding() }
         dockVisibility.showDockIcon = model.preferences.showDockIcon
         model.onDockIconVisibilityChange = { [weak self] visible in
             self?.dockVisibility.showDockIcon = visible
@@ -176,12 +178,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         #if DEBUG
         if CommandLine.arguments.contains("--show-agent") { agentWindow.show() }
+        if CommandLine.arguments.contains("--show-onboarding") { openOnboarding() }
         if CommandLine.arguments.contains("--test-clipboard") {
             clipboardWindow.pinned = true
             clipboardWindow.show()
             clipboardWindow.query = ProcessInfo.processInfo.environment["ASKY_CLIPBOARD_TEST_QUERY"] ?? ""
         }
         #endif
+        if !model.preferences.hasCompletedOnboarding {
+            openOnboarding()
+        }
         Task {
             await model.start()
             reminders.start()
@@ -233,7 +239,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Silent relaunch only when nothing is open, running or waiting for the user.
     private var isQuietForUpdate: Bool {
         !launcher.isVisible && !clipboardWindow.isVisible && !agentWindow.isVisible && !agentWindow.model.isRunning
-            && settingsWindow?.isVisible != true && model.confirmations.queue.isEmpty
+            && settingsWindow?.isVisible != true && onboardingWindow?.isVisible != true
+            && model.confirmations.queue.isEmpty
             && !ContentPreviewWindow.shared.isVisible && !ContentPreviewWindow.quick.isVisible
             && PermissionAuthorizationWindow.shared.window?.isVisible != true
             && !model.terminal.isRunning && !model.isMCPBusy
@@ -245,7 +252,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             ("hasVisible", flag ? "1" : "0"),
             ("settingsVisible", settingsWindow?.isVisible == true ? "1" : "0"),
         ])
-        if let settingsWindow, settingsWindow.isVisible {
+        if let onboardingWindow, onboardingWindow.isVisible {
+            windowPresentation.show(onboardingWindow)
+        } else if let settingsWindow, settingsWindow.isVisible {
             windowPresentation.show(settingsWindow)
         } else {
             openLauncher()
@@ -455,5 +464,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         launcher.hide()
         clipboardWindow.hide()
         if let settingsWindow { windowPresentation.show(settingsWindow) }
+    }
+
+    @objc private func openOnboarding() {
+        if onboardingWindow == nil {
+            let w = OnboardingWindow.make(app: model, onFinish: { [weak self] in
+                self?.onboardingWindow?.close()
+                self?.openLauncher()
+            }, onDismiss: { [weak self] in
+                self?.onboardingWindow?.close()
+            })
+            w.level = .normal
+            w.collectionBehavior = [.moveToActiveSpace, .primary]
+            w.isReleasedWhenClosed = false
+            w.center()
+            onboardingWindow = w
+        }
+        launcher.hide()
+        clipboardWindow.hide()
+        if let onboardingWindow { windowPresentation.show(onboardingWindow) }
     }
 }

@@ -152,7 +152,7 @@ private struct HotKeySettings: View {
     }
 }
 
-private struct HotKeyRecorder: View {
+struct HotKeyRecorder: View {
     let label: String
     let allowsPlainKey: Bool
     let apply: (UInt32, UInt32, String) -> Bool

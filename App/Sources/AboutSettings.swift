@@ -24,8 +24,13 @@ struct AboutSettings: View {
                             .textSelection(.enabled)
                     }
                     Spacer(minLength: 12)
-                    SettingsButton("GitHub", assetImage: "GitHubMark") {
-                        _ = ToolService.openLauncherURL(ToolService.appRepositoryURL)
+                    HStack(spacing: 8) {
+                        SettingsButton(NSLocalizedString("欢迎引导", comment: "")) {
+                            app.openOnboarding()
+                        }
+                        SettingsButton("GitHub", assetImage: "GitHubMark") {
+                            _ = ToolService.openLauncherURL(ToolService.appRepositoryURL)
+                        }
                     }
                 }
                 .padding(.vertical, 4)
