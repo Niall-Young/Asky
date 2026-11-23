@@ -75,6 +75,20 @@ enum InlineTagKind: Equatable {
         return false
     }
 
+    var supportsComposerPopover: Bool {
+        switch self {
+        case .file, .image: false
+        case .pastedText, .selection, .reply: true
+        }
+    }
+
+    var supportsBubbleAction: Bool {
+        switch self {
+        case .file, .image: false
+        case .pastedText, .selection, .reply: true
+        }
+    }
+
     static func singleLinePreview(_ text: String) -> String {
         text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
     }
@@ -97,20 +111,39 @@ struct InlineTagAppearance: Equatable {
     let reduceTransparency: Bool
 }
 
+enum InlineTagHoverState: Equatable {
+    case none
+    case pill
+    case closeButton
+}
+
 @MainActor
 final class InlineTagAttachment: NSTextAttachment {
     let tokenID: String
     var kind: InlineTagKind
     var appearance: InlineTagAppearance
+    private(set) var hoverState: InlineTagHoverState = .none
 
     static let pillHeight: CGFloat = 22
     static let horizontalMargin: CGFloat = 2
     static let horizontalPadding: CGFloat = 7
     static let iconSpacing: CGFloat = 5
     static let iconSize: CGFloat = 13
+    static let closeIconSize: CGFloat = 11.5
     static let thumbSize: CGFloat = 16
     static let maxPillWidth: CGFloat = 188
     static let cornerRadius: CGFloat = 6
+
+    private var hasThumbnail: Bool {
+        if case .image(_, let data) = kind, data != nil { return true }
+        return false
+    }
+
+    var closeHitWidth: CGFloat {
+        let iconWidth = hasThumbnail ? Self.thumbSize : Self.iconSize
+        let leadingPad = hasThumbnail ? 4 : Self.horizontalPadding
+        return Self.horizontalMargin + leadingPad + iconWidth + Self.iconSpacing / 2
+    }
 
     init(kind: InlineTagKind, appearance: InlineTagAppearance) {
         self.tokenID = kind.tokenID
@@ -133,17 +166,19 @@ final class InlineTagAttachment: NSTextAttachment {
         rebuildImage()
     }
 
+    @discardableResult
+    func setHoverState(_ newState: InlineTagHoverState) -> Bool {
+        guard hoverState != newState else { return false }
+        hoverState = newState
+        rebuildImage()
+        return true
+    }
+
     private func rebuildImage() {
         let font = NSFont.systemFont(ofSize: 12.5, weight: .regular)
         let label = kind.label
-        let iconWidth: CGFloat = {
-            if case .image(_, let data) = kind, data != nil { return Self.thumbSize }
-            return Self.iconSize
-        }()
-        let leadingPad: CGFloat = {
-            if case .image(_, let data) = kind, data != nil { return 4 }
-            return Self.horizontalPadding
-        }()
+        let iconWidth: CGFloat = hasThumbnail ? Self.thumbSize : Self.iconSize
+        let leadingPad: CGFloat = hasThumbnail ? 4 : Self.horizontalPadding
         let maxTextWidth = Self.maxPillWidth - leadingPad - iconWidth - Self.iconSpacing - Self.horizontalPadding
         let measuredWidth = ceil((label as NSString).size(withAttributes: [.font: font]).width)
         let textWidth = min(maxTextWidth, max(12, measuredWidth))
@@ -151,6 +186,7 @@ final class InlineTagAttachment: NSTextAttachment {
         let totalSize = NSSize(width: pillWidth + Self.horizontalMargin * 2, height: Self.pillHeight)
 
         let isDark = appearance.colorScheme == .dark
+        let isHovered = hoverState != .none
         let fillColor: NSColor
         let borderColor: NSColor
         if appearance.reduceTransparency {
@@ -165,11 +201,11 @@ final class InlineTagAttachment: NSTextAttachment {
                 : NSColor(red: 14 / 255, green: 15 / 255, blue: 17 / 255, alpha: 0.08)
         } else {
             fillColor = isDark
-                ? NSColor(white: 1, alpha: 0.10)
-                : NSColor(red: 14 / 255, green: 15 / 255, blue: 17 / 255, alpha: 0.065)
+                ? NSColor(white: 1, alpha: isHovered ? 0.15 : 0.10)
+                : NSColor(red: 14 / 255, green: 15 / 255, blue: 17 / 255, alpha: isHovered ? 0.10 : 0.065)
             borderColor = isDark
-                ? NSColor(white: 1, alpha: 0.12)
-                : NSColor(red: 14 / 255, green: 15 / 255, blue: 17 / 255, alpha: 0.08)
+                ? NSColor(white: 1, alpha: isHovered ? 0.18 : 0.12)
+                : NSColor(red: 14 / 255, green: 15 / 255, blue: 17 / 255, alpha: isHovered ? 0.12 : 0.08)
         }
         let textColor = isDark
             ? NSColor(white: 1, alpha: 0.86)
@@ -198,7 +234,38 @@ final class InlineTagAttachment: NSTextAttachment {
                                       y: thumbRect.midY - drawSize.height / 2,
                                       width: drawSize.width, height: drawSize.height)
                 nsImage.draw(in: drawRect)
+                if self.hoverState != .none {
+                    let scrimAlpha: CGFloat = self.hoverState == .closeButton ? 0.65 : 0.48
+                    NSColor.black.withAlphaComponent(scrimAlpha).setFill()
+                    thumbRect.fill()
+                    let glyph = MingCute.image("xmark", size: Self.closeIconSize)
+                    let tinted = Self.tintedImage(glyph, color: .white)
+                    let closeRect = NSRect(x: thumbRect.midX - Self.closeIconSize / 2,
+                                           y: thumbRect.midY - Self.closeIconSize / 2,
+                                           width: Self.closeIconSize, height: Self.closeIconSize)
+                    tinted.draw(in: closeRect)
+                }
                 NSGraphicsContext.restoreGraphicsState()
+            } else if self.hoverState != .none {
+                let iconCenterX = iconX + Self.iconSize / 2
+                let iconCenterY = Self.pillHeight / 2
+                if self.hoverState == .closeButton {
+                    let badgeSize: CGFloat = 16
+                    let badgeRect = NSRect(x: iconCenterX - badgeSize / 2, y: iconCenterY - badgeSize / 2,
+                                           width: badgeSize, height: badgeSize)
+                    let badgeColor = isDark
+                        ? NSColor(white: 1, alpha: 0.16)
+                        : NSColor(red: 14 / 255, green: 15 / 255, blue: 17 / 255, alpha: 0.11)
+                    badgeColor.setFill()
+                    NSBezierPath(ovalIn: badgeRect).fill()
+                }
+                let glyph = MingCute.image("xmark", size: Self.closeIconSize)
+                let tint = self.hoverState == .closeButton ? textColor : iconColor
+                let tinted = Self.tintedImage(glyph, color: tint)
+                let closeRect = NSRect(x: iconCenterX - Self.closeIconSize / 2,
+                                       y: iconCenterY - Self.closeIconSize / 2,
+                                       width: Self.closeIconSize, height: Self.closeIconSize)
+                tinted.draw(in: closeRect)
             } else {
                 let symbol: String = switch self.kind {
                 case .image: "photo"
@@ -501,7 +568,11 @@ private final class UserInlineTagTextView: NSTextView {
     override func mouseMoved(with event: NSEvent) {
         if let (tag, _) = tagAt(windowPoint: event.locationInWindow) {
             toolTip = tag.kind.helpText
-            NSCursor.pointingHand.set()
+            if tag.kind.supportsBubbleAction {
+                NSCursor.pointingHand.set()
+            } else {
+                super.mouseMoved(with: event)
+            }
         } else {
             toolTip = nil
             super.mouseMoved(with: event)
@@ -509,7 +580,7 @@ private final class UserInlineTagTextView: NSTextView {
     }
 
     override func mouseDown(with event: NSEvent) {
-        if let (tag, rect) = tagAt(windowPoint: event.locationInWindow) {
+        if let (tag, rect) = tagAt(windowPoint: event.locationInWindow), tag.kind.supportsBubbleAction {
             onTagClick?(tag, rect)
             return
         }

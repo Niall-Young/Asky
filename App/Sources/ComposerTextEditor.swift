@@ -29,6 +29,8 @@ private final class ComposerTextView: NSTextView {
 
     private let popoverPresenter = InlineTagPopoverPresenter()
     private var tracking: NSTrackingArea?
+    private weak var hoveredTag: InlineTagAttachment?
+    private var hoveredTagIndex: Int?
 
     static let bodyFont = NSFont.systemFont(ofSize: 14, weight: .regular)
     static var bodyParagraphStyle: NSParagraphStyle {
@@ -150,39 +152,112 @@ private final class ComposerTextView: NSTextView {
         return (attachment, index, rect)
     }
 
+    private func isPointInCloseButton(_ pt: NSPoint, tag: InlineTagAttachment, rect: NSRect) -> Bool {
+        let closeRect = NSRect(x: rect.minX, y: rect.minY, width: tag.closeHitWidth, height: rect.height)
+        return closeRect.insetBy(dx: -2, dy: -2).contains(pt)
+    }
+
+    private func invalidateTagDisplay(at index: Int) {
+        guard let storage = textStorage, index >= 0, index < storage.length else {
+            needsDisplay = true
+            return
+        }
+        layoutManager?.invalidateDisplay(forCharacterRange: NSRange(location: index, length: 1))
+        needsDisplay = true
+    }
+
+    func clearHoveredTag() {
+        guard let previous = hoveredTag else {
+            hoveredTagIndex = nil
+            return
+        }
+        let changed = previous.setHoverState(.none)
+        let prevIndex = hoveredTagIndex
+        hoveredTag = nil
+        hoveredTagIndex = nil
+        if changed {
+            if let prevIndex {
+                invalidateTagDisplay(at: prevIndex)
+            } else {
+                needsDisplay = true
+            }
+        }
+    }
+
+    func resetDraft() {
+        clearHoveredTag()
+        popoverPresenter.close()
+        textStorage?.setAttributedString(NSAttributedString())
+        updateTypingAttributes()
+        needsDisplay = true
+    }
+
     override func mouseMoved(with event: NSEvent) {
-        if let (tag, _, _) = tagAt(windowPoint: event.locationInWindow) {
-            toolTip = tag.kind.helpText
-            NSCursor.pointingHand.set()
+        let pt = convert(event.locationInWindow, from: nil)
+        if let (tag, index, rect) = tagAt(windowPoint: event.locationInWindow) {
+            let overClose = isPointInCloseButton(pt, tag: tag, rect: rect)
+            let newState: InlineTagHoverState = overClose ? .closeButton : .pill
+            if hoveredTag !== tag {
+                clearHoveredTag()
+                hoveredTag = tag
+                hoveredTagIndex = index
+            } else {
+                hoveredTagIndex = index
+            }
+            if tag.setHoverState(newState) {
+                invalidateTagDisplay(at: index)
+            }
+            toolTip = overClose ? NSLocalizedString("移除", comment: "") : tag.kind.helpText
+            if overClose || tag.kind.supportsComposerPopover {
+                NSCursor.pointingHand.set()
+            } else {
+                NSCursor.arrow.set()
+            }
         } else {
+            clearHoveredTag()
             toolTip = nil
             super.mouseMoved(with: event)
         }
     }
 
+    override func mouseExited(with event: NSEvent) {
+        clearHoveredTag()
+        toolTip = nil
+        super.mouseExited(with: event)
+    }
+
     override func mouseDown(with event: NSEvent) {
+        let pt = convert(event.locationInWindow, from: nil)
         if let (tag, index, rect) = tagAt(windowPoint: event.locationInWindow) {
-            let expand: (() -> Void)? = {
-                if case .pastedText(let snippet) = tag.kind {
-                    return { [weak self] in self?.replaceTag(at: index, with: snippet.text) }
-                }
-                return nil
-            }()
-            let reveal: (() -> Void)? = {
-                if case .reply(let quote) = tag.kind {
-                    return { [weak self] in self?.onRevealReply?(quote.sourceMessageID) }
-                }
-                return nil
-            }()
-            popoverPresenter.show(
-                kind: tag.kind,
-                relativeTo: rect,
-                of: self,
-                onExpandPasted: expand,
-                onRevealReply: reveal,
-                onRemove: { [weak self] in self?.replaceTag(at: index, with: "") }
-            )
-            return
+            if isPointInCloseButton(pt, tag: tag, rect: rect) {
+                clearHoveredTag()
+                popoverPresenter.close()
+                replaceTag(at: index, with: "")
+                return
+            }
+            if tag.kind.supportsComposerPopover {
+                let expand: (() -> Void)? = {
+                    if case .pastedText(let snippet) = tag.kind {
+                        return { [weak self] in self?.replaceTag(at: index, with: snippet.text) }
+                    }
+                    return nil
+                }()
+                let reveal: (() -> Void)? = {
+                    if case .reply(let quote) = tag.kind {
+                        return { [weak self] in self?.onRevealReply?(quote.sourceMessageID) }
+                    }
+                    return nil
+                }()
+                popoverPresenter.show(
+                    kind: tag.kind,
+                    relativeTo: rect,
+                    of: self,
+                    onExpandPasted: expand,
+                    onRevealReply: reveal,
+                    onRemove: { [weak self] in self?.replaceTag(at: index, with: "") }
+                )
+                return
+            }
         }
         super.mouseDown(with: event)
     }
@@ -218,6 +293,7 @@ private final class ComposerTextView: NSTextView {
 
     override func didChangeText() {
         super.didChangeText()
+        clearHoveredTag()
         normalizeTextAttributes()
         updateTypingAttributes()
         needsDisplay = true
@@ -385,9 +461,7 @@ struct ComposerTextEditor: NSViewRepresentable {
 
         if context.coordinator.lastResetRevision != resetRevision {
             context.coordinator.lastResetRevision = resetRevision
-            editor.textStorage?.setAttributedString(NSAttributedString())
-            editor.updateTypingAttributes()
-            editor.needsDisplay = true
+            editor.resetDraft()
         }
 
         if !pendingInsertions.isEmpty {
