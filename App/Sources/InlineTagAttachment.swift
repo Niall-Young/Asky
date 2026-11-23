@@ -125,13 +125,15 @@ final class InlineTagAttachment: NSTextAttachment {
     private(set) var hoverState: InlineTagHoverState = .none
 
     static let pillHeight: CGFloat = 22
-    static let horizontalMargin: CGFloat = 2
+    static let horizontalMargin: CGFloat = 5
     static let horizontalPadding: CGFloat = 7
+    static let iconLeadingPadding: CGFloat = 6
+    static let thumbLeadingPadding: CGFloat = 3
     static let iconSpacing: CGFloat = 5
-    static let iconSize: CGFloat = 13
-    static let closeIconSize: CGFloat = 11.5
-    static let thumbSize: CGFloat = 16
-    static let maxPillWidth: CGFloat = 188
+    static let iconSize: CGFloat = 15
+    static let closeIconSize: CGFloat = 13
+    static let thumbSize: CGFloat = 18
+    static let maxPillWidth: CGFloat = 192
     static let cornerRadius: CGFloat = 6
 
     private var hasThumbnail: Bool {
@@ -141,7 +143,7 @@ final class InlineTagAttachment: NSTextAttachment {
 
     var closeHitWidth: CGFloat {
         let iconWidth = hasThumbnail ? Self.thumbSize : Self.iconSize
-        let leadingPad = hasThumbnail ? 4 : Self.horizontalPadding
+        let leadingPad = hasThumbnail ? Self.thumbLeadingPadding : Self.iconLeadingPadding
         return Self.horizontalMargin + leadingPad + iconWidth + Self.iconSpacing / 2
     }
 
@@ -178,7 +180,7 @@ final class InlineTagAttachment: NSTextAttachment {
         let font = NSFont.systemFont(ofSize: 12.5, weight: .regular)
         let label = kind.label
         let iconWidth: CGFloat = hasThumbnail ? Self.thumbSize : Self.iconSize
-        let leadingPad: CGFloat = hasThumbnail ? 4 : Self.horizontalPadding
+        let leadingPad: CGFloat = hasThumbnail ? Self.thumbLeadingPadding : Self.iconLeadingPadding
         let maxTextWidth = Self.maxPillWidth - leadingPad - iconWidth - Self.iconSpacing - Self.horizontalPadding
         let measuredWidth = ceil((label as NSString).size(withAttributes: [.font: font]).width)
         let textWidth = min(maxTextWidth, max(12, measuredWidth))
@@ -210,7 +212,7 @@ final class InlineTagAttachment: NSTextAttachment {
         let textColor = isDark
             ? NSColor(white: 1, alpha: 0.86)
             : NSColor(red: 14 / 255, green: 15 / 255, blue: 17 / 255, alpha: 0.80)
-        let iconColor = NSColor(ThemeColor.kIconSubtle.color(for: appearance.colorScheme))
+        let iconColor = NSColor(ThemeColor.kIcon.color(for: appearance.colorScheme))
 
         let image = NSImage(size: totalSize, flipped: false) { _ in
             let pillRect = NSRect(x: Self.horizontalMargin, y: 0.5, width: pillWidth, height: Self.pillHeight - 1)
@@ -226,7 +228,7 @@ final class InlineTagAttachment: NSTextAttachment {
                 let thumbRect = NSRect(x: iconX, y: (Self.pillHeight - Self.thumbSize) / 2,
                                        width: Self.thumbSize, height: Self.thumbSize)
                 NSGraphicsContext.saveGraphicsState()
-                NSBezierPath(roundedRect: thumbRect, xRadius: 3.5, yRadius: 3.5).addClip()
+                NSBezierPath(roundedRect: thumbRect, xRadius: 4, yRadius: 4).addClip()
                 let src = nsImage.size
                 let scale = max(thumbRect.width / max(1, src.width), thumbRect.height / max(1, src.height))
                 let drawSize = NSSize(width: src.width * scale, height: src.height * scale)
@@ -250,7 +252,7 @@ final class InlineTagAttachment: NSTextAttachment {
                 let iconCenterX = iconX + Self.iconSize / 2
                 let iconCenterY = Self.pillHeight / 2
                 if self.hoverState == .closeButton {
-                    let badgeSize: CGFloat = 16
+                    let badgeSize: CGFloat = 17
                     let badgeRect = NSRect(x: iconCenterX - badgeSize / 2, y: iconCenterY - badgeSize / 2,
                                            width: badgeSize, height: badgeSize)
                     let badgeColor = isDark
@@ -360,8 +362,8 @@ private struct InlineTagPopoverContent: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
-                Image(mingCute: iconName, size: 14)
-                    .foregroundStyle(ThemeColor.kIconSubtle)
+                Image(mingCute: iconName, size: 15)
+                    .foregroundStyle(ThemeColor.kIcon)
                 Text(headerTitle)
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(ThemeColor.kText)
