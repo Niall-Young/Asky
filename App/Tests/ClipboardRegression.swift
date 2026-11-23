@@ -1077,6 +1077,23 @@ enum ClipboardRegression {
         panel.makeKey()
         controller.toggleActionsMenu()
         controller.actionSelection = 2
+        let keepOpenKey = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .option,
+            timestamp: 0, windowNumber: panel.windowNumber, context: nil, characters: "\r",
+            charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 36)!
+        precondition(controller.handleActionKey(keepOpenKey))
+        try await Task.sleep(for: .milliseconds(650))
+        let afterKeepOpenKey = try String(contentsOf: root.appending(path: "text"), encoding: .utf8)
+        precondition(afterKeepOpenKey == "LeftPASTEPASTERight",
+                     "Option Return must paste and keep window open even when Delete is highlighted in More")
+        precondition(controller.isVisible && panel.contentView != nil && panel.frame == keptFrame,
+                     "Option Return keep-open paste must leave the unpinned panel open at the same position")
+        precondition(controller.query == "PASTE" && controller.selectedItem?.id == keptItem && !controller.pinned,
+                     "Option Return keep-open paste must preserve query, selection and pin state")
+        precondition(!controller.isActionsMenuPresented && !panel.isKeyWindow,
+                     "Option Return keep-open paste must close More and leave keyboard focus with the destination")
+        panel.makeKey()
+        controller.toggleActionsMenu()
+        controller.actionSelection = 2
         let copyKey = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command,
             timestamp: 0, windowNumber: panel.windowNumber, context: nil, characters: "\r",
             charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 36)!
@@ -1090,11 +1107,11 @@ enum ClipboardRegression {
             charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 36)!
         NSApp.postEvent(returnKey, atStart: false)
         for _ in 0..<100 {
-            if (try? String(contentsOf: root.appending(path: "text"), encoding: .utf8)) == "LeftPASTEPASTERight" { break }
+            if (try? String(contentsOf: root.appending(path: "text"), encoding: .utf8)) == "LeftPASTEPASTEPASTERight" { break }
             try await Task.sleep(for: .milliseconds(30))
         }
         let afterPaste = try String(contentsOf: root.appending(path: "text"), encoding: .utf8)
-        precondition(afterPaste == "LeftPASTEPASTERight",
+        precondition(afterPaste == "LeftPASTEPASTEPASTERight",
                      "Return must insert at the original cursor in another process")
         precondition(!controller.isVisible)
         // A clipboard change between copy and dispatch must prevent an unrelated paste.
@@ -1145,11 +1162,15 @@ enum ClipboardRegression {
         var draft = "LeftRight"
         var attachmentPastes = 0
         let host = NSHostingView(rootView: ComposerTextEditor(
-            text: Binding(get: { draft }, set: { draft = $0 }), height: .constant(80),
-            isFocused: .constant(true), pasteAttachment: {
+            height: .constant(80), isFocused: .constant(true), resetRevision: 0,
+            pendingInsertions: [], consumeInsertions: { _ in },
+            onSegmentsChanged: { segments in
+                draft = segments.compactMap { if case .text(let s) = $0 { return s } else { return nil } }.joined()
+            }, pasteAttachment: {
                 if NSPasteboard.general.data(forType: .png) != nil { attachmentPastes += 1; return true }
                 return false
-            }, submit: { preconditionFailure("paste must never submit the message") }))
+            }, pasteLongText: { _ in nil }, onRevealReply: { _ in },
+            submit: { preconditionFailure("paste must never submit the message") }))
         let window = NSWindow(contentRect: NSRect(x: 200, y: 200, width: 500, height: 200),
                               styleMask: [.titled], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
@@ -1159,6 +1180,7 @@ enum ClipboardRegression {
         defer { window.close() }
         try await Task.sleep(for: .milliseconds(250))
         let editor = descendants(host, of: NSTextView.self).first!
+        editor.string = draft
         NSApp.activate(ignoringOtherApps: true)
         for _ in 0..<30 {
             window.makeKeyAndOrderFront(nil)

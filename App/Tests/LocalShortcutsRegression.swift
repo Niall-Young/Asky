@@ -115,6 +115,11 @@ enum LocalShortcutsRegression {
                 precondition(prompts == ["hello shortcut"])
                 precondition(!launcher.handleActionKey(event(36, .command)), "old AI shortcut must stop firing")
                 let clipboard = ClipboardController(app: app)
+                precondition(ClipboardHistoryAction.pasteKeepingOpen.shortcut == .clipboardPasteKeepingOpen)
+                precondition(clipboard.handleActionKey(event(36, .option)))
+                precondition(app.preferences.setShortcut(.clipboardPasteKeepingOpen, .init(code: 35, modifiers: 4096, label: "⌃ P")))
+                precondition(clipboard.handleActionKey(event(35, .control)))
+                precondition(!clipboard.handleActionKey(event(36, .option)), "old paste-keeping-open shortcut must stop firing")
                 precondition(app.preferences.setShortcut(.clipboardCopy, .init(code: 38, modifiers: 4096, label: "⌃ J")))
                 precondition(clipboard.handleActionKey(event(38, .control)))
                 precondition(!clipboard.handleActionKey(event(36, .command)), "old clipboard shortcut must stop firing")
@@ -125,8 +130,12 @@ enum LocalShortcutsRegression {
                 var agentPreferences = SettingsPreferences()
                 precondition(!agentPreferences.setShortcut(.send, .init(code: 38, modifiers: 4096, label: "⌃ J")))
                 precondition(!agentPreferences.setShortcut(.newline, .init(code: 40, modifiers: 4096, label: "⌃ K")))
-                let composer = ComposerTextEditor(text: Binding(get: { draft }, set: { draft = $0 }),
-                    height: .constant(44), isFocused: .constant(false), pasteAttachment: { false },
+                let composer = ComposerTextEditor(
+                    height: .constant(44), isFocused: .constant(false), resetRevision: 0,
+                    pendingInsertions: [], consumeInsertions: { _ in },
+                    onSegmentsChanged: { segments in
+                        draft = segments.compactMap { if case .text(let s) = $0 { return s } else { return nil } }.joined()
+                    }, pasteAttachment: { false }, pasteLongText: { _ in nil }, onRevealReply: { _ in },
                     submit: { sends += 1 }, shortcuts: agentPreferences)
                 let host = NSHostingView(rootView: composer)
                 host.frame = NSRect(x: 0, y: 0, width: 400, height: 100)
@@ -136,6 +145,7 @@ enum LocalShortcutsRegression {
                 try await Task.sleep(for: .milliseconds(200))
                 host.layoutSubtreeIfNeeded()
                 let editor = views(host).compactMap { $0 as? NSTextView }.first!
+                editor.string = draft
                 precondition(editor.performKeyEquivalent(with: event(36, window: composerWindow)))
                 precondition(sends == 1)
                 precondition(editor.performKeyEquivalent(with: event(36, .shift, window: composerWindow)))

@@ -836,6 +836,8 @@
 
 "复制到剪贴板" = "Copy to clipboard";
 
+"粘贴并保持窗口开启" = "Paste and Keep Window Open";
+
 "选择上一项" = "Select previous item";
 
 "选择下一项" = "Select next item";

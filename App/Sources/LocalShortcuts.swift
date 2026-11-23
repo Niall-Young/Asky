@@ -3,7 +3,7 @@ import SwiftUI
 
 /// Stored by stable action ID; missing IDs retain their defaults on older installations.
 enum LocalShortcutAction: String, CaseIterable, Identifiable {
-    case windowPreviousDisplay, windowNextDisplay, reveal, copyPath, copyFile, copyName, fileInfo, execute, askAI, launcherPreview, launcherMore, launcherUp, launcherDown, enterFolder, back, launcherEscape, settings, paste, clipboardCopy, delete, clipboardPreview, clipboardMore, clipboardUp, clipboardDown, clipboardEscape, send, newline, newChat, closeChat, agentEscape
+    case windowPreviousDisplay, windowNextDisplay, reveal, copyPath, copyFile, copyName, fileInfo, execute, askAI, launcherPreview, launcherMore, launcherUp, launcherDown, enterFolder, back, launcherEscape, settings, paste, clipboardCopy, clipboardPasteKeepingOpen, delete, clipboardPreview, clipboardMore, clipboardUp, clipboardDown, clipboardEscape, send, newline, newChat, closeChat, agentEscape
     var id: String { rawValue }
     var isConfigurable: Bool {
         switch self {
@@ -34,6 +34,7 @@ enum LocalShortcutAction: String, CaseIterable, Identifiable {
         case .settings: "打开设置"
         case .paste: "粘贴到光标位置"
         case .clipboardCopy: "复制到剪贴板"
+        case .clipboardPasteKeepingOpen: "粘贴并保持窗口开启"
         case .delete: "删除记录"
         case .clipboardMore: "更多（列表布局）"
         case .clipboardUp: "选择上一项"
@@ -66,6 +67,7 @@ enum LocalShortcutAction: String, CaseIterable, Identifiable {
         case .settings: "all"
         case .paste: "clipboard"
         case .clipboardCopy: "clipboard"
+        case .clipboardPasteKeepingOpen: "clipboard"
         case .delete: "clipboard"
         case .clipboardPreview: "clipboard"
         case .clipboardMore: "clipboard"
@@ -100,6 +102,7 @@ enum LocalShortcutAction: String, CaseIterable, Identifiable {
         case .settings: .init(code: 43, modifiers: 256, label: "⌘ ,")
         case .paste: .init(code: 36, modifiers: 0, label: "↵")
         case .clipboardCopy: .init(code: 36, modifiers: 256, label: "⌘ ↵")
+        case .clipboardPasteKeepingOpen: .init(code: 36, modifiers: 2048, label: "⌥ ↵")
         case .delete: .init(code: 51, modifiers: 256, label: "⌘ ⌫")
         case .clipboardMore: .init(code: 40, modifiers: 256, label: "⌘ K")
         case .clipboardUp: .init(code: 126, modifiers: 0, label: "↑")

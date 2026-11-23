@@ -81,7 +81,7 @@ private struct HotKeySettings: View {
                 Text(NSLocalizedString("启动器", comment: ""))
             }
             Section {
-                localRows([.clipboardCopy, .delete, .clipboardPreview, .clipboardMore])
+                localRows([.clipboardCopy, .clipboardPasteKeepingOpen, .delete, .clipboardPreview, .clipboardMore])
             } header: {
                 Text(NSLocalizedString("剪贴板历史", comment: ""))
             }

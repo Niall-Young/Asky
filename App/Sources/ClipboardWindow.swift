@@ -74,8 +74,9 @@ enum ClipboardHistoryAction {
         switch self {
         case .preview: .clipboardPreview
         case .copy: .clipboardCopy
+        case .pasteKeepingOpen: .clipboardPasteKeepingOpen
         case .delete: .delete
-        case .pasteKeepingOpen, .clearAll: nil
+        case .clearAll: nil
         }
     }
 }
@@ -384,6 +385,11 @@ final class ClipboardController {
         if matches(.clipboardCopy) {
             isActionsMenuPresented = false
             if !event.isARepeat { submitSelection(copyOnly: true) }
+            return true
+        }
+        if matches(.clipboardPasteKeepingOpen) {
+            isActionsMenuPresented = false
+            if !event.isARepeat, hasPasteTarget { pasteSelection(keepingOpen: true) }
             return true
         }
         if matches(.delete) {
