@@ -18,26 +18,26 @@ private final class ComposerTextView: NSTextView {
     var focusChanged: (Bool) -> Void = { _ in }
     var tagAppearance = InlineTagAppearance(colorScheme: .light, inBubble: false, reduceTransparency: false)
     var placeholderColor: NSColor = .placeholderTextColor {
-        didSet { needsDisplay = true }
-    }
-    var baseTextColor: NSColor = .labelColor {
         didSet {
-            textColor = baseTextColor
-            updateTypingAttributes()
+            if (textStorage?.length ?? 0) == 0 { needsDisplay = true }
         }
     }
+    var baseTextColor: NSColor = .labelColor
 
     private let popoverPresenter = InlineTagPopoverPresenter()
     private var tracking: NSTrackingArea?
     private weak var hoveredTag: InlineTagAttachment?
     private var hoveredTagIndex: Int?
 
+    static let minEditorHeight: CGFloat = 28
+    static let maxEditorHeight: CGFloat = 160
     static let bodyFont = NSFont.systemFont(ofSize: 14, weight: .regular)
-    static var bodyParagraphStyle: NSParagraphStyle {
+    static let maxCaretHeight: CGFloat = ceil(bodyFont.ascender - bodyFont.descender) + 1
+    static let bodyParagraphStyle: NSParagraphStyle = {
         let style = NSMutableParagraphStyle()
         style.lineSpacing = max(0, TextStyle(size: 14, weight: 400, mode: .default).lineHeight - 14 * 1.2)
-        return style
-    }
+        return style.copy() as! NSParagraphStyle
+    }()
 
     func baseAttributes() -> [NSAttributedString.Key: Any] {
         [
@@ -48,7 +48,85 @@ private final class ComposerTextView: NSTextView {
     }
 
     func updateTypingAttributes() {
-        typingAttributes = baseAttributes()
+        let expected = baseAttributes()
+        if (typingAttributes[.font] as? NSFont) == Self.bodyFont,
+           (typingAttributes[.foregroundColor] as? NSColor) == baseTextColor,
+           (typingAttributes[.paragraphStyle] as? NSParagraphStyle) == Self.bodyParagraphStyle,
+           typingAttributes.count == expected.count {
+            return
+        }
+        typingAttributes = expected
+    }
+
+    func applyThemeColors(text: NSColor, placeholder: NSColor) {
+        baseTextColor = text
+        placeholderColor = placeholder
+        insertionPointColor = text
+        guard !hasMarkedText() else { return }
+        updateTypingAttributes()
+        guard let storage = textStorage, storage.length > 0 else { return }
+        let fullRange = NSRange(location: 0, length: storage.length)
+        storage.beginEditing()
+        storage.addAttribute(.foregroundColor, value: text, range: fullRange)
+        storage.endEditing()
+    }
+
+    func naturalContentHeight() -> CGFloat {
+        guard let container = textContainer, let layout = layoutManager else { return Self.minEditorHeight }
+        layout.ensureLayout(for: container)
+        return ceil(layout.usedRect(for: container).height + textContainerInset.height * 2)
+    }
+
+    func pinScrollToTop() {
+        guard let scroll = enclosingScrollView else { return }
+        if scroll.contentView.bounds.origin != .zero {
+            scroll.contentView.scroll(to: .zero)
+            scroll.reflectScrolledClipView(scroll.contentView)
+        }
+    }
+
+    override func scrollToVisible(_ rect: NSRect) -> Bool {
+        // While the composer is still below maxEditorHeight it grows to fit all lines;
+        // suppress intermediate clip-view scrolling so line 1 never vanishes before resize.
+        if naturalContentHeight() <= Self.maxEditorHeight {
+            pinScrollToTop()
+            return false
+        }
+        return super.scrollToVisible(rect)
+    }
+
+    private func clampedCaretRect(_ rect: NSRect) -> NSRect {
+        guard rect.height > Self.maxCaretHeight else { return rect }
+        let delta = floor((rect.height - Self.maxCaretHeight) / 2)
+        return NSRect(x: rect.origin.x, y: rect.origin.y + delta,
+                      width: rect.width, height: Self.maxCaretHeight)
+    }
+
+    private func clampInsertionIndicators(in view: NSView) {
+        for subview in view.subviews {
+            if subview is NSTextInsertionIndicator {
+                let clamped = clampedCaretRect(subview.frame)
+                if clamped != subview.frame {
+                    subview.frame = clamped
+                }
+            } else if !subview.subviews.isEmpty {
+                clampInsertionIndicators(in: subview)
+            }
+        }
+    }
+
+    override func updateInsertionPointStateAndRestartTimer(_ restartFlag: Bool) {
+        super.updateInsertionPointStateAndRestartTimer(restartFlag)
+        clampInsertionIndicators(in: self)
+    }
+
+    override func layout() {
+        super.layout()
+        clampInsertionIndicators(in: self)
+    }
+
+    override func drawInsertionPoint(in rect: NSRect, color: NSColor, turnedOn flag: Bool) {
+        super.drawInsertionPoint(in: clampedCaretRect(rect), color: color, turnedOn: flag)
     }
 
     func insertInlineTag(_ kind: InlineTagKind, atStart: Bool) {
@@ -294,15 +372,37 @@ private final class ComposerTextView: NSTextView {
     override func didChangeText() {
         super.didChangeText()
         clearHoveredTag()
-        normalizeTextAttributes()
-        updateTypingAttributes()
-        needsDisplay = true
+        if !hasMarkedText() {
+            normalizeTextAttributesIfNeeded()
+            updateTypingAttributes()
+        }
+        if (textStorage?.length ?? 0) == 0 {
+            needsDisplay = true
+        }
     }
 
-    private func normalizeTextAttributes() {
+    private func normalizeTextAttributesIfNeeded() {
         guard let storage = textStorage, storage.length > 0 else { return }
         let fullRange = NSRange(location: 0, length: storage.length)
-        storage.addAttributes(baseAttributes(), range: fullRange)
+        let expectedFont = Self.bodyFont
+        let expectedColor = baseTextColor
+        let expectedParagraph = Self.bodyParagraphStyle
+        var rangesToFix: [NSRange] = []
+        storage.enumerateAttributes(in: fullRange, options: []) { attrs, range, _ in
+            let fontOK = (attrs[.font] as? NSFont) == expectedFont
+            let colorOK = (attrs[.foregroundColor] as? NSColor) == expectedColor
+            let paraOK = (attrs[.paragraphStyle] as? NSParagraphStyle) == expectedParagraph
+            if !fontOK || !colorOK || !paraOK {
+                rangesToFix.append(range)
+            }
+        }
+        guard !rangesToFix.isEmpty else { return }
+        let base = baseAttributes()
+        storage.beginEditing()
+        for range in rangesToFix {
+            storage.addAttributes(base, range: range)
+        }
+        storage.endEditing()
     }
 
     override func becomeFirstResponder() -> Bool {
@@ -407,29 +507,40 @@ struct ComposerTextEditor: NSViewRepresentable {
 
     func makeNSView(context: Context) -> NSScrollView {
         let scroll = NSScrollView()
-        let editor = ComposerTextView()
+        let storage = NSTextStorage()
+        let layout = NSLayoutManager()
+        let container = NSTextContainer(size: NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude))
+        container.lineFragmentPadding = 0
+        container.widthTracksTextView = true
+        storage.addLayoutManager(layout)
+        layout.addTextContainer(container)
+
+        let editor = ComposerTextView(frame: NSRect(x: 0, y: 0, width: 0, height: ComposerTextView.minEditorHeight),
+                                      textContainer: container)
         editor.isRichText = true
         editor.allowsUndo = true
         editor.importsGraphics = false
         editor.drawsBackground = false
         editor.font = ComposerTextView.bodyFont
+        editor.defaultParagraphStyle = ComposerTextView.bodyParagraphStyle
         editor.updateTypingAttributes()
         // Keep text 12 pt from the glass while the scroll view sits only 4 pt in.
         editor.textContainerInset = NSSize(width: 8, height: 4)
-        editor.textContainer?.lineFragmentPadding = 0
-        editor.minSize = NSSize(width: 0, height: 28)
+        editor.minSize = NSSize(width: 0, height: ComposerTextView.minEditorHeight)
         editor.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         editor.isVerticallyResizable = true
         editor.isHorizontallyResizable = false
         editor.autoresizingMask = [.width]
-        editor.textContainer?.widthTracksTextView = true
         editor.delegate = context.coordinator
         editor.focusChanged = { [weak coordinator = context.coordinator] focused in
             DispatchQueue.main.async { coordinator?.parent.isFocused = focused }
         }
         editor.setAccessibilityLabel(NSLocalizedString("消息输入", comment: ""))
         scroll.drawsBackground = false
-        scroll.hasVerticalScroller = true
+        scroll.borderType = .noBorder
+        scroll.hasVerticalScroller = false
+        scroll.hasHorizontalScroller = false
+        scroll.autohidesScrollers = true
         scroll.documentView = editor
         context.coordinator.editor = editor
         DispatchQueue.main.async { [weak editor] in
@@ -442,16 +553,27 @@ struct ComposerTextEditor: NSViewRepresentable {
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         guard let editor = scroll.documentView as? ComposerTextView else { return }
         context.coordinator.parent = self
-        editor.setFrameSize(NSSize(width: scroll.contentSize.width, height: max(28, editor.frame.height)))
+        let targetWidth = scroll.contentSize.width
+        if targetWidth > 0, abs(editor.frame.width - targetWidth) > 0.5 {
+            editor.setFrameSize(NSSize(width: targetWidth, height: max(ComposerTextView.minEditorHeight, editor.frame.height)))
+        }
         editor.pasteAttachment = pasteAttachment
         editor.pasteLongText = pasteLongText
         editor.onRevealReply = onRevealReply
         editor.shortcuts = shortcuts
         editor.submit = submit
-        editor.baseTextColor = NSColor(ThemeColor.kText.color(for: colorScheme))
-        editor.placeholderColor = NSColor(ThemeColor.kTextSubtlest.color(for: colorScheme))
-        editor.selectedTextAttributes = [.backgroundColor: NSColor(selectionColor).withAlphaComponent(0.45)]
-        editor.insertionPointColor = editor.baseTextColor
+
+        if context.coordinator.lastColorScheme != colorScheme {
+            context.coordinator.lastColorScheme = colorScheme
+            editor.applyThemeColors(
+                text: NSColor(ThemeColor.kText.color(for: colorScheme)),
+                placeholder: NSColor(ThemeColor.kTextSubtlest.color(for: colorScheme))
+            )
+        }
+        if context.coordinator.lastSelectionColor != selectionColor {
+            context.coordinator.lastSelectionColor = selectionColor
+            editor.selectedTextAttributes = [.backgroundColor: NSColor(selectionColor).withAlphaComponent(0.45)]
+        }
 
         let appearance = InlineTagAppearance(colorScheme: colorScheme, inBubble: false, reduceTransparency: reduceTransparency)
         if editor.tagAppearance != appearance {
@@ -488,6 +610,8 @@ struct ComposerTextEditor: NSViewRepresentable {
         var parent: ComposerTextEditor
         fileprivate weak var editor: ComposerTextView?
         var lastResetRevision = 0
+        var lastColorScheme: ColorScheme?
+        var lastSelectionColor: Color?
         var appliedInsertionIDs: Set<UUID> = []
 
         init(_ parent: ComposerTextEditor) { self.parent = parent }
@@ -500,9 +624,16 @@ struct ComposerTextEditor: NSViewRepresentable {
         }
 
         func updateHeight() {
-            guard let editor, let container = editor.textContainer, let layout = editor.layoutManager else { return }
-            layout.ensureLayout(for: container)
-            let height = min(160, max(28, layout.usedRect(for: container).height + 8))
+            guard let editor, let scroll = editor.enclosingScrollView else { return }
+            let natural = editor.naturalContentHeight()
+            let needsScroll = natural > ComposerTextView.maxEditorHeight
+            if scroll.hasVerticalScroller != needsScroll {
+                scroll.hasVerticalScroller = needsScroll
+            }
+            if !needsScroll {
+                editor.pinScrollToTop()
+            }
+            let height = min(ComposerTextView.maxEditorHeight, max(ComposerTextView.minEditorHeight, natural))
             if abs(parent.height - height) > 1 {
                 DispatchQueue.main.async { [weak self] in self?.parent.height = height }
             }
