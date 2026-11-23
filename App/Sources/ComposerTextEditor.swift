@@ -512,6 +512,7 @@ struct ComposerTextEditor: NSViewRepresentable {
         let container = NSTextContainer(size: NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude))
         container.lineFragmentPadding = 0
         container.widthTracksTextView = true
+        container.heightTracksTextView = false
         storage.addLayoutManager(layout)
         layout.addTextContainer(container)
 
@@ -540,7 +541,6 @@ struct ComposerTextEditor: NSViewRepresentable {
         scroll.borderType = .noBorder
         scroll.hasVerticalScroller = false
         scroll.hasHorizontalScroller = false
-        scroll.autohidesScrollers = true
         scroll.documentView = editor
         context.coordinator.editor = editor
         DispatchQueue.main.async { [weak editor] in
@@ -627,10 +627,28 @@ struct ComposerTextEditor: NSViewRepresentable {
             guard let editor, let scroll = editor.enclosingScrollView else { return }
             let natural = editor.naturalContentHeight()
             let needsScroll = natural > ComposerTextView.maxEditorHeight
-            if scroll.hasVerticalScroller != needsScroll {
+            let scrollerChanged = scroll.hasVerticalScroller != needsScroll
+            if scrollerChanged {
                 scroll.hasVerticalScroller = needsScroll
+                scroll.tile()
             }
-            if !needsScroll {
+            if needsScroll {
+                if editor.frame.height < natural {
+                    editor.setFrameSize(NSSize(width: editor.frame.width, height: natural))
+                }
+                scroll.reflectScrolledClipView(scroll.contentView)
+                if scrollerChanged {
+                    DispatchQueue.main.async { [weak scroll, weak editor] in
+                        guard let scroll else { return }
+                        scroll.tile()
+                        scroll.reflectScrolledClipView(scroll.contentView)
+                        if let editor {
+                            editor.scrollRangeToVisible(editor.selectedRange())
+                        }
+                        scroll.flashScrollers()
+                    }
+                }
+            } else {
                 editor.pinScrollToTop()
             }
             let height = min(ComposerTextView.maxEditorHeight, max(ComposerTextView.minEditorHeight, natural))

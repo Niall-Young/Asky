@@ -11,7 +11,7 @@
    - 同时 `updateNSView` 每次按键都会无条件调用 `setFrameSize`、重置 `baseTextColor`（进而触发 `textColor` 重写整段 `textStorage` 前景色与 `typingAttributes`）并设置 `needsDisplay = true`，`didChangeText` 也无条件重写整段属性。
    - 修复：
      - 改用显式 TextKit 1 栈初始化 `ComposerTextView`，避免运行期从 TextKit 2 回退。
-     - 当自然内容高度 `<= 160 pt` 时关闭垂直滚动条，并在 `scrollToVisible(_:)` 中抑制中间态滚动、保持 `clipView` 固定在顶部；仅当内容超过 `160 pt` 时再启用垂直滚动条与正常滚动。
+     - 当自然内容高度 `<= 160 pt` 时关闭垂直滚动条，并在 `scrollToVisible(_:)` 中抑制中间态滚动、保持 `clipView` 固定在顶部；仅当内容超过 `160 pt` 时再启用垂直滚动条（不开启 `autohidesScrollers`）、调用 `tile()` 与 `reflectScrolledClipView(_:)` 并 `flashScrollers()`，保证超长内容时滚动条正常出现与滚动。
      - `updateNSView` 仅在宽度、配色方案或选区色实际变化时更新；`didChangeText` 跳过 `hasMarkedText()` 并仅修正属性实际不一致的区间。
 
 2. **行内 Tag 导致输入光标过高**
