@@ -8,6 +8,57 @@ import ToolService
 @main
 @MainActor
 enum AgentReplyRegression {
+    static func composerBackspaceRegression(app: AppModel) async throws {
+        let model = AgentModel(app: app)
+        let controller = AgentWindowController(model: model, presentation: WindowPresentation())
+        controller.show()
+        let window = NSApp.windows.first { $0.title == "Asky AI" }!
+        defer { window.orderOut(nil) }
+
+        let file = app.store.root.appending(path: "backspace.txt")
+        try "attachment".write(to: file, atomically: true, encoding: .utf8)
+        model.addQuote("quote", sourceMessageID: "source")
+        let pasted = model.collapsePastedTextIfNeeded(String(repeating: "文", count: 301))!
+        model.pendingTagInsertions.append(ComposerTagInsertion(kind: pasted, atStart: false))
+        model.attach(fileURL: file)
+        let attachment = model.attachments.first!
+        let original = model.pendingTagInsertions.map { $0.kind.segment }
+        for _ in 0..<100 where !model.pendingTagInsertions.isEmpty {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        precondition(original.count == 3 && model.draftSegments == original)
+        guard let editor = window.firstResponder as? NSTextView, let undo = editor.undoManager else {
+            preconditionFailure("Composer must have keyboard focus and support undo")
+        }
+        func backspace() {
+            editor.breakUndoCoalescing()
+            let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
+                timestamp: 0, windowNumber: window.windowNumber, context: nil,
+                characters: "\u{7f}", charactersIgnoringModifiers: "\u{7f}", isARepeat: false, keyCode: 51)!
+            window.sendEvent(event)
+            editor.breakUndoCoalescing()
+        }
+
+        // Delete just the final attachment at the caret, as in the crash report.
+        backspace()
+        precondition(model.attachments.isEmpty && model.draftSegments == Array(original.dropLast()))
+        precondition(FileManager.default.fileExists(atPath: attachment.path))
+        undo.undo()
+        precondition(model.attachments == [attachment] && model.draftSegments == original)
+        editor.selectAll(nil)
+        backspace()
+        precondition(model.isComposerEmpty)
+        undo.undo()
+        precondition(model.draftSegments == original && model.attachments == [attachment])
+        precondition(model.quotes.first?.text == "quote" && model.pastedTexts.first?.text.count == 301)
+        undo.redo()
+        precondition(model.isComposerEmpty)
+        editor.insertText("继续", replacementRange: editor.selectedRange())
+        backspace()
+        precondition(model.draft == "继")
+        print("Composer Backspace passed: attachment, mixed tags, undo, redo and subsequent typing")
+    }
+
     static func bubbleWidthPreview(app: AppModel) async throws {
         let sample = "给你这条消息贴了个 💬，表示要发短信这件事。"
         let store = ConversationStore(app.store)
@@ -2800,6 +2851,10 @@ enum AgentReplyRegression {
         let root = FileManager.default.temporaryDirectory.appending(path: "Asky-reply-\(UUID())")
         defer { try? FileManager.default.removeItem(at: root) }
         let app = try AppModel(root: root)
+        if CommandLine.arguments.contains("--composer-backspace") {
+            try await composerBackspaceRegression(app: app)
+            return
+        }
         if CommandLine.arguments.contains("--bubble-width-preview") {
             try await bubbleWidthPreview(app: app)
             return

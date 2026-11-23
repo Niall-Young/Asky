@@ -248,9 +248,10 @@ final class AgentModel {
             retiredPastedTexts[p.id] = p
         }
 
-        let allQuotes = Dictionary(uniqueKeysWithValues: (quotes + Array(retiredQuotes.values)).map { ($0.id, $0) })
-        let allAttachments = Dictionary(uniqueKeysWithValues: (attachments + Array(retiredAttachments.values)).map { ($0.id, $0) })
-        let allPasted = Dictionary(uniqueKeysWithValues: (pastedTexts + Array(retiredPastedTexts.values)).map { ($0.id, $0) })
+        // A freshly deleted tag is still in the current array during this sync.
+        let allQuotes = retiredQuotes.merging(quotes.map { ($0.id, $0) }) { _, current in current }
+        let allAttachments = retiredAttachments.merging(attachments.map { ($0.id, $0) }) { _, current in current }
+        let allPasted = retiredPastedTexts.merging(pastedTexts.map { ($0.id, $0) }) { _, current in current }
 
         quotes = activeQuoteIDs.compactMap { allQuotes[$0] }
             + quotes.filter { pendingQuoteIDs.contains($0.id) && !activeQuoteIDs.contains($0.id) }
