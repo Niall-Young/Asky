@@ -255,6 +255,48 @@ func tempRoot() -> URL {
         #expect(MessageQuote.contextText(Array(quotes.dropFirst())).contains("[引用 1，来源消息 reply-2]"))
     }
 
+    @Test func inlineSegmentsAndPastedTextsSurviveReopenAndSerializePrompt() throws {
+        let root = tempRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = ConversationStore(try LocalStore(root: root))
+        let cid = try store.create(title: "行内标签")
+        let quote = MessageQuote(id: "q1", sourceMessageID: "reply-1", text: "缩写撞车的太多", kind: .selection)
+        let reply = MessageQuote(id: "q2", sourceMessageID: "reply-2", text: "完整回答内容", kind: .reply)
+        let pasted = MessagePastedText(id: "p1", text: String(repeating: "长文本内容", count: 80))
+        let file = AttachmentRef(id: "a1", kind: .file, path: "/tmp/方案.pdf", mimeType: "application/pdf", byteSize: 2048, temporary: false)
+        let image = AttachmentRef(id: "a2", kind: .image, path: "/tmp/screenshot.png", mimeType: "image/png", byteSize: 4096, temporary: false)
+        let segments: [MessageSegment] = [
+            .quote(id: reply.id),
+            .text(" 把 "),
+            .attachment(id: file.id),
+            .text(" 里和 "),
+            .quote(id: quote.id),
+            .text(" 冲突的地方，参照 "),
+            .attachment(id: image.id),
+            .text(" 和 "),
+            .pastedText(id: pasted.id),
+            .text(" 改一下")
+        ]
+        let presentation = MessagePresentation(quotes: [reply, quote], pastedTexts: [pasted], segments: segments)
+        let prompt = MessagePresentation.promptText(
+            segments: segments, quotes: [reply, quote], attachments: [file, image], pastedTexts: [pasted]
+        )
+        #expect(prompt == "[回复 1] 把 [附件: 方案.pdf] 里和 [引用 2] 冲突的地方，参照 [图片: screenshot.png] 和 [粘贴文本 1] 改一下")
+        #expect(MessagePastedText.contextText([pasted]).contains("[粘贴文本 1，共 400 字]"))
+        let copyable = MessagePresentation.copyableText(
+            fallback: prompt, segments: segments, quotes: [reply, quote], attachments: [file, image], pastedTexts: [pasted]
+        )
+        #expect(copyable.contains("[方案.pdf]"))
+        #expect(copyable.contains(pasted.text))
+
+        let saved = try store.append(conversationID: cid, role: "user", text: prompt,
+                                     attachments: [file, image], presentation: presentation)
+        let reopened = ConversationStore(try LocalStore(root: root))
+        let loaded = reopened.message(saved.id, conversationID: cid)
+        #expect(loaded?.presentation?.segments == segments)
+        #expect(loaded?.presentation?.pastedTexts == [pasted])
+    }
+
     @Test func transcriptStepsSurviveDiskReopenPagingAndUpdates() throws {
         let root = tempRoot()
         defer { try? FileManager.default.removeItem(at: root) }

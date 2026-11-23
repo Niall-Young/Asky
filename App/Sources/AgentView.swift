@@ -117,7 +117,7 @@ struct AgentView: View {
         reduceMotion ? .opacity : .opacity.combined(with: .offset(y: 8))
     }
     private var isEmptyConversation: Bool { model.items.isEmpty && !model.isRunning }
-    private var isComposerEmpty: Bool { model.draft.isEmpty && model.attachments.isEmpty && model.quotes.isEmpty }
+    private var isComposerEmpty: Bool { model.isComposerEmpty }
     private var effectiveComposerHeight: CGFloat { isComposerEmpty ? emptyComposerHeight : composerHeight }
 
     var body: some View {
@@ -1307,8 +1307,9 @@ private struct ChatBubble: View {
     var body: some View {
         switch item.kind {
         case .user:
+            let hasInlineSegments = !(item.segments ?? []).isEmpty
             VStack(alignment: .trailing, spacing: 8) {
-                if !item.attachments.isEmpty || !item.quotes.isEmpty {
+                if !hasInlineSegments, (!item.attachments.isEmpty || !item.quotes.isEmpty) {
                     if imageAttachments.count > 1 {
                         ChatImageAttachmentStack(attachments: imageAttachments)
                     }
@@ -1350,7 +1351,7 @@ private struct ChatBubble: View {
                             }
                         }
                     }
-                    UserCopyActionRow(text: item.text, hoverState: hoverState)
+                    UserCopyActionRow(text: item.copyableText, hoverState: hoverState)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
@@ -1358,6 +1359,9 @@ private struct ChatBubble: View {
             // hover tracking, so moving to Copy never hides it mid-gesture.
             .contentShape(.rect)
             .onHover { hoverState.bubbleHovered = $0 }
+            .alert(NSLocalizedString("原回复已不可用", comment: ""), isPresented: $replyUnavailable) {
+                Button(NSLocalizedString("确定", comment: ""), role: .cancel) {}
+            }
         case .assistant:
             VStack(alignment: .leading, spacing: 6) {
                 ChatReplyView(text: item.text, isStreaming: item.id == "streaming",
@@ -1429,9 +1433,6 @@ private struct ChatBubble: View {
             }
         }
         .fixedSize(horizontal: true, vertical: false)
-        .alert(NSLocalizedString("原回复已不可用", comment: ""), isPresented: $replyUnavailable) {
-            Button(NSLocalizedString("确定", comment: ""), role: .cancel) {}
-        }
     }
 
     private var replyButton: some View {
@@ -1449,10 +1450,25 @@ private struct ChatBubble: View {
 
     private var bubble: some View {
         VStack(alignment: .leading, spacing: 10) {
-            ChatInlineText(markdown: item.text, literal: true, shrinkToFit: true)
+            if let segments = item.segments, !segments.isEmpty {
+                UserInlineMessageView(
+                    segments: segments,
+                    quotes: item.quotes,
+                    attachments: item.attachments,
+                    pastedTexts: item.pastedTexts,
+                    onRevealReply: { sourceID in
+                        replyUnavailable = !model.revealReply(sourceID)
+                    }
+                )
                 .environment(\.chatSelectionColor, model.avatarColor.tint)
                 .environment(\.chatQuoteAction, { model.addQuote($0, sourceMessageID: item.id) })
                 .fixedSize(horizontal: false, vertical: true)
+            } else {
+                ChatInlineText(markdown: item.text, literal: true, shrinkToFit: true)
+                    .environment(\.chatSelectionColor, model.avatarColor.tint)
+                    .environment(\.chatQuoteAction, { model.addQuote($0, sourceMessageID: item.id) })
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 }
@@ -1466,33 +1482,22 @@ private struct Composer: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if !model.attachments.isEmpty || !model.quotes.isEmpty {
-                ScrollView(.horizontal) {
-                    HStack(spacing: 8) {
-                        ForEach(Array(model.quotes.enumerated()), id: \.element.id) { index, quote in
-                            ComposerAttachmentCard(quote: quote, quoteNumber: index + 1, remove: {
-                                model.quotes.removeAll { $0.id == quote.id }
-                            })
-                        }
-                        ForEach(model.attachments) { attachment in
-                            ComposerAttachmentCard(attachment: attachment,
-                                thumbnail: model.attachmentThumbnails[attachment.id]) {
-                                model.removeAttachment(attachment)
-                            }
-                        }
-                    }
-                    // Keep the last delete button inside the scroll content without widening each gap.
-                    .padding(.trailing, 8)
-                    .padding(.horizontal, 12)
-                }
-                .scrollIndicators(.hidden).frame(height: 58)
-            }
-            ComposerTextEditor(text: $model.draft, height: $editorHeight,
+            ComposerTextEditor(
+                height: $editorHeight,
                 isFocused: $editorFocused,
-                pasteAttachment: { model.pasteAttachments() }, submit: submitDraft, shortcuts: model.shortcutPreferences)
-                .environment(\.chatSelectionColor, model.avatarColor.tint)
-                .frame(height: model.draft.isEmpty ? 28 : editorHeight)
-                .padding(.horizontal, 4)
+                resetRevision: model.composerResetRevision,
+                pendingInsertions: model.pendingTagInsertions,
+                consumeInsertions: { model.consumeTagInsertions($0) },
+                onSegmentsChanged: { model.syncDraft(segments: $0) },
+                pasteAttachment: { model.pasteAttachments() },
+                pasteLongText: { model.collapsePastedTextIfNeeded($0) },
+                onRevealReply: { _ = model.revealReply($0) },
+                submit: submitDraft,
+                shortcuts: model.shortcutPreferences
+            )
+            .environment(\.chatSelectionColor, model.avatarColor.tint)
+            .frame(height: model.isComposerEmpty ? 28 : editorHeight)
+            .padding(.horizontal, 4)
             HStack {
                 Button { importing = true } label: {
                     Image(mingCute: "plus", size: 14).frame(width: 28, height: 28)
@@ -1510,9 +1515,7 @@ private struct Composer: View {
             }
             .padding(.horizontal, 8)
         }
-        // Attachment cards reserve 6 pt above their visible edge for the delete button.
-        // Keep the visible top inset aligned with the compact text editor.
-        .padding(.top, model.attachments.isEmpty && model.quotes.isEmpty ? 10 : 4).padding(.bottom, 8)
+        .padding(.top, 10).padding(.bottom, 8)
         .nativeGlassBackground(in: RoundedRectangle(cornerRadius: 16, style: .circular))
         .onChange(of: model.quoteFocusRevision) { _, _ in editorFocused = true }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.data, .image, .text], allowsMultipleSelection: true) { r in
@@ -1529,7 +1532,7 @@ private struct Composer: View {
 
     private func submitDraft() {
         model.send()
-        if model.draft.isEmpty { editorHeight = 28 }
+        if model.isComposerEmpty { editorHeight = 28 }
     }
 }
 

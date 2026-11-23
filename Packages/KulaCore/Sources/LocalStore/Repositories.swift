@@ -198,6 +198,64 @@ public struct MessageQuote: Sendable, Hashable, Codable, Identifiable {
     }
 }
 
+/// A long pasted text snippet collapsed into an inline tag and retained with the user message.
+public struct MessagePastedText: Sendable, Hashable, Codable, Identifiable {
+    public var id: String
+    public var text: String
+
+    public init(id: String = UUID().uuidString, text: String) {
+        self.id = id
+        self.text = text
+    }
+
+    public static func contextText(_ snippets: [MessagePastedText]) -> String {
+        snippets.enumerated().map { index, snippet in
+            "[粘贴文本 \(index + 1)，共 \(snippet.text.count) 字]\n" + snippet.text
+        }.joined(separator: "\n\n")
+    }
+}
+
+/// Ordered inline segments of a composed user message, keeping text and inline tags in exact position.
+public enum MessageSegment: Sendable, Hashable, Codable {
+    case text(String)
+    case quote(id: String)
+    case attachment(id: String)
+    case pastedText(id: String)
+
+    private enum CodingKeys: String, CodingKey { case type, value }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let type = try container.decode(String.self, forKey: .type)
+        let value = try container.decode(String.self, forKey: .value)
+        switch type {
+        case "text": self = .text(value)
+        case "quote": self = .quote(id: value)
+        case "attachment": self = .attachment(id: value)
+        case "pastedText": self = .pastedText(id: value)
+        default: self = .text(value)
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .text(let value):
+            try container.encode("text", forKey: .type)
+            try container.encode(value, forKey: .value)
+        case .quote(let id):
+            try container.encode("quote", forKey: .type)
+            try container.encode(id, forKey: .value)
+        case .attachment(let id):
+            try container.encode("attachment", forKey: .type)
+            try container.encode(id, forKey: .value)
+        case .pastedText(let id):
+            try container.encode("pastedText", forKey: .type)
+            try container.encode(id, forKey: .value)
+        }
+    }
+}
+
 /// Transcript presentation and user-selected context; no raw tool arguments or results.
 public struct MessagePresentation: Sendable, Hashable, Codable {
     public var responseID: String?
@@ -210,6 +268,10 @@ public struct MessagePresentation: Sendable, Hashable, Codable {
     /// Non-nil (including an empty dictionary) permanently marks a submitted form.
     public var submittedFormValues: [String: [String]]?
     public var quotes: [MessageQuote]?
+    /// Long pasted text snippets collapsed into inline tags.
+    public var pastedTexts: [MessagePastedText]?
+    /// Ordered inline segments of a user message when composed with inline tags.
+    public var segments: [MessageSegment]?
     /// The assistant's single emoji reaction, attached to the user message.
     public var agentReaction: String?
 
@@ -217,6 +279,7 @@ public struct MessagePresentation: Sendable, Hashable, Codable {
                 toolError: String? = nil, needsPermissionSettings: Bool = false,
                 workSeconds: Int? = nil, completedAt: Date? = nil,
                 submittedFormValues: [String: [String]]? = nil, quotes: [MessageQuote]? = nil,
+                pastedTexts: [MessagePastedText]? = nil, segments: [MessageSegment]? = nil,
                 agentReaction: String? = nil) {
         self.responseID = responseID
         self.toolName = toolName
@@ -227,7 +290,62 @@ public struct MessagePresentation: Sendable, Hashable, Codable {
         self.completedAt = completedAt
         self.submittedFormValues = submittedFormValues
         self.quotes = quotes
+        self.pastedTexts = pastedTexts
+        self.segments = segments
         self.agentReaction = agentReaction
+    }
+
+    /// Serialize inline segments into prompt text with positional anchors matching attachments and context.
+    public static func promptText(segments: [MessageSegment], quotes: [MessageQuote],
+                                  attachments: [AttachmentRef], pastedTexts: [MessagePastedText]) -> String {
+        let quoteIndex = Dictionary(uniqueKeysWithValues: quotes.enumerated().map { ($0.element.id, $0.offset + 1) })
+        let quotesByID = Dictionary(uniqueKeysWithValues: quotes.map { ($0.id, $0) })
+        let attachmentsByID = Dictionary(uniqueKeysWithValues: attachments.map { ($0.id, $0) })
+        let pastedIndex = Dictionary(uniqueKeysWithValues: pastedTexts.enumerated().map { ($0.element.id, $0.offset + 1) })
+
+        return segments.map { segment in
+            switch segment {
+            case .text(let value):
+                return value
+            case .quote(let id):
+                guard let index = quoteIndex[id], let quote = quotesByID[id] else { return "" }
+                return "[\(quote.kind == .reply ? "回复" : "引用") \(index)]"
+            case .attachment(let id):
+                guard let attachment = attachmentsByID[id] else { return "" }
+                let name = URL(filePath: attachment.path).lastPathComponent
+                let label = attachment.kind == .image ? "图片" : "附件"
+                return "[\(label): \(name)]"
+            case .pastedText(let id):
+                guard let index = pastedIndex[id] else { return "" }
+                return "[粘贴文本 \(index)]"
+            }
+        }.joined().trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Plain text representation suitable for copying a sent user message.
+    public static func copyableText(fallback: String, segments: [MessageSegment]?,
+                                    quotes: [MessageQuote], attachments: [AttachmentRef],
+                                    pastedTexts: [MessagePastedText]) -> String {
+        guard let segments, !segments.isEmpty else { return fallback }
+        let pastedByID = Dictionary(uniqueKeysWithValues: pastedTexts.map { ($0.id, $0) })
+        let attachmentsByID = Dictionary(uniqueKeysWithValues: attachments.map { ($0.id, $0) })
+        let quotesByID = Dictionary(uniqueKeysWithValues: quotes.map { ($0.id, $0) })
+        let result = segments.map { segment in
+            switch segment {
+            case .text(let value):
+                return value
+            case .pastedText(let id):
+                return pastedByID[id]?.text ?? ""
+            case .attachment(let id):
+                guard let attachment = attachmentsByID[id] else { return "" }
+                return "[\(URL(filePath: attachment.path).lastPathComponent)]"
+            case .quote(let id):
+                guard let quote = quotesByID[id] else { return "" }
+                let preview = quote.text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+                return "「\(String(preview.prefix(40)))」"
+            }
+        }.joined().trimmingCharacters(in: .whitespacesAndNewlines)
+        return result.isEmpty ? fallback : result
     }
 }
 
