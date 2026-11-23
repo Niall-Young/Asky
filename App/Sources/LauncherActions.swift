@@ -58,6 +58,7 @@ struct LauncherActionBar: View {
             Spacer(minLength: 12)
             if !model.secondaryActions.isEmpty {
                 LauncherActionLabel(title: "更多", shortcut: model.actionPreferences.shortcut(.launcherMore).label)
+                    .fixedSize()
                     .hidden()
                     .accessibilityHidden(true)
                     .anchorPreference(key: LauncherMoreAnchorKey.self, value: .bounds) { $0 }
@@ -77,6 +78,7 @@ struct LauncherActionLabel: View {
     var body: some View {
         HStack(spacing: 8) {
             Text(NSLocalizedString(title, tableName: "Launcher", comment: "Launcher action"))
+                .lineLimit(1)
             if let shortcut { LauncherActionKeyCap(value: shortcut) }
         }
         .font(.system(size: 12, weight: .medium))
@@ -101,6 +103,8 @@ struct LauncherActionKeyCap: View {
     var body: some View {
         Text(value)
             .font(.system(size: 11, weight: .medium))
+            .lineLimit(1)
+            .fixedSize()
             .foregroundStyle(ThemeColor.kTextSubtle)
             .padding(.horizontal, 5)
             .frame(height: 20)

@@ -755,6 +755,7 @@ private struct ClipboardActionBar: View {
             .buttonStyle(LauncherActionButtonStyle())
             Spacer(minLength: 12)
             label("更多", shortcut: controller.shortcutPreferences.shortcut(.clipboardMore).label)
+                .fixedSize()
                 .hidden()
                 .accessibilityHidden(true)
                 .anchorPreference(key: LauncherMoreAnchorKey.self, value: .bounds) { $0 }
@@ -768,6 +769,7 @@ private struct ClipboardActionBar: View {
     private func label(_ title: String, shortcut: String) -> some View {
         HStack(spacing: 8) {
             Text(NSLocalizedString(title, tableName: "Clipboard", comment: "Clipboard action"))
+                .lineLimit(1)
             LauncherActionKeyCap(value: shortcut)
         }
         .font(.system(size: 12, weight: .medium))
