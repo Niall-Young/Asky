@@ -17,7 +17,7 @@ enum SettingsPalette {
     /// Monochrome control accent so switches, focus rings, and prominent controls stay black-and-white.
     static func monochromeTint(_ scheme: ColorScheme) -> Color {
         scheme == .dark
-            ? Color(.sRGB, red: 0.46, green: 0.47, blue: 0.51, opacity: 1)
+            ? Color(.sRGB, white: 0.96, opacity: 1)
             : Color(.sRGB, red: 0.11, green: 0.115, blue: 0.13, opacity: 1)
     }
     static func focusBorder(_ scheme: ColorScheme) -> Color {

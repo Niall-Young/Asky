@@ -113,19 +113,14 @@ private struct CompatibleGlassButtonStyle: ViewModifier {
     var prominent: Bool
     @Environment(\.colorScheme) private var scheme
 
-    private var monochromeProminentTint: Color {
-        scheme == .dark
-            ? Color(.sRGB, red: 0.46, green: 0.47, blue: 0.51, opacity: 1)
-            : Color(.sRGB, red: 0.11, green: 0.115, blue: 0.13, opacity: 1)
-    }
-
     @ViewBuilder
     func body(content: Content) -> some View {
+        let tint = SettingsPalette.monochromeTint(scheme)
         if #available(macOS 26, *), !SurfaceCompatibility.useLegacyMaterial {
-            if prominent { content.buttonStyle(.glassProminent).tint(monochromeProminentTint) }
+            if prominent { content.buttonStyle(.glassProminent).tint(tint) }
             else { content.buttonStyle(.glass) }
         } else {
-            if prominent { content.buttonStyle(.borderedProminent).tint(monochromeProminentTint) }
+            if prominent { content.buttonStyle(.borderedProminent).tint(tint) }
             else { content.buttonStyle(.bordered) }
         }
     }
