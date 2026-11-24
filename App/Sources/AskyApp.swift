@@ -32,9 +32,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var newAgentHotKey: HotKey?
     private var statusItem: NSStatusItem?
     private var settingsWindow: NSWindow?
-    #if DEBUG
-    private var onboardingWindow: NSWindow?
-    #endif
     private var pressure: MemoryPressureMonitor?
     private let termination = ApplicationTermination()
     private let dockVisibility = DockVisibilityController()
@@ -179,9 +176,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         #if DEBUG
         if CommandLine.arguments.contains("--show-agent") { agentWindow.show() }
-        if CommandLine.arguments.contains("--show-onboarding") || !model.preferences.hasCompletedOnboarding {
-            openOnboarding()
-        }
         if CommandLine.arguments.contains("--test-clipboard") {
             clipboardWindow.pinned = true
             clipboardWindow.show()
@@ -238,13 +232,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// Silent relaunch only when nothing is open, running or waiting for the user.
     private var isQuietForUpdate: Bool {
-        #if DEBUG
-        let onboardingVisible = onboardingWindow?.isVisible == true
-        #else
-        let onboardingVisible = false
-        #endif
-        return !launcher.isVisible && !clipboardWindow.isVisible && !agentWindow.isVisible && !agentWindow.model.isRunning
-            && settingsWindow?.isVisible != true && !onboardingVisible
+        !launcher.isVisible && !clipboardWindow.isVisible && !agentWindow.isVisible && !agentWindow.model.isRunning
+            && settingsWindow?.isVisible != true
             && model.confirmations.queue.isEmpty
             && !ContentPreviewWindow.shared.isVisible && !ContentPreviewWindow.quick.isVisible
             && PermissionAuthorizationWindow.shared.window?.isVisible != true
@@ -257,12 +246,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             ("hasVisible", flag ? "1" : "0"),
             ("settingsVisible", settingsWindow?.isVisible == true ? "1" : "0"),
         ])
-        #if DEBUG
-        if let onboardingWindow, onboardingWindow.isVisible {
-            windowPresentation.show(onboardingWindow)
-            return true
-        }
-        #endif
         if let settingsWindow, settingsWindow.isVisible {
             windowPresentation.show(settingsWindow)
         } else {
@@ -388,7 +371,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         add(menu, "登录时启动", #selector(toggleLaunchAtLogin), on: ToolService.launchAtLoginEnabled)
         #if DEBUG
         add(menu, "预览提醒卡片", #selector(previewReminderBanner))
-        add(menu, "预览欢迎页面", #selector(openOnboarding))
         #endif
         menu.addItem(.separator())
         add(menu, "设置…", #selector(openSettings), key: ",")
@@ -483,25 +465,4 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         clipboardWindow.hide()
         if let settingsWindow { windowPresentation.show(settingsWindow) }
     }
-
-    #if DEBUG
-    @objc private func openOnboarding() {
-        if onboardingWindow == nil {
-            let w = OnboardingWindow.make(app: model, onFinish: { [weak self] in
-                self?.onboardingWindow?.close()
-                self?.openLauncher()
-            }, onDismiss: { [weak self] in
-                self?.onboardingWindow?.close()
-            })
-            w.level = .normal
-            w.collectionBehavior = [.moveToActiveSpace, .primary]
-            w.isReleasedWhenClosed = false
-            w.center()
-            onboardingWindow = w
-        }
-        launcher.hide()
-        clipboardWindow.hide()
-        if let onboardingWindow { windowPresentation.show(onboardingWindow) }
-    }
-    #endif
 }
