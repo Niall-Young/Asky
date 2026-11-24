@@ -817,6 +817,8 @@ private struct ModernTranscriptScroll<Content: View>: View {
                                    onUserScroll: { bottomTask?.cancel(); submissionTask?.cancel(); replyTask?.cancel(); viewport.followsLatestContent = false; viewport.readerMoved = true })
             }
         }
+        .coordinateSpace(name: "transcriptScroll")
+        .environment(\.transcriptVisibleInsets, EdgeInsets(top: AgentLayout.headerHeight + 8, leading: 0, bottom: bottomInset + 8, trailing: 0))
         .scrollIndicators(.hidden)
         .onDisappear { bottomTask?.cancel(); submissionTask?.cancel(); replyTask?.cancel(); viewport.followsLatestContent = false; viewport.cancelReadingAnchor() }
         .onChange(of: replyNavigation) { _, request in
@@ -999,6 +1001,8 @@ private struct LegacyTranscriptScroll<Content: View>: View {
                                    onUserScroll: { bottomTask?.cancel(); submissionTask?.cancel(); replyTask?.cancel(); viewport.followsLatestContent = false; viewport.readerMoved = true })
             }
         }
+        .coordinateSpace(name: "transcriptScroll")
+        .environment(\.transcriptVisibleInsets, EdgeInsets(top: AgentLayout.headerHeight + 8, leading: 0, bottom: bottomInset + 8, trailing: 0))
         .scrollIndicators(.hidden)
         .onDisappear { bottomTask?.cancel(); submissionTask?.cancel(); replyTask?.cancel(); viewport.followsLatestContent = false; viewport.cancelReadingAnchor() }
         .onChange(of: replyNavigation) { _, request in
@@ -1260,7 +1264,21 @@ private struct ChatShareButton: View {
     }
 }
 
+private struct TranscriptVisibleInsetsKey: EnvironmentKey {
+    static let defaultValue = EdgeInsets(top: AgentLayout.headerHeight + 8, leading: 0, bottom: 102, trailing: 0)
+}
+
+private extension EnvironmentValues {
+    var transcriptVisibleInsets: EdgeInsets {
+        get { self[TranscriptVisibleInsetsKey.self] }
+        set { self[TranscriptVisibleInsetsKey.self] = newValue }
+    }
+}
+
 private struct AssistantSideActionBar: View {
+    static let width: CGFloat = 86
+    static let height: CGFloat = 28
+
     let text: String
     let hoverState: UserMessageHoverState
     let onReply: () -> Void
@@ -1269,24 +1287,48 @@ private struct AssistantSideActionBar: View {
     @State private var copyFeedbackID: UUID?
     @FocusState private var actionFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.transcriptVisibleInsets) private var visibleInsets
 
     private var isVisible: Bool {
         hoverState.bubbleHovered || rowHovering || actionFocused || copyFeedbackID != nil
     }
 
     var body: some View {
-        HStack(spacing: 2) {
-            ChatCopyButton(text: text, copyFeedbackID: $copyFeedbackID)
-                .focused($actionFocused)
-            ChatReplyButton(action: onReply)
-                .focused($actionFocused)
-            ChatShareButton(action: onShare)
-                .focused($actionFocused)
+        GeometryReader { proxy in
+            HStack(spacing: 2) {
+                ChatCopyButton(text: text, copyFeedbackID: $copyFeedbackID)
+                    .focused($actionFocused)
+                ChatReplyButton(action: onReply)
+                    .focused($actionFocused)
+                ChatShareButton(action: onShare)
+                    .focused($actionFocused)
+            }
+            .frame(width: Self.width, height: Self.height)
+            .onHover { rowHovering = $0 }
+            .opacity(isVisible ? 1 : 0)
+            .allowsHitTesting(isVisible)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.14), value: isVisible)
+            .position(x: Self.width / 2, y: stickyCenterY(in: proxy))
         }
-        .onHover { rowHovering = $0 }
-        .opacity(isVisible ? 1 : 0)
-        .allowsHitTesting(isVisible)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.14), value: isVisible)
+        .frame(width: Self.width)
+    }
+
+    private func stickyCenterY(in proxy: GeometryProxy) -> CGFloat {
+        let totalHeight = proxy.size.height
+        guard totalHeight > Self.height else { return totalHeight / 2 }
+        let edgePadding: CGFloat = 12
+        let minCenter = min(totalHeight / 2, Self.height / 2 + edgePadding)
+        let maxCenter = max(totalHeight / 2, totalHeight - Self.height / 2 - edgePadding)
+        guard let viewport = proxy.bounds(of: .named("transcriptScroll")) else {
+            return totalHeight / 2
+        }
+        let visibleTop = max(0, viewport.minY + visibleInsets.top)
+        let visibleBottom = min(totalHeight, viewport.maxY - visibleInsets.bottom)
+        guard visibleBottom > visibleTop else {
+            return totalHeight / 2
+        }
+        let target = (visibleTop + visibleBottom) / 2
+        return min(max(target, minCenter), maxCenter)
     }
 }
 
@@ -1426,6 +1468,13 @@ private struct ChatBubble: View {
                             assistantContextMenuItems(actions)
                         }
                     }
+                if contextActions != nil {
+                    Color.clear
+                        .frame(width: AssistantSideActionBar.width, height: AssistantSideActionBar.height)
+                        .layoutPriority(1)
+                }
+            }
+            .overlay(alignment: .trailing) {
                 if let actions = contextActions {
                     AssistantSideActionBar(
                         text: item.text,
@@ -1433,8 +1482,6 @@ private struct ChatBubble: View {
                         onReply: actions.reply,
                         onShare: actions.share
                     )
-                    .fixedSize()
-                    .layoutPriority(1)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -1457,14 +1504,17 @@ private struct ChatBubble: View {
                     .contextMenu {
                         assistantContextMenuItems(contextActions)
                     }
+                Color.clear
+                    .frame(width: AssistantSideActionBar.width, height: AssistantSideActionBar.height)
+                    .layoutPriority(1)
+            }
+            .overlay(alignment: .trailing) {
                 AssistantSideActionBar(
                     text: item.text,
                     hoverState: hoverState,
                     onReply: contextActions.reply,
                     onShare: contextActions.share
                 )
-                .fixedSize()
-                .layoutPriority(1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(.rect)
