@@ -128,7 +128,9 @@ extension AgentReplyRegression {
                 let initial = text.convert(text.bounds, to: surface)
                 let answerFrame = answer.convert(answer.bounds, to: surface)
                 let textFrame = text.convert(text.bounds, to: nil)
-                let copyPoint = NSPoint(x: textFrame.maxX + 4, y: textFrame.minY - 32)
+                // Left side action bar sits 8 pt left of the bubble (18 pt text inset),
+                // containing Copy (28 pt) + 2 pt gap + Reply (28 pt), centered vertically.
+                let copyPoint = NSPoint(x: textFrame.minX - 70, y: textFrame.midY)
                 let copyRect = surface.convert(NSRect(x: copyPoint.x - 14, y: copyPoint.y - 14, width: 28, height: 28), from: nil)
                 func snapshot() -> NSBitmapImageRep {
                     let bitmap = surface.bitmapImageRepForCachingDisplay(in: surface.bounds)!
@@ -155,7 +157,7 @@ extension AgentReplyRegression {
                     window.makeKeyAndOrderFront(nil)
                     NSApp.activate(ignoringOtherApps: true)
                     movePointer(window.convertPoint(toScreen: point))
-                    try await Task.sleep(for: .milliseconds(180))
+                    try await Task.sleep(for: .milliseconds(240))
                     surface.layoutSubtreeIfNeeded()
                     let frame = text.convert(text.bounds, to: surface)
                     let bitmap = snapshot()

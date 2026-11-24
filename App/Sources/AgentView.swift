@@ -1275,6 +1275,24 @@ private extension EnvironmentValues {
     }
 }
 
+private func bubbleSideActionCenterY(in proxy: GeometryProxy, barHeight: CGFloat, visibleInsets: EdgeInsets) -> CGFloat {
+    let totalHeight = proxy.size.height
+    guard totalHeight > barHeight else { return totalHeight / 2 }
+    let edgePadding: CGFloat = 12
+    let minCenter = min(totalHeight / 2, barHeight / 2 + edgePadding)
+    let maxCenter = max(totalHeight / 2, totalHeight - barHeight / 2 - edgePadding)
+    guard let viewport = proxy.bounds(of: .named("transcriptScroll")) else {
+        return totalHeight / 2
+    }
+    let visibleTop = max(0, viewport.minY + visibleInsets.top)
+    let visibleBottom = min(totalHeight, viewport.maxY - visibleInsets.bottom)
+    guard visibleBottom > visibleTop else {
+        return totalHeight / 2
+    }
+    let target = (visibleTop + visibleBottom) / 2
+    return min(max(target, minCenter), maxCenter)
+}
+
 private struct AssistantSideActionBar: View {
     static let width: CGFloat = 86
     static let height: CGFloat = 28
@@ -1308,48 +1326,45 @@ private struct AssistantSideActionBar: View {
             .opacity(isVisible ? 1 : 0)
             .allowsHitTesting(isVisible)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.14), value: isVisible)
-            .position(x: Self.width / 2, y: stickyCenterY(in: proxy))
+            .position(x: Self.width / 2, y: bubbleSideActionCenterY(in: proxy, barHeight: Self.height, visibleInsets: visibleInsets))
         }
         .frame(width: Self.width)
     }
-
-    private func stickyCenterY(in proxy: GeometryProxy) -> CGFloat {
-        let totalHeight = proxy.size.height
-        guard totalHeight > Self.height else { return totalHeight / 2 }
-        let edgePadding: CGFloat = 12
-        let minCenter = min(totalHeight / 2, Self.height / 2 + edgePadding)
-        let maxCenter = max(totalHeight / 2, totalHeight - Self.height / 2 - edgePadding)
-        guard let viewport = proxy.bounds(of: .named("transcriptScroll")) else {
-            return totalHeight / 2
-        }
-        let visibleTop = max(0, viewport.minY + visibleInsets.top)
-        let visibleBottom = min(totalHeight, viewport.maxY - visibleInsets.bottom)
-        guard visibleBottom > visibleTop else {
-            return totalHeight / 2
-        }
-        let target = (visibleTop + visibleBottom) / 2
-        return min(max(target, minCenter), maxCenter)
-    }
 }
 
-private struct UserMessageActionRow: View {
+private struct UserSideActionBar: View {
+    static let width: CGFloat = 58
+    static let height: CGFloat = 28
+
     let text: String
     let hoverState: UserMessageHoverState
     let onReply: () -> Void
     @State private var rowHovering = false
     @State private var copyFeedbackID: UUID?
     @FocusState private var actionFocused: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.transcriptVisibleInsets) private var visibleInsets
+
+    private var isVisible: Bool {
+        hoverState.bubbleHovered || rowHovering || actionFocused || copyFeedbackID != nil
+    }
 
     var body: some View {
-        HStack(spacing: 0) {
-            ChatCopyButton(text: text, copyFeedbackID: $copyFeedbackID)
-                .focused($actionFocused)
-            ChatReplyButton(action: onReply)
-                .focused($actionFocused)
+        GeometryReader { proxy in
+            HStack(spacing: 2) {
+                ChatCopyButton(text: text, copyFeedbackID: $copyFeedbackID)
+                    .focused($actionFocused)
+                ChatReplyButton(action: onReply)
+                    .focused($actionFocused)
+            }
+            .frame(width: Self.width, height: Self.height)
+            .onHover { rowHovering = $0 }
+            .opacity(isVisible ? 1 : 0)
+            .allowsHitTesting(isVisible)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.14), value: isVisible)
+            .position(x: Self.width / 2, y: bubbleSideActionCenterY(in: proxy, barHeight: Self.height, visibleInsets: visibleInsets))
         }
-        .onHover { rowHovering = $0 }
-        .opacity(hoverState.bubbleHovered || rowHovering || actionFocused || copyFeedbackID != nil ? 1 : 0)
-        .frame(maxWidth: .infinity, alignment: .trailing)
+        .frame(width: Self.width)
     }
 }
 
@@ -1398,8 +1413,11 @@ private struct ChatBubble: View {
                         .frame(maxWidth: .infinity, alignment: .trailing)
                     }
                 }
-                VStack(alignment: .trailing, spacing: 4) {
-                    HStack { Spacer(minLength: 40); bubble
+                HStack(alignment: .center, spacing: 8) {
+                    Color.clear
+                        .frame(width: UserSideActionBar.width, height: UserSideActionBar.height)
+                        .layoutPriority(1)
+                    bubble
                         .background {
                             TranscriptReplyPosition(id: item.id)
                         }
@@ -1429,14 +1447,18 @@ private struct ChatBubble: View {
                                     .accessibilityLabel(String(format: NSLocalizedString("Asky 回应了 %@", comment: ""), emoji))
                             }
                         }
-                    }
-                    UserMessageActionRow(text: item.copyableText, hoverState: hoverState) {
-                        model.addQuote(item.copyableText, sourceMessageID: item.id, kind: .reply)
-                    }
                 }
+                .overlay(alignment: .leading) {
+                    UserSideActionBar(
+                        text: item.copyableText,
+                        hoverState: hoverState,
+                        onReply: { model.addQuote(item.copyableText, sourceMessageID: item.id, kind: .reply) }
+                    )
+                }
+                .padding(.bottom, item.agentReaction == nil ? 0 : 26 - AgentLayout.userMessageVerticalInset)
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
-            // Include the empty action row and the gap below the bubble in
+            // Include the leading side action bar and the gap next to the bubble in
             // hover tracking, so moving to Copy never hides it mid-gesture.
             .contentShape(.rect)
             .onHover { hoverState.bubbleHovered = $0 }
