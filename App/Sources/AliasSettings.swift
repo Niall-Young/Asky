@@ -107,17 +107,15 @@ private struct AliasEditor: View {
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack {
-                Text(label(draft.isNew ? "添加别名" : "编辑别名")).font(.system(size: 16, weight: .semibold))
-                Spacer()
-                Button(action: close) {
-                    Image(mingCute: "xmark", size: 12)
-                        .frame(width: 28, height: 28).contentShape(.circle)
-                }
-                .buttonStyle(.plain).foregroundStyle(ThemeColor.kTextSubtle)
-                .accessibilityLabel(label("关闭"))
-            }
+        SettingsDialogScaffold(
+            title: label(draft.isNew ? "添加别名" : "编辑别名"),
+            width: 480,
+            primaryTitle: label("保存"),
+            primaryDisabled: !canSave,
+            primaryAction: save,
+            cancelTitle: label("取消"),
+            close: close
+        ) {
             VStack(alignment: .leading, spacing: 8) {
                 VStack(spacing: 0) {
                     cardRow {
@@ -135,21 +133,14 @@ private struct AliasEditor: View {
                             .onSubmit(save)
                     }
                 }
-                .background(SettingsPalette.card(scheme), in: RoundedRectangle(cornerRadius: 12))
+                .background(SettingsPalette.card(scheme), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 if let error = validationError {
                     Text(error).foregroundStyle(ThemeColor.kTextNegative)
                         .font(.system(size: 12)).fixedSize(horizontal: false, vertical: true)
                 }
             }
-            HStack {
-                Spacer()
-                SettingsButton(label("取消"), action: close)
-                SettingsButton(label("保存")) { save() }.disabled(!canSave)
-            }
         }
         .labeledContentStyle(AliasRowStyle())
-        .settingsDialogSurface(width: 480)
-        .onExitCommand(perform: close)
         .task { await refreshShortcuts() }
     }
 

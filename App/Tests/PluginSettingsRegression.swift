@@ -162,7 +162,34 @@ private enum PluginSettingsRegression {
             try require(window.contentView?.hitTest(sidebarPoint) === overlay,
                         "dialog must intercept sidebar clicks")
         }
+        func checkDialogChrome(in targetOverlay: SettingsDialogOverlay, in targetWindow: NSWindow,
+                               primaryTitle: String, cancelTitle: String) throws {
+            targetWindow.contentView?.layoutSubtreeIfNeeded()
+            let card = targetOverlay.card.convert(targetOverlay.card.bounds, to: targetWindow.contentView)
+            let dialogButtons = descendants(targetOverlay).compactMap { $0 as? NSButton }
+            guard let closeButton = dialogButtons.first(where: { $0.accessibilityIdentifier() == "settings-dialog-close" }) else {
+                throw NSError(domain: "PluginSettings", code: 5, userInfo: [NSLocalizedDescriptionKey: "Missing circular close button in SettingsDialog"])
+            }
+            let closeFrame = closeButton.convert(closeButton.bounds, to: targetWindow.contentView)
+            try require(abs(closeFrame.width - 28) < 2 && abs(closeFrame.height - 28) < 2,
+                        "close button must keep its 28pt circular size")
+            guard let primary = dialogButtons.first(where: { $0.title == primaryTitle }),
+                  let cancel = dialogButtons.first(where: { $0.title == cancelTitle }) else {
+                throw NSError(domain: "PluginSettings", code: 5, userInfo: [NSLocalizedDescriptionKey: "Missing primary/cancel dialog buttons"])
+            }
+            let primaryFrame = primary.convert(primary.bounds, to: nil)
+            let cancelFrame = cancel.convert(cancel.bounds, to: nil)
+            try require(primaryFrame.midY > cancelFrame.midY,
+                        "primary action must stack above cancel")
+            try require(abs(primaryFrame.width - cancelFrame.width) < 1 && primaryFrame.width > card.width - 50,
+                        "stacked dialog buttons must span the dialog content width")
+            try require(primaryFrame.height >= 35 && cancelFrame.height >= 35,
+                        "stacked dialog buttons must use the larger 36pt height")
+        }
         try checkDialogCenter()
+        try checkDialogChrome(in: overlay, in: window,
+                              primaryTitle: NSLocalizedString("安装", comment: ""),
+                              cancelTitle: NSLocalizedString("取消", comment: ""))
         try await until { repositoryField()?.currentEditor() != nil }
         repositoryField()?.currentEditor()?.insertText("https://github.com/example/plugin")
         try await until { descendants(overlay).compactMap { $0 as? NSButton }.contains {
@@ -225,9 +252,12 @@ private enum PluginSettingsRegression {
         try require(abs(configurationFrame.midX - configurationWindow.contentView!.bounds.midX) < 1 &&
                     abs(configurationFrame.midY - configurationWindow.contentView!.bounds.midY) < 1,
                     "plugin configuration must share full-window centering")
+        try checkDialogChrome(in: configurationOverlay, in: configurationWindow,
+                              primaryTitle: NSLocalizedString("保存", comment: ""),
+                              cancelTitle: NSLocalizedString("取消", comment: ""))
         try capture("configuration-dialog", in: configurationWindow)
         descendants(configurationOverlay).compactMap { $0 as? NSButton }.first {
-            $0.title == NSLocalizedString("取消", comment: "")
+            $0.accessibilityIdentifier() == "settings-dialog-close"
         }?.performClick(nil)
         try await until { configurationWindow.contentView?.subviews.contains(where: { $0 is SettingsDialogOverlay }) == false }
         configurationWindow.close()
@@ -246,6 +276,9 @@ private enum PluginSettingsRegression {
         try require(abs(aliasFrame.midX - window.contentView!.bounds.midX) < 1 &&
                     abs(aliasFrame.midY - window.contentView!.bounds.midY) < 1,
                     "alias editor must share full-window centering")
+        try checkDialogChrome(in: aliasOverlay, in: window,
+                              primaryTitle: NSLocalizedString("保存", comment: ""),
+                              cancelTitle: NSLocalizedString("取消", comment: ""))
         try capture("alias-dialog")
         descendants(aliasOverlay).compactMap { $0 as? NSButton }.first {
             $0.title == NSLocalizedString("取消", comment: "")

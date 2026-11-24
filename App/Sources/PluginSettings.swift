@@ -244,22 +244,23 @@ struct PluginSettings: View {
         }
     }
     private var addDialog: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            HStack {
-                Text(label("添加插件")).font(.system(size: 16, weight: .semibold))
-                Spacer()
-                Button { adding = false } label: {
-                    Image(mingCute: "xmark", size: 12)
-                        .frame(width: 28, height: 28).contentShape(.circle)
-                }
-                .buttonStyle(.plain).foregroundStyle(ThemeColor.kTextSubtle)
-                .accessibilityLabel(label("关闭"))
-            }
+        SettingsDialogScaffold(
+            title: label("添加插件"),
+            width: 440,
+            primaryTitle: label("安装"),
+            primaryDisabled: busy || trimmedRepository.isEmpty,
+            primaryAction: installFromDialog,
+            cancelTitle: label("取消"),
+            close: { adding = false }
+        ) {
             VStack(alignment: .leading, spacing: 8) {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(label("GitHub 仓库链接"))
                     SettingsInputField(label("GitHub 仓库链接"), text: $repository)
                         .frame(maxWidth: .infinity)
+                        .onSubmit {
+                            if !busy && !trimmedRepository.isEmpty { installFromDialog() }
+                        }
                 }
                 .accessibilityIdentifier("plugin-repository")
                 if !repositoryError.isEmpty {
@@ -268,15 +269,7 @@ struct PluginSettings: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            HStack {
-                Spacer()
-                SettingsButton(label("取消")) { adding = false }
-                SettingsButton(label("安装")) { installFromDialog() }
-                    .disabled(busy || trimmedRepository.isEmpty)
-            }
         }
-        .settingsDialogSurface(width: 440)
-        .onExitCommand { adding = false }
         .accessibilityIdentifier("plugin-add-dialog")
     }
     private func pluginSubtitle(_ plugin: InstalledPlugin) -> some View {
@@ -356,51 +349,75 @@ struct PluginConfigurationEditor: View {
     let close: () -> Void
     @State private var values: [String: JSONValue]
     @State private var error = ""
+    @Environment(\.colorScheme) private var scheme
     init(plugin: InstalledPlugin, manager: PluginManager, saved: @escaping () -> Void, close: @escaping () -> Void) {
         self.plugin = plugin; self.manager = manager; self.saved = saved; self.close = close
         _values = State(initialValue: plugin.configuration)
     }
+    private var fields: [PluginConfigurationField] { plugin.manifest.configuration ?? [] }
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack {
-                Text(plugin.manifest.name).font(.system(size: 16, weight: .semibold))
-                Spacer()
-                Button(action: close) {
-                    Image(mingCute: "xmark", size: 12)
-                        .frame(width: 28, height: 28).contentShape(.circle)
+        SettingsDialogScaffold(
+            title: plugin.manifest.name,
+            width: 520,
+            primaryTitle: NSLocalizedString("保存", comment: ""),
+            primaryAction: submit,
+            cancelTitle: NSLocalizedString("取消", comment: ""),
+            close: close
+        ) {
+            VStack(alignment: .leading, spacing: 8) {
+                if fields.count > 5 {
+                    ScrollView { fieldsCard }
+                        .frame(height: 280)
+                } else {
+                    fieldsCard
                 }
-                .buttonStyle(.plain).foregroundStyle(ThemeColor.kTextSubtle)
-                .accessibilityLabel(NSLocalizedString("关闭", comment: ""))
-            }
-            SettingsForm {
-                ForEach(plugin.manifest.configuration ?? []) { field in
-                    if field.type == "boolean" {
-                        Toggle(field.label, isOn: Binding(get: { values[field.key]?.boolValue ?? false }, set: { values[field.key] = .bool($0) }))
-                    } else if field.type == "enum" {
-                        LabeledContent(field.label) {
-                            SettingsChoice(selection: text(field.key), options: (field.options ?? []).map { ($0, $0) })
-                        }
-                    } else {
-                        SettingsTextField(field.label, text: text(field.key))
-                    }
+                if !error.isEmpty {
+                    Text(error).foregroundStyle(ThemeColor.kTextNegative)
+                        .font(.system(size: 12)).fixedSize(horizontal: false, vertical: true)
                 }
-            }.formStyle(.grouped)
-            if !error.isEmpty { Text(error).foregroundStyle(.red) }
-            HStack {
-                Spacer()
-                SettingsButton(NSLocalizedString("取消", comment: "")) { close() }.accessibilityLabel(NSLocalizedString("取消", comment: ""))
-                SettingsButton(NSLocalizedString("保存", comment: "")) {
-                    Task {
-                        do { try await manager.configure(plugin.id, values: values); saved(); close() }
-                        catch { self.error = error.localizedDescription }
-                    }
-                }.accessibilityLabel(NSLocalizedString("保存", comment: "")).keyboardShortcut(.defaultAction)
             }
         }
-        .frame(height: 312)
-        .settingsDialogSurface(width: 520)
-        .onExitCommand(perform: close)
         .accessibilityIdentifier("plugin-configuration-dialog")
+    }
+    private var fieldsCard: some View {
+        VStack(spacing: 0) {
+            ForEach(Array(fields.enumerated()), id: \.element.id) { index, field in
+                if index > 0 {
+                    Rectangle().fill(SettingsPalette.separator(scheme))
+                        .frame(height: 1).padding(.horizontal, 16)
+                }
+                fieldRow(field)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16).padding(.vertical, 12)
+            }
+        }
+        .background(SettingsPalette.card(scheme), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+    @ViewBuilder
+    private func fieldRow(_ field: PluginConfigurationField) -> some View {
+        if field.type == "boolean" {
+            HStack(spacing: 24) {
+                Text(field.label)
+                Spacer(minLength: 24)
+                Toggle(field.label, isOn: Binding(get: { values[field.key]?.boolValue ?? false }, set: { values[field.key] = .bool($0) }))
+                    .labelsHidden().toggleStyle(.switch).controlSize(.small).fixedSize()
+            }
+        } else if field.type == "enum" {
+            HStack(spacing: 24) {
+                Text(field.label)
+                Spacer(minLength: 24)
+                SettingsChoice(selection: text(field.key), options: (field.options ?? []).map { ($0, $0) })
+            }
+        } else {
+            SettingsTextField(field.label, text: text(field.key))
+                .onSubmit(submit)
+        }
+    }
+    private func submit() {
+        Task {
+            do { try await manager.configure(plugin.id, values: values); saved(); close() }
+            catch { self.error = error.localizedDescription }
+        }
     }
     private func text(_ key: String) -> Binding<String> {
         Binding(get: { values[key]?.stringValue ?? "" }, set: { values[key] = .string($0) })
