@@ -87,7 +87,7 @@ enum ApplicationLanguageRegression {
             calendars: [.init(id: "work", name: "Work", account: "iCloud", isDefault: true)], source: "Bring prototype")
         for saving in [false, true] {
             calendarModel.saving = saving
-            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 380, height: 480), styleMask: [.titled], backing: .buffered, defer: false)
+            let window = NSWindow(contentRect: NSRect(origin: .zero, size: MessageCalendarEditor.windowSize), styleMask: [.titled], backing: .buffered, defer: false)
             window.isReleasedWhenClosed = false
             let host = NSHostingView(rootView: MessageCalendarEditorView(model: calendarModel, cancel: {}, create: {}))
             host.sizingOptions = []

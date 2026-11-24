@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 import Theme
 
-private enum ChatFormMetrics {
+enum ChatFormMetrics {
     static let controlHeight: CGFloat = 34
     static let controlCornerRadius: CGFloat = 10
     static let optionMinHeight: CGFloat = 38
@@ -489,7 +489,7 @@ private struct ChatFormDateField: View {
     }
 }
 
-private struct ChatFormDatePopover: View {
+struct ChatFormDatePopover: View {
     @Binding var selection: Date
     let dismiss: () -> Void
     @Environment(\.colorScheme) private var scheme
@@ -616,7 +616,7 @@ private struct ChatFormTemporalField: View {
     }
 }
 
-private struct ChatFormTemporalPopover: View {
+struct ChatFormTemporalPopover: View {
     let field: ChatForm.Field
     @Binding var values: [Int]
     let dismiss: () -> Void
@@ -792,7 +792,7 @@ private struct ChatFormTimeCell: View {
 
 // MARK: - Shared Form Trigger & Popover Controls
 
-private struct ChatFormPickerTriggerButton<Icon: View>: View {
+struct ChatFormPickerTriggerButton<Icon: View>: View {
     let isOpen: Bool
     let enabled: Bool
     let accessibilityLabel: String
@@ -901,7 +901,7 @@ private struct ChatFormPopoverPrimaryButton: View {
 }
 
 /// Crisp geometric clock glyph matching MingCute's 24pt/2pt round-stroke icon weight.
-private struct ChatFormClockGlyph: View {
+struct ChatFormClockGlyph: View {
     let size: CGFloat
 
     var body: some View {
@@ -924,7 +924,7 @@ private struct ChatFormClockGlyph: View {
 }
 
 /// Non-interactive geometry marker so native regressions can locate and click real SwiftUI controls.
-private struct ChatFormControlMarker: NSViewRepresentable {
+struct ChatFormControlMarker: NSViewRepresentable {
     let id: String
 
     func makeNSView(context: Context) -> MarkerView {

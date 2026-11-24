@@ -571,6 +571,8 @@
 "日程未创建，请重试。" = "The event was not created. Please try again.";
 "开始时间" = "Start";
 "结束时间" = "End";
+"须晚于当前时间" = "Must be in the future";
+"须晚于开始时间" = "Must be after start";
 "地点" = "Location";
 "请填写标题和未来的开始时间，结束时间须晚于开始时间。" = "Enter a title and a future start time. The end must be after the start.";
 "日期" = "Date";
