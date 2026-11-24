@@ -6,7 +6,7 @@ import SwiftUI
 import Theme
 import ToolService
 
-/// First-launch welcome and setup window: pure luminous canvas, silk diffused light, Apple-style fluid motion.
+/// First-launch welcome and setup window: airy light hierarchy, gentle silk glow, generous controls.
 @MainActor
 enum OnboardingWindow {
     static let size = NSSize(width: 560, height: 460)
@@ -75,7 +75,35 @@ private final class OnboardingContainerController: NSViewController, NSWindowDel
     }
 }
 
-// MARK: - Pure Silk Diffused Light Canvas
+// MARK: - Refined Ink Palette (Soft, Never Harsh Black)
+
+private enum OnboardingInk {
+    static func primary(_ scheme: ColorScheme) -> Color {
+        scheme == .dark
+            ? Color(.sRGB, red: 0.93, green: 0.94, blue: 0.97, opacity: 1)
+            : Color(.sRGB, red: 0.16, green: 0.19, blue: 0.26, opacity: 1)
+    }
+
+    static func secondary(_ scheme: ColorScheme) -> Color {
+        scheme == .dark
+            ? Color(.sRGB, red: 0.62, green: 0.65, blue: 0.72, opacity: 1)
+            : Color(.sRGB, red: 0.45, green: 0.49, blue: 0.56, opacity: 1)
+    }
+
+    static func tertiary(_ scheme: ColorScheme) -> Color {
+        scheme == .dark
+            ? Color(.sRGB, red: 0.46, green: 0.49, blue: 0.56, opacity: 1)
+            : Color(.sRGB, red: 0.58, green: 0.61, blue: 0.68, opacity: 1)
+    }
+
+    static func positive(_ scheme: ColorScheme) -> Color {
+        scheme == .dark
+            ? Color(.sRGB, red: 0.34, green: 0.82, blue: 0.54, opacity: 1)
+            : Color(.sRGB, red: 0.16, green: 0.60, blue: 0.36, opacity: 1)
+    }
+}
+
+// MARK: - Whisper-Light Silk Ambient Backdrop
 
 private struct OnboardingLuminousCanvas: View {
     let step: OnboardingStep
@@ -84,8 +112,8 @@ private struct OnboardingLuminousCanvas: View {
 
     private var baseColor: Color {
         scheme == .dark
-            ? Color(.sRGB, red: 0.082, green: 0.086, blue: 0.102, opacity: 1)
-            : Color(.sRGB, red: 0.996, green: 0.996, blue: 1.0, opacity: 1)
+            ? Color(.sRGB, red: 0.085, green: 0.090, blue: 0.106, opacity: 1)
+            : Color(.sRGB, red: 0.996, green: 0.997, blue: 1.0, opacity: 1)
     }
 
     var body: some View {
@@ -107,28 +135,28 @@ private struct OnboardingLuminousCanvas: View {
 
     @available(macOS 15, *)
     private func silkMesh(time t: Double) -> some View {
-        let phase = Double(step.rawValue) * 0.9
-        let dx = Float(0.08 * sin(t * 0.35 + phase))
-        let dy = Float(0.05 * cos(t * 0.28 + phase))
-        let midY: Float = step == .welcome ? 0.48 : 0.34
+        let phase = Double(step.rawValue) * 0.85
+        let dx = Float(0.07 * sin(t * 0.32 + phase))
+        let dy = Float(0.04 * cos(t * 0.25 + phase))
+        let midY: Float = step == .welcome ? 0.44 : 0.30
 
         let colors: [Color] = scheme == .dark
             ? [
-                Color(.sRGB, red: 0.10, green: 0.16, blue: 0.28, opacity: 1),
-                Color(.sRGB, red: 0.15, green: 0.12, blue: 0.26, opacity: 1),
-                Color(.sRGB, red: 0.19, green: 0.12, blue: 0.20, opacity: 1),
-                Color(.sRGB, red: 0.086, green: 0.094, blue: 0.122, opacity: 1),
-                Color(.sRGB, red: 0.086, green: 0.090, blue: 0.114, opacity: 1),
-                Color(.sRGB, red: 0.092, green: 0.088, blue: 0.108, opacity: 1),
+                Color(.sRGB, red: 0.10, green: 0.14, blue: 0.24, opacity: 1),
+                Color(.sRGB, red: 0.13, green: 0.11, blue: 0.22, opacity: 1),
+                Color(.sRGB, red: 0.16, green: 0.11, blue: 0.18, opacity: 1),
+                Color(.sRGB, red: 0.088, green: 0.094, blue: 0.118, opacity: 1),
+                Color(.sRGB, red: 0.088, green: 0.092, blue: 0.112, opacity: 1),
+                Color(.sRGB, red: 0.092, green: 0.090, blue: 0.110, opacity: 1),
                 baseColor, baseColor, baseColor,
             ]
             : [
-                Color(.sRGB, red: 0.87, green: 0.93, blue: 1.0, opacity: 1),
-                Color(.sRGB, red: 0.93, green: 0.90, blue: 1.0, opacity: 1),
-                Color(.sRGB, red: 1.0, green: 0.91, blue: 0.94, opacity: 1),
-                Color(.sRGB, red: 0.965, green: 0.980, blue: 1.0, opacity: 1),
-                Color(.sRGB, red: 0.992, green: 0.992, blue: 1.0, opacity: 1),
-                Color(.sRGB, red: 1.0, green: 0.975, blue: 0.985, opacity: 1),
+                Color(.sRGB, red: 0.925, green: 0.958, blue: 1.0, opacity: 1),
+                Color(.sRGB, red: 0.955, green: 0.938, blue: 1.0, opacity: 1),
+                Color(.sRGB, red: 1.0, green: 0.945, blue: 0.962, opacity: 1),
+                Color(.sRGB, red: 0.982, green: 0.990, blue: 1.0, opacity: 1),
+                Color(.sRGB, red: 0.996, green: 0.996, blue: 1.0, opacity: 1),
+                Color(.sRGB, red: 1.0, green: 0.988, blue: 0.992, opacity: 1),
                 baseColor, baseColor, baseColor,
             ]
 
@@ -149,15 +177,72 @@ private struct OnboardingLuminousCanvas: View {
     private var legacySilkGradient: some View {
         LinearGradient(
             colors: scheme == .dark
-                ? [Color(.sRGB, red: 0.13, green: 0.14, blue: 0.24, opacity: 1), baseColor]
-                : [Color(.sRGB, red: 0.91, green: 0.94, blue: 1.0, opacity: 1), baseColor],
+                ? [Color(.sRGB, red: 0.12, green: 0.13, blue: 0.21, opacity: 1), baseColor]
+                : [Color(.sRGB, red: 0.94, green: 0.96, blue: 1.0, opacity: 1), baseColor],
             startPoint: .top,
             endPoint: .center
         )
     }
 }
 
-// MARK: - Crisp Elevated Surface Card
+// MARK: - Generous Pill Buttons
+
+private struct OnboardingPillButtonStyle: ButtonStyle {
+    var prominent: Bool
+    var minWidth: CGFloat = 104
+    var height: CGFloat = 38
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 14, weight: .medium))
+            .foregroundStyle(prominent ? Color.white : OnboardingInk.primary(scheme))
+            .padding(.horizontal, 20)
+            .frame(minWidth: minWidth, minHeight: height)
+            .background {
+                if prominent {
+                    Capsule().fill(Color.accentColor)
+                } else {
+                    Capsule().fill(scheme == .dark ? Color.white.opacity(0.09) : Color.black.opacity(0.045))
+                }
+            }
+            .overlay {
+                if !prominent {
+                    Capsule().strokeBorder(scheme == .dark ? Color.white.opacity(0.11) : Color.black.opacity(0.06), lineWidth: 1)
+                }
+            }
+            .opacity(isEnabled ? (configuration.isPressed ? 0.86 : 1) : 0.4)
+            .scaleEffect(configuration.isPressed ? 0.975 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+            .contentShape(Capsule())
+    }
+}
+
+private struct OnboardingInlinePillButtonStyle: ButtonStyle {
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 13, weight: .medium))
+            .foregroundStyle(OnboardingInk.primary(scheme))
+            .padding(.horizontal, 14)
+            .frame(minHeight: 30)
+            .background(
+                Capsule().fill(scheme == .dark ? Color.white.opacity(0.09) : Color.black.opacity(0.045))
+            )
+            .overlay {
+                Capsule().strokeBorder(scheme == .dark ? Color.white.opacity(0.10) : Color.black.opacity(0.06), lineWidth: 1)
+            }
+            .opacity(isEnabled ? (configuration.isPressed ? 0.82 : 1) : 0.4)
+            .scaleEffect(configuration.isPressed ? 0.97 : 1)
+            .animation(.easeOut(duration: 0.1), value: configuration.isPressed)
+            .contentShape(Capsule())
+    }
+}
+
+// MARK: - Clean Surface Card
 
 private struct OnboardingCleanCard<Content: View>: View {
     @ViewBuilder var content: Content
@@ -168,22 +253,22 @@ private struct OnboardingCleanCard<Content: View>: View {
         content
             .background(
                 scheme == .dark
-                    ? Color(.sRGB, red: 0.135, green: 0.140, blue: 0.160, opacity: 0.92)
+                    ? Color(.sRGB, red: 0.132, green: 0.138, blue: 0.158, opacity: 0.90)
                     : Color.white.opacity(0.92),
                 in: shape
             )
             .overlay {
                 shape.strokeBorder(
-                    scheme == .dark ? Color.white.opacity(0.09) : Color.black.opacity(0.065),
+                    scheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.055),
                     lineWidth: 1
                 )
                 .allowsHitTesting(false)
             }
-            .shadow(color: Color.black.opacity(scheme == .dark ? 0.22 : 0.035), radius: 10, y: 3)
+            .shadow(color: Color.black.opacity(scheme == .dark ? 0.18 : 0.025), radius: 12, y: 4)
     }
 }
 
-// MARK: - Silky Light-Sweep Reveal Modifier
+// MARK: - Silky Light-Sweep Reveal
 
 private struct SilkSweepReveal: ViewModifier {
     let progress: CGFloat
@@ -193,7 +278,6 @@ private struct SilkSweepReveal: ViewModifier {
             .mask {
                 GeometryReader { geo in
                     let w = max(geo.size.width, 1)
-                    // Soft leading edge sweeps smoothly from left to right
                     LinearGradient(
                         stops: [
                             .init(color: .black, location: 0),
@@ -258,7 +342,7 @@ struct OnboardingView: View {
 
             VStack(spacing: 0) {
                 Color.clear
-                    .frame(height: 32)
+                    .frame(height: 30)
                     .compatibleWindowDrag()
 
                 ZStack {
@@ -272,20 +356,20 @@ struct OnboardingView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding(.horizontal, 36)
+                .padding(.horizontal, 40)
 
                 if step != .welcome {
                     footerBar
-                        .padding(.horizontal, 36)
+                        .padding(.horizontal, 40)
                         .padding(.top, 8)
-                        .padding(.bottom, 22)
+                        .padding(.bottom, 26)
                         .transition(.opacity)
                 }
             }
         }
         .frame(width: OnboardingWindow.size.width, height: OnboardingWindow.size.height)
         .font(.system(size: 14))
-        .foregroundStyle(ThemeColor.kText)
+        .foregroundStyle(OnboardingInk.primary(scheme))
         .onAppear {
             loadModelDraft()
             loginStatus = ToolService.launchAtLoginStatus
@@ -342,23 +426,23 @@ struct OnboardingView: View {
             showLogo = true
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
-            withAnimation(.timingCurve(0.25, 0.1, 0.25, 1.0, duration: 0.95)) {
+            withAnimation(.timingCurve(0.25, 0.1, 0.25, 1.0, duration: 0.9)) {
                 greetingSweep = 1.2
             }
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.52) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.50) {
             withAnimation(.spring(response: 0.65, dampingFraction: 0.92)) {
                 showSubtitle = true
             }
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.78) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.74) {
             withAnimation(.spring(response: 0.58, dampingFraction: 0.92)) {
                 showActions = true
             }
         }
     }
 
-    // MARK: - Step 1: Pure, Airy Welcome
+    // MARK: - Step 1: Welcome
 
     private var welcomeStep: some View {
         VStack(spacing: 0) {
@@ -367,8 +451,8 @@ struct OnboardingView: View {
             Image("AskyLogo")
                 .resizable()
                 .scaledToFit()
-                .frame(width: 76, height: 76)
-                .shadow(color: Color.black.opacity(scheme == .dark ? 0.35 : 0.08), radius: 18, y: 8)
+                .frame(width: 72, height: 72)
+                .shadow(color: Color.black.opacity(scheme == .dark ? 0.30 : 0.06), radius: 16, y: 6)
                 .scaleEffect(showLogo ? 1 : 0.88)
                 .opacity(showLogo ? 1 : 0)
                 .blur(radius: showLogo ? 0 : 8)
@@ -377,31 +461,27 @@ struct OnboardingView: View {
             Spacer().frame(height: 24)
 
             Text(NSLocalizedString("你好，欢迎使用 Asky", comment: ""))
-                .font(.system(size: 28, weight: .semibold))
-                .tracking(-0.5)
+                .font(.system(size: 23, weight: .medium))
+                .tracking(-0.3)
+                .foregroundStyle(OnboardingInk.primary(scheme))
                 .modifier(SilkSweepReveal(progress: greetingSweep))
                 .offset(y: greetingSweep > 0 ? 0 : 8)
 
-            Spacer().frame(height: 10)
+            Spacer().frame(height: 8)
 
             Text(NSLocalizedString("搜索、剪贴板与 AI，一个快捷键呼出", comment: ""))
-                .font(.system(size: 15))
-                .foregroundStyle(ThemeColor.kTextSubtle)
+                .font(.system(size: 13.5))
+                .foregroundStyle(OnboardingInk.secondary(scheme))
                 .opacity(showSubtitle ? 1 : 0)
                 .offset(y: showSubtitle ? 0 : 8)
 
             Spacer()
 
-            VStack(spacing: 12) {
-                Button {
+            VStack(spacing: 14) {
+                Button(NSLocalizedString("开始设置", comment: "")) {
                     navigate(to: .permissions)
-                } label: {
-                    Text(NSLocalizedString("开始设置", comment: ""))
-                        .font(.system(size: 14, weight: .medium))
-                        .frame(minWidth: 132)
                 }
-                .compatibleGlassButtonStyle(prominent: true)
-                .controlSize(.large)
+                .buttonStyle(OnboardingPillButtonStyle(prominent: true, minWidth: 164, height: 40))
 
                 Button(NSLocalizedString("跳过", comment: "")) {
                     app.preferences.hasCompletedOnboarding = true
@@ -409,28 +489,28 @@ struct OnboardingView: View {
                 }
                 .buttonStyle(.plain)
                 .font(.system(size: 12.5))
-                .foregroundStyle(ThemeColor.kTextSubtlest)
+                .foregroundStyle(OnboardingInk.tertiary(scheme))
             }
             .opacity(showActions ? 1 : 0)
             .offset(y: showActions ? 0 : 10)
 
-            Spacer().frame(height: 30)
+            Spacer().frame(height: 28)
         }
     }
 
-    // MARK: - Step 2: Recommended Permissions
+    // MARK: - Step 2: Permissions
 
     private var permissionsStep: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 22) {
+            VStack(alignment: .leading, spacing: 5) {
                 Text(NSLocalizedString("开启常用权限", comment: ""))
-                    .font(.system(size: 22, weight: .semibold))
-                    .tracking(-0.3)
-                Text(NSLocalizedString("只申请必要能力，日历和备忘录会在首次使用时再询问", comment: ""))
-                    .font(.system(size: 13.5))
-                    .foregroundStyle(ThemeColor.kTextSubtle)
+                    .font(.system(size: 19, weight: .medium))
+                    .foregroundStyle(OnboardingInk.primary(scheme))
+                Text(NSLocalizedString("按需开启，随时可在设置中调整", comment: ""))
+                    .font(.system(size: 13))
+                    .foregroundStyle(OnboardingInk.secondary(scheme))
             }
-            .padding(.top, 8)
+            .padding(.top, 12)
 
             OnboardingCleanCard {
                 VStack(spacing: 0) {
@@ -438,16 +518,15 @@ struct OnboardingView: View {
                         symbol: "accessibility",
                         tint: ToolIconPalette.blue,
                         title: NSLocalizedString("辅助功能", comment: ""),
-                        badge: NSLocalizedString("必备", comment: ""),
-                        accentBadge: true,
-                        description: NSLocalizedString("用于剪贴板自动粘贴与应用窗口搜索", comment: "")
+                        description: NSLocalizedString("自动粘贴与窗口切换", comment: "")
                     ) {
                         if permissionModel.states[.accessibility] == .authorized {
-                            grantedPill
+                            grantedLabel
                         } else {
-                            SettingsButton(NSLocalizedString("去授权", comment: "")) {
+                            Button(NSLocalizedString("去授权", comment: "")) {
                                 PermissionAuthorizationWindow.shared.show(.accessibility, colorScheme: scheme)
                             }
+                            .buttonStyle(OnboardingInlinePillButtonStyle())
                         }
                     }
 
@@ -456,15 +535,13 @@ struct OnboardingView: View {
                     permissionRow(
                         symbol: "bookmark",
                         tint: ToolIconPalette.orange,
-                        title: NSLocalizedString("Chrome 书签与链接", comment: ""),
-                        badge: NSLocalizedString("可选", comment: ""),
-                        accentBadge: false,
-                        description: NSLocalizedString("用于检索 Chrome 本地书签与已知站点，不读取浏览历史", comment: "")
+                        title: NSLocalizedString("Chrome 书签", comment: ""),
+                        description: NSLocalizedString("快速搜索本地书签", comment: "")
                     ) {
                         if app.chromeBookmarkAccessState == .authorized {
-                            grantedPill
+                            grantedLabel
                         } else {
-                            SettingsButton(NSLocalizedString(requestingChrome ? "正在请求…" : "去授权", comment: "")) {
+                            Button(NSLocalizedString(requestingChrome ? "正在请求…" : "去授权", comment: "")) {
                                 requestingChrome = true
                                 Task {
                                     await app.authorizeChromeBookmarkFolder()
@@ -472,6 +549,7 @@ struct OnboardingView: View {
                                     requestingChrome = false
                                 }
                             }
+                            .buttonStyle(OnboardingInlinePillButtonStyle())
                             .disabled(requestingChrome)
                         }
                     }
@@ -482,9 +560,7 @@ struct OnboardingView: View {
                         symbol: "power",
                         tint: ToolIconPalette.teal,
                         title: NSLocalizedString("登录时启动", comment: ""),
-                        badge: NSLocalizedString("推荐", comment: ""),
-                        accentBadge: false,
-                        description: NSLocalizedString("开机自动在菜单栏就绪，随时用快捷键呼出", comment: "")
+                        description: NSLocalizedString("开机自动在菜单栏就绪", comment: "")
                     ) {
                         Toggle("", isOn: Binding(
                             get: { loginStatus == .enabled },
@@ -507,75 +583,59 @@ struct OnboardingView: View {
         symbol: String,
         tint: Color,
         title: String,
-        badge: String,
-        accentBadge: Bool,
         description: String,
         @ViewBuilder trailing: () -> Trailing
     ) -> some View {
         HStack(spacing: 14) {
             ZStack {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(tint)
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(tint.opacity(scheme == .dark ? 0.18 : 0.10))
                 Image(systemName: symbol)
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(.white)
+                    .font(.system(size: 14.5, weight: .medium))
+                    .foregroundStyle(tint)
             }
             .frame(width: 32, height: 32)
             .accessibilityHidden(true)
 
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 6) {
-                    Text(title)
-                        .font(.system(size: 14, weight: .medium))
-                    Text(badge)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(accentBadge ? tint : ThemeColor.kTextSubtle.color(for: scheme))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 1.5)
-                        .background(
-                            accentBadge ? tint.opacity(scheme == .dark ? 0.20 : 0.11)
-                                : ThemeColor.kBackgroundNeutral.color(for: scheme),
-                            in: Capsule()
-                        )
-                }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 13.5, weight: .medium))
+                    .foregroundStyle(OnboardingInk.primary(scheme))
                 Text(description)
-                    .font(.system(size: 12.5))
-                    .foregroundStyle(ThemeColor.kTextSubtle)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .font(.system(size: 12))
+                    .foregroundStyle(OnboardingInk.secondary(scheme))
+                    .lineLimit(1)
             }
             Spacer(minLength: 12)
             trailing()
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 15)
     }
 
-    private var grantedPill: some View {
+    private var grantedLabel: some View {
         HStack(spacing: 4) {
             Image(mingCute: "checkmark", size: 12)
             Text(NSLocalizedString("已开启", comment: ""))
         }
         .font(.system(size: 12.5, weight: .medium))
-        .foregroundStyle(ThemeColor.kTextPositive)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 4)
-        .background(ThemeColor.kTextPositive.color(for: scheme).opacity(0.12), in: Capsule())
+        .foregroundStyle(OnboardingInk.positive(scheme))
     }
 
     // MARK: - Step 3: Shortcuts & Optional AI
 
     private var readyStep: some View {
         ScrollView(.vertical, showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 16) {
-                VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 5) {
                     Text(NSLocalizedString("随时呼出 Asky", comment: ""))
-                        .font(.system(size: 22, weight: .semibold))
-                        .tracking(-0.3)
-                    Text(NSLocalizedString("你可以在这里微调快捷键，AI 助手留到需要时再配置", comment: ""))
-                        .font(.system(size: 13.5))
-                        .foregroundStyle(ThemeColor.kTextSubtle)
+                        .font(.system(size: 19, weight: .medium))
+                        .foregroundStyle(OnboardingInk.primary(scheme))
+                    Text(NSLocalizedString("随时按快捷键呼出", comment: ""))
+                        .font(.system(size: 13))
+                        .foregroundStyle(OnboardingInk.secondary(scheme))
                 }
-                .padding(.top, 8)
+                .padding(.top, 12)
 
                 OnboardingCleanCard {
                     VStack(spacing: 0) {
@@ -607,7 +667,8 @@ struct OnboardingView: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text(title)
-                    .font(.system(size: 13.5))
+                    .font(.system(size: 13.5, weight: .medium))
+                    .foregroundStyle(OnboardingInk.primary(scheme))
                 Spacer(minLength: 12)
                 HotKeyRecorder(label: label, allowsPlainKey: false, apply: apply)
                     .frame(width: 140, height: 28)
@@ -618,8 +679,8 @@ struct OnboardingView: View {
                     .foregroundStyle(ThemeColor.kTextNegative)
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 11)
     }
 
     private var aiOptionalCard: some View {
@@ -630,38 +691,29 @@ struct OnboardingView: View {
                         .frame(width: 28, height: 28)
                         .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 2) {
-                        HStack(spacing: 6) {
-                            Text(NSLocalizedString("AI 助手", comment: ""))
-                                .font(.system(size: 13.5, weight: .medium))
-                            Text(NSLocalizedString("可选", comment: ""))
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(ThemeColor.kTextSubtle)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 1.5)
-                                .background(ThemeColor.kBackgroundNeutral.color(for: scheme), in: Capsule())
-                        }
+                        Text(NSLocalizedString("AI 助手", comment: ""))
+                            .font(.system(size: 13.5, weight: .medium))
+                            .foregroundStyle(OnboardingInk.primary(scheme))
                         if app.isModelConfigured && !showAIForm, let cfg = app.modelConfiguration {
-                            HStack(spacing: 4) {
-                                Image(mingCute: "checkmark", size: 11)
-                                    .foregroundStyle(ThemeColor.kTextPositive)
-                                Text(cfg.modelName)
-                                    .font(.system(size: 12, design: .monospaced))
-                                    .foregroundStyle(ThemeColor.kTextSubtle)
-                            }
+                            Text(cfg.modelName)
+                                .font(.system(size: 12, design: .monospaced))
+                                .foregroundStyle(OnboardingInk.positive(scheme))
                         } else {
                             Text(NSLocalizedString("不配置模型也能畅用搜索、剪贴板与预览", comment: ""))
                                 .font(.system(size: 12))
-                                .foregroundStyle(ThemeColor.kTextSubtle)
+                                .foregroundStyle(OnboardingInk.secondary(scheme))
+                                .lineLimit(1)
                         }
                     }
                     Spacer(minLength: 8)
-                    SettingsButton(NSLocalizedString(showAIForm ? "收起" : (app.isModelConfigured ? "修改配置" : "现在配置"), comment: "")) {
+                    Button(NSLocalizedString(showAIForm ? "收起" : (app.isModelConfigured ? "修改配置" : "现在配置"), comment: "")) {
                         let toggle = { showAIForm.toggle() }
                         if reduceMotion { toggle() } else { withAnimation(.spring(response: 0.4, dampingFraction: 0.92), toggle) }
                     }
+                    .buttonStyle(OnboardingInlinePillButtonStyle())
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 14)
 
                 if showAIForm {
                     rowDivider
@@ -701,7 +753,7 @@ struct OnboardingView: View {
                                         Image(mingCute: "arrow.up.right", size: 12)
                                     }
                                     .font(.system(size: 12))
-                                    .foregroundStyle(ThemeColor.kTextSubtle)
+                                    .foregroundStyle(OnboardingInk.secondary(scheme))
                                 }
                                 .buttonStyle(.plain)
                             }
@@ -721,7 +773,7 @@ struct OnboardingView: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
-                    .padding(16)
+                    .padding(18)
                     .disabled(savingModel || checkingModel)
                     .transition(.opacity)
                 }
@@ -738,8 +790,8 @@ struct OnboardingView: View {
                     Button { navigate(to: item) } label: {
                         Capsule()
                             .fill(item == step
-                                  ? ThemeColor.kText.color(for: scheme).opacity(0.75)
-                                  : ThemeColor.kTextSubtlest.color(for: scheme).opacity(0.28))
+                                  ? OnboardingInk.primary(scheme).opacity(0.60)
+                                  : OnboardingInk.tertiary(scheme).opacity(0.32))
                             .frame(width: item == step ? 16 : 6, height: 6)
                             .padding(.vertical, 6)
                             .contentShape(Rectangle())
@@ -751,11 +803,12 @@ struct OnboardingView: View {
             .animation(reduceMotion ? nil : .spring(response: 0.36, dampingFraction: 0.88), value: step)
 
             HStack {
-                SettingsButton(NSLocalizedString("上一步", comment: "")) {
+                Button(NSLocalizedString("上一步", comment: "")) {
                     if let previous = OnboardingStep(rawValue: step.rawValue - 1) {
                         navigate(to: previous)
                     }
                 }
+                .buttonStyle(OnboardingPillButtonStyle(prominent: false, minWidth: 96, height: 38))
 
                 Spacer()
 
@@ -763,15 +816,13 @@ struct OnboardingView: View {
                     Button(NSLocalizedString("继续", comment: "")) {
                         navigate(to: .ready)
                     }
-                    .compatibleGlassButtonStyle(prominent: true)
-                    .controlSize(.large)
+                    .buttonStyle(OnboardingPillButtonStyle(prominent: true, minWidth: 104, height: 38))
                 } else {
                     Button(NSLocalizedString("开始使用", comment: "")) {
                         app.preferences.hasCompletedOnboarding = true
                         onFinish()
                     }
-                    .compatibleGlassButtonStyle(prominent: true)
-                    .controlSize(.large)
+                    .buttonStyle(OnboardingPillButtonStyle(prominent: true, minWidth: 112, height: 38))
                 }
             }
         }
@@ -781,9 +832,9 @@ struct OnboardingView: View {
 
     private var rowDivider: some View {
         Rectangle()
-            .fill(scheme == .dark ? Color.white.opacity(0.07) : Color.black.opacity(0.06))
+            .fill(scheme == .dark ? Color.white.opacity(0.06) : Color.black.opacity(0.05))
             .frame(height: 1)
-            .padding(.horizontal, 16)
+            .padding(.horizontal, 18)
     }
 
     private func navigate(to target: OnboardingStep) {
