@@ -69,14 +69,17 @@ enum LocalShortcutsRegression {
                 window.makeKeyAndOrderFront(nil)
                 try await Task.sleep(for: .milliseconds(350))
                 @MainActor func views(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(views) }
-                guard let content = window.contentView,
-                      let recorder = views(content).compactMap({ $0 as? NSButton }).first(where: { $0.title == "⌘ C" }) else {
+                let content = window.contentView!
+                let recorders = views(content).compactMap { $0 as? HotKeyRecorderField }
+                guard let recorder = recorders.first(where: { $0.label == "⌘ C" }) else {
                     fatalError("Copy file must have a native editable recorder")
                 }
-                let buttons = views(content).compactMap { $0 as? NSButton }
-                precondition(!buttons.contains { ["↑", "↓", "←", "→", "↵", "Tab", "⌫", "Esc", "⇧ ↵"].contains($0.title) },
+                precondition(!recorders.contains { ["↑", "↓", "←", "→", "↵", "Tab", "⌫", "Esc", "⇧ ↵"].contains($0.label) },
                              "fixed keyboard operations must not appear as editable shortcuts")
-                recorder.performClick(nil)
+                let click = NSEvent.mouseEvent(with: .leftMouseDown, location: .zero, modifierFlags: [], timestamp: 0,
+                                               windowNumber: window.windowNumber, context: nil, eventNumber: 1,
+                                               clickCount: 1, pressure: 1)!
+                recorder.mouseDown(with: click)
                 precondition(window.firstResponder === recorder)
                 recorder.keyDown(with: event(38, [.command, .shift], window: window))
                 try await Task.sleep(for: .milliseconds(100))
@@ -85,7 +88,7 @@ enum LocalShortcutsRegression {
                 let afterRecording = try AppModel(root: root)
                 precondition(afterRecording.preferences.shortcut(.copyFile).code == 38)
                 // Same native recorder accepts unmodified navigation keys and rejects occupied ones.
-                recorder.performClick(nil)
+                recorder.mouseDown(with: click)
                 recorder.keyDown(with: event(36, window: window))
                 precondition(app.preferences.shortcut(.copyFile).code == 38, "occupied Return must be rejected")
                 window.makeFirstResponder(nil)
