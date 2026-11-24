@@ -379,11 +379,13 @@ extension AgentReplyRegression {
             try await Task.sleep(for: .milliseconds(550))
             try capture("before-\(name)")
 
-            // Trigger dedicated emoji swap animation and capture mid-flight + settled states.
+            // Trigger dedicated emoji swap animation and capture early, peak, and settled states.
             model.toggleUserReaction("❤️", for: replyID)
-            try await Task.sleep(for: .milliseconds(115))
-            try capture("mid-\(name)")
-            try await Task.sleep(for: .milliseconds(420))
+            try await Task.sleep(for: .milliseconds(75))
+            try capture("early-\(name)")
+            try await Task.sleep(for: .milliseconds(75))
+            try capture("peak-\(name)")
+            try await Task.sleep(for: .milliseconds(400))
             try capture("after-\(name)")
             precondition(model.items.first { $0.id == replyID }?.userReaction == "❤️")
         }

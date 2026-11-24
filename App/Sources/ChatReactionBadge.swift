@@ -224,7 +224,7 @@ struct ChatReactionBadge: View {
             switch kind {
             case .initial: 1
             case .appear: 0.68
-            case .swap: 0.54
+            case .swap: 0.46
             }
         }
 
@@ -232,7 +232,7 @@ struct ChatReactionBadge: View {
             switch kind {
             case .initial: 0
             case .appear: -4
-            case .swap: 9
+            case .swap: 11
             }
         }
 
@@ -241,7 +241,7 @@ struct ChatReactionBadge: View {
             switch kind {
             case .initial: return 0
             case .appear: return -10 * sign
-            case .swap: return 18 * sign
+            case .swap: return 24 * sign
             }
         }
 
@@ -273,10 +273,10 @@ struct ChatReactionBadge: View {
                             landed = true
                         }
                     } else if kind == .swap {
-                        withAnimation(.easeOut(duration: 0.14)) {
+                        withAnimation(.easeOut(duration: 0.13)) {
                             revealed = true
                         }
-                        withAnimation(.spring(response: 0.34, dampingFraction: 0.48)) {
+                        withAnimation(.spring(response: 0.36, dampingFraction: 0.46)) {
                             landed = true
                         }
                     } else {
@@ -302,24 +302,24 @@ struct ChatReactionBadge: View {
 
         private var exitOffsetX: CGFloat {
             guard kind == .swap else { return 0 }
-            return side == .trailing ? 5 : -5
+            return side == .trailing ? 7 : -7
         }
 
         private var exitOffsetY: CGFloat {
-            kind == .swap ? -11 : 4
+            kind == .swap ? -14 : 4
         }
 
         private var exitScale: CGFloat {
-            kind == .swap ? 0.48 : 0.62
+            kind == .swap ? 0.45 : 0.62
         }
 
         private var exitRotation: Double {
             guard kind == .swap else { return 0 }
-            return side == .trailing ? -22 : 22
+            return side == .trailing ? -26 : 26
         }
 
         private var exitBlur: CGFloat {
-            kind == .swap ? 2.2 : 0
+            kind == .swap ? 2.0 : 0
         }
 
         var body: some View {
@@ -341,7 +341,7 @@ struct ChatReactionBadge: View {
                         return
                     }
                     guard !Task.isCancelled else { return }
-                    let duration = reduceMotion ? 0.14 : (kind == .swap ? 0.16 : 0.15)
+                    let duration = reduceMotion ? 0.14 : (kind == .swap ? 0.18 : 0.15)
                     withAnimation(.easeOut(duration: duration)) {
                         dismissed = true
                     }
@@ -352,51 +352,48 @@ struct ChatReactionBadge: View {
 
 private struct ReactionSwapBurstView: View {
     let accentColor: Color
-    @State private var progress: CGFloat = 0
+    @State private var startDate: Date?
+
+    private static let duration: TimeInterval = 0.34
+    private static let beatDelay: TimeInterval = 0.024
 
     var body: some View {
-        ReactionSwapBurstLayer(progress: progress, accentColor: accentColor)
-            .frame(width: 48, height: 48)
-            .task {
-                do {
-                    try await Task.sleep(for: .milliseconds(24))
-                } catch {
-                    return
-                }
-                guard !Task.isCancelled else { return }
-                withAnimation(.timingCurve(0.22, 1.0, 0.36, 1.0, duration: 0.34)) {
-                    progress = 1
-                }
-            }
+        TimelineView(.animation(minimumInterval: 1.0 / 60, paused: startDate == nil)) { context in
+            let progress = burstProgress(at: context.date)
+            ReactionSwapBurstCanvas(progress: progress, accentColor: accentColor)
+        }
+        .frame(width: 52, height: 52)
+        .onAppear {
+            startDate = Date()
+        }
+    }
+
+    private func burstProgress(at now: Date) -> CGFloat {
+        guard let startDate else { return 0 }
+        let elapsed = now.timeIntervalSince(startDate) - Self.beatDelay
+        guard elapsed > 0 else { return 0 }
+        return CGFloat(min(1, elapsed / Self.duration))
     }
 }
 
-private struct ReactionSwapBurstLayer: View, Animatable {
-    nonisolated var progress: CGFloat
+private struct ReactionSwapBurstCanvas: View {
+    let progress: CGFloat
     let accentColor: Color
 
-    nonisolated var animatableData: CGFloat {
-        get { progress }
-        set { progress = newValue }
-    }
-
-    private var ringOpacity: Double {
-        if progress <= 0.01 || progress >= 0.99 { return 0 }
-        let fadeIn = min(1, progress / 0.22)
-        let fadeOut = max(0, 1 - max(0, progress - 0.22) / 0.78)
-        return Double(fadeIn * fadeOut) * 0.48
-    }
-
-    private var sparkOpacity: Double {
-        if progress <= 0.01 || progress >= 0.99 { return 0 }
-        let fadeIn = min(1, progress / 0.16)
-        let fadeOut = max(0, 1 - max(0, progress - 0.16) / 0.84)
-        return Double(fadeIn * fadeOut) * 0.85
-    }
-
     var body: some View {
-        let ringDiameter = 12 + 20 * progress
-        let ringWidth = max(0.45, 2.0 * (1 - progress * 0.75))
+        let t = max(0, min(1, progress))
+        let eased = 1 - pow(1 - t, 3)
+
+        let ringFadeIn = min(1, t / 0.18)
+        let ringFadeOut = max(0, 1 - max(0, t - 0.18) / 0.82)
+        let ringOpacity = (t <= 0.005 || t >= 0.995) ? 0 : Double(ringFadeIn * ringFadeOut) * 0.58
+
+        let sparkFadeIn = min(1, t / 0.14)
+        let sparkFadeOut = max(0, 1 - max(0, t - 0.14) / 0.86)
+        let sparkOpacity = (t <= 0.005 || t >= 0.995) ? 0 : Double(sparkFadeIn * sparkFadeOut) * 0.92
+
+        let ringDiameter = 14 + 22 * eased
+        let ringWidth = max(0.5, 2.2 * (1 - eased * 0.76))
 
         ZStack {
             Circle()
@@ -405,10 +402,10 @@ private struct ReactionSwapBurstLayer: View, Animatable {
 
             ForEach(0..<6, id: \.self) { index in
                 let angle = (Double(index) * 60 + 18) * .pi / 180
-                let reach: CGFloat = (index.isMultiple(of: 2) ? 13 : 10) * progress + 6.5
-                let dotDiameter: CGFloat = (index.isMultiple(of: 2) ? 3.0 : 2.2) * max(0.2, 1 - progress * 0.78)
+                let reach: CGFloat = (index.isMultiple(of: 2) ? 14.5 : 11.5) * eased + 7.0
+                let dotDiameter: CGFloat = (index.isMultiple(of: 2) ? 3.4 : 2.5) * max(0.22, 1 - t * 0.78)
                 Circle()
-                    .fill(index.isMultiple(of: 2) ? accentColor : accentColor.opacity(0.75))
+                    .fill(index.isMultiple(of: 2) ? accentColor : accentColor.opacity(0.82))
                     .frame(width: dotDiameter, height: dotDiameter)
                     .opacity(sparkOpacity)
                     .offset(
