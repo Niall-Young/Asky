@@ -1027,3 +1027,7 @@
 "随时按快捷键呼出 Asky，AI 助手可在需要时再配置" = "Summon Asky anytime with a shortcut. You can set up AI whenever you’re ready.";
 "不配置模型也能畅用搜索、剪贴板与预览" = "Search, clipboard, and preview work offline without a model";
 "现在配置" = "Set Up Now";
+"你好，欢迎使用 Asky" = "Hello, welcome to Asky";
+"随时呼出 Asky" = "Summon Asky Anytime";
+"你可以在这里微调快捷键，AI 助手留到需要时再配置" = "Adjust shortcuts here, or set up AI whenever you’re ready.";
+"开始使用" = "Start Using";

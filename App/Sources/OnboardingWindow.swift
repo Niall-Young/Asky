@@ -6,10 +6,10 @@ import SwiftUI
 import Theme
 import ToolService
 
-/// First-launch welcome and setup window with diffused ambient light and Apple-inspired fluid motion.
+/// First-launch welcome and setup window: pure luminous canvas, silk diffused light, Apple-style fluid motion.
 @MainActor
 enum OnboardingWindow {
-    static let size = NSSize(width: 640, height: 520)
+    static let size = NSSize(width: 560, height: 460)
 
     static func make(app: AppModel, onFinish: @escaping () -> Void, onDismiss: @escaping () -> Void) -> NSWindow {
         let controller = OnboardingContainerController(app: app, onFinish: onFinish, onDismiss: onDismiss)
@@ -17,8 +17,8 @@ enum OnboardingWindow {
                                            styleMask: [.titled, .closable, .fullSizeContentView],
                                            backing: .buffered, defer: false)
         window.animationBehavior = .documentWindow
-        window.isOpaque = false
-        window.backgroundColor = .clear
+        window.isOpaque = true
+        window.backgroundColor = .windowBackgroundColor
         window.contentViewController = controller
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
@@ -47,9 +47,6 @@ private final class OnboardingContainerController: NSViewController, NSWindowDel
 
     override func loadView() {
         view = NSView()
-        view.wantsLayer = true
-        view.layer?.cornerRadius = LauncherLayout.shellCornerRadius
-        view.layer?.masksToBounds = true
         let content = NSHostingView(rootView: OnboardingView(app: app, onFinish: onFinish, onSkip: onDismiss) { [weak self] in
             self?.updateAppearance()
         })
@@ -78,197 +75,137 @@ private final class OnboardingContainerController: NSViewController, NSWindowDel
     }
 }
 
-// MARK: - Ambient Diffused Light Backdrop
+// MARK: - Pure Silk Diffused Light Canvas
 
-private struct OnboardingAmbientBackdrop: View {
+private struct OnboardingLuminousCanvas: View {
     let step: OnboardingStep
     @Environment(\.colorScheme) private var scheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    @Environment(\.colorSchemeContrast) private var contrast
 
-    private var opaque: Bool { reduceTransparency || contrast == .increased }
+    private var baseColor: Color {
+        scheme == .dark
+            ? Color(.sRGB, red: 0.082, green: 0.086, blue: 0.102, opacity: 1)
+            : Color(.sRGB, red: 0.996, green: 0.996, blue: 1.0, opacity: 1)
+    }
 
     var body: some View {
         ZStack {
-            SettingsBackdrop()
-            if !opaque {
-                // Soft milky veil in light mode keeps the glass airy and luminous.
-                (scheme == .dark ? Color.black.opacity(0.18) : Color.white.opacity(0.32))
+            baseColor
+            if #available(macOS 15, *) {
                 TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: reduceMotion)) { timeline in
                     let t = reduceMotion ? 0 : timeline.date.timeIntervalSinceReferenceDate
-                    ambientOrbs(time: t)
+                    silkMesh(time: t)
                 }
-                .allowsHitTesting(false)
-                .accessibilityHidden(true)
+            } else {
+                legacySilkGradient
             }
         }
         .ignoresSafeArea()
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 
-    private func ambientOrbs(time t: Double) -> some View {
-        let phase = Double(step.rawValue) * 1.15
-        let isDark = scheme == .dark
-        let sky = Color(.sRGB, red: 0.36, green: 0.72, blue: 1.0, opacity: isDark ? 0.24 : 0.34)
-        let lavender = Color(.sRGB, red: 0.62, green: 0.50, blue: 1.0, opacity: isDark ? 0.22 : 0.28)
-        let peach = Color(.sRGB, red: 1.0, green: 0.64, blue: 0.72, opacity: isDark ? 0.16 : 0.26)
-        let mint = Color(.sRGB, red: 0.36, green: 0.88, blue: 0.80, opacity: isDark ? 0.16 : 0.24)
+    @available(macOS 15, *)
+    private func silkMesh(time t: Double) -> some View {
+        let phase = Double(step.rawValue) * 0.9
+        let dx = Float(0.08 * sin(t * 0.35 + phase))
+        let dy = Float(0.05 * cos(t * 0.28 + phase))
+        let midY: Float = step == .welcome ? 0.48 : 0.34
 
-        return GeometryReader { geo in
-            let w = geo.size.width
-            let h = geo.size.height
-            ZStack {
-                Circle()
-                    .fill(RadialGradient(colors: [sky, .clear], center: .center, startRadius: 0, endRadius: 230))
-                    .frame(width: 460, height: 460)
-                    .position(
-                        x: w * (0.24 + 0.08 * sin(t * 0.28 + phase)),
-                        y: h * (0.22 + 0.07 * cos(t * 0.22 + phase))
-                    )
-                Circle()
-                    .fill(RadialGradient(colors: [lavender, .clear], center: .center, startRadius: 0, endRadius: 240))
-                    .frame(width: 480, height: 480)
-                    .position(
-                        x: w * (0.78 + 0.07 * cos(t * 0.24 + phase * 0.8)),
-                        y: h * (0.26 + 0.08 * sin(t * 0.19 + phase))
-                    )
-                Circle()
-                    .fill(RadialGradient(colors: [peach, .clear], center: .center, startRadius: 0, endRadius: 220))
-                    .frame(width: 440, height: 440)
-                    .position(
-                        x: w * (0.68 + 0.09 * sin(t * 0.21 + 1.8 + phase)),
-                        y: h * (0.82 + 0.06 * cos(t * 0.26 + phase))
-                    )
-                Circle()
-                    .fill(RadialGradient(colors: [mint, .clear], center: .center, startRadius: 0, endRadius: 210))
-                    .frame(width: 420, height: 420)
-                    .position(
-                        x: w * (0.20 + 0.07 * cos(t * 0.23 + 2.4 + phase)),
-                        y: h * (0.78 + 0.07 * sin(t * 0.20 + phase))
-                    )
-            }
-            .blur(radius: 38)
-            .animation(reduceMotion ? nil : .spring(response: 0.9, dampingFraction: 0.95), value: step)
-        }
-    }
-}
-
-// MARK: - Apple-style Cursive "hello" Calligraphy
-
-private struct HelloWordmarkShape: Shape {
-    func path(in rect: CGRect) -> Path {
-        // Designed in a 260 x 100 coordinate canvas and scaled cleanly to rect.
-        let sx = rect.width / 260
-        let sy = rect.height / 100
-        func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
-            CGPoint(x: rect.minX + x * sx, y: rect.minY + y * sy)
-        }
-
-        var path = Path()
-        // h — graceful entry sweep into tall ascender loop, down to baseline, then soft arch
-        path.move(to: p(14, 72))
-        path.addCurve(to: p(46, 12), control1: p(30, 56), control2: p(52, 26))
-        path.addCurve(to: p(36, 22), control1: p(42, 4), control2: p(38, 10))
-        path.addCurve(to: p(28, 82), control1: p(32, 42), control2: p(29, 64))
-        path.addCurve(to: p(52, 50), control1: p(33, 66), control2: p(42, 50))
-        path.addCurve(to: p(66, 76), control1: p(61, 50), control2: p(59, 76))
-        // e — flowing loop
-        path.addCurve(to: p(94, 58), control1: p(75, 76), control2: p(88, 68))
-        path.addCurve(to: p(82, 52), control1: p(99, 51), control2: p(90, 48))
-        path.addCurve(to: p(86, 79), control1: p(72, 56), control2: p(74, 79))
-        path.addCurve(to: p(114, 62), control1: p(97, 79), control2: p(106, 72))
-        // l (first) — tall airy loop
-        path.addCurve(to: p(134, 12), control1: p(126, 46), control2: p(138, 24))
-        path.addCurve(to: p(124, 22), control1: p(131, 4), control2: p(126, 10))
-        path.addCurve(to: p(124, 79), control1: p(119, 44), control2: p(116, 79))
-        path.addCurve(to: p(150, 62), control1: p(134, 79), control2: p(142, 72))
-        // l (second) — matching tall airy loop
-        path.addCurve(to: p(170, 12), control1: p(162, 46), control2: p(174, 24))
-        path.addCurve(to: p(160, 22), control1: p(167, 4), control2: p(162, 10))
-        path.addCurve(to: p(160, 79), control1: p(155, 44), control2: p(152, 79))
-        path.addCurve(to: p(190, 56), control1: p(170, 79), control2: p(180, 68))
-        // o — smooth rounded bowl with an effortless exit flourish
-        path.addCurve(to: p(214, 52), control1: p(198, 48), control2: p(208, 48))
-        path.addCurve(to: p(190, 67), control1: p(202, 49), control2: p(190, 55))
-        path.addCurve(to: p(206, 80), control1: p(190, 78), control2: p(198, 82))
-        path.addCurve(to: p(222, 60), control1: p(216, 78), control2: p(224, 69))
-        path.addCurve(to: p(212, 52), control1: p(221, 53), control2: p(216, 51))
-        path.addCurve(to: p(246, 55), control1: p(222, 62), control2: p(235, 62))
-        return path
-    }
-}
-
-private struct HelloCalligraphyView: View {
-    let progress: CGFloat
-    @Environment(\.colorScheme) private var scheme
-
-    private var strokeGradient: LinearGradient {
         let colors: [Color] = scheme == .dark
             ? [
-                Color(.sRGB, red: 0.48, green: 0.78, blue: 1.0, opacity: 1),
-                Color(.sRGB, red: 0.72, green: 0.58, blue: 1.0, opacity: 1),
-                Color(.sRGB, red: 1.0, green: 0.58, blue: 0.76, opacity: 1),
-                Color(.sRGB, red: 1.0, green: 0.76, blue: 0.52, opacity: 1),
+                Color(.sRGB, red: 0.10, green: 0.16, blue: 0.28, opacity: 1),
+                Color(.sRGB, red: 0.15, green: 0.12, blue: 0.26, opacity: 1),
+                Color(.sRGB, red: 0.19, green: 0.12, blue: 0.20, opacity: 1),
+                Color(.sRGB, red: 0.086, green: 0.094, blue: 0.122, opacity: 1),
+                Color(.sRGB, red: 0.086, green: 0.090, blue: 0.114, opacity: 1),
+                Color(.sRGB, red: 0.092, green: 0.088, blue: 0.108, opacity: 1),
+                baseColor, baseColor, baseColor,
             ]
             : [
-                Color(.sRGB, red: 0.16, green: 0.46, blue: 0.96, opacity: 1),
-                Color(.sRGB, red: 0.48, green: 0.32, blue: 0.92, opacity: 1),
-                Color(.sRGB, red: 0.86, green: 0.30, blue: 0.58, opacity: 1),
-                Color(.sRGB, red: 0.92, green: 0.48, blue: 0.24, opacity: 1),
+                Color(.sRGB, red: 0.87, green: 0.93, blue: 1.0, opacity: 1),
+                Color(.sRGB, red: 0.93, green: 0.90, blue: 1.0, opacity: 1),
+                Color(.sRGB, red: 1.0, green: 0.91, blue: 0.94, opacity: 1),
+                Color(.sRGB, red: 0.965, green: 0.980, blue: 1.0, opacity: 1),
+                Color(.sRGB, red: 0.992, green: 0.992, blue: 1.0, opacity: 1),
+                Color(.sRGB, red: 1.0, green: 0.975, blue: 0.985, opacity: 1),
+                baseColor, baseColor, baseColor,
             ]
-        return LinearGradient(colors: colors, startPoint: .leading, endPoint: .trailing)
+
+        return MeshGradient(
+            width: 3,
+            height: 3,
+            points: [
+                SIMD2(0.0, 0.0), SIMD2(0.5 + dx, 0.0), SIMD2(1.0, 0.0),
+                SIMD2(0.0, midY + dy), SIMD2(0.5 - dx * 0.6, midY - dy), SIMD2(1.0, midY + dy * 0.5),
+                SIMD2(0.0, 1.0), SIMD2(0.5, 1.0), SIMD2(1.0, 1.0),
+            ],
+            colors: colors,
+            smoothsColors: true
+        )
+        .animation(reduceMotion ? nil : .spring(response: 0.85, dampingFraction: 0.95), value: step)
     }
 
-    var body: some View {
-        ZStack {
-            HelloWordmarkShape()
-                .trim(from: 0, to: progress)
-                .stroke(strokeGradient, style: StrokeStyle(lineWidth: 9, lineCap: .round, lineJoin: .round))
-                .opacity(scheme == .dark ? 0.35 : 0.22)
-                .blur(radius: 10)
-            HelloWordmarkShape()
-                .trim(from: 0, to: progress)
-                .stroke(strokeGradient, style: StrokeStyle(lineWidth: 3.6, lineCap: .round, lineJoin: .round))
-        }
-        .frame(width: 224, height: 86)
-        .accessibilityLabel("Hello")
+    private var legacySilkGradient: some View {
+        LinearGradient(
+            colors: scheme == .dark
+                ? [Color(.sRGB, red: 0.13, green: 0.14, blue: 0.24, opacity: 1), baseColor]
+                : [Color(.sRGB, red: 0.91, green: 0.94, blue: 1.0, opacity: 1), baseColor],
+            startPoint: .top,
+            endPoint: .center
+        )
     }
 }
 
-// MARK: - Airy Translucent Surface Card
+// MARK: - Crisp Elevated Surface Card
 
-private struct OnboardingGlassCard<Content: View>: View {
+private struct OnboardingCleanCard<Content: View>: View {
     @ViewBuilder var content: Content
     @Environment(\.colorScheme) private var scheme
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    @Environment(\.colorSchemeContrast) private var contrast
-
-    private var opaque: Bool { reduceTransparency || contrast == .increased }
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
         content
-            .background {
-                if opaque {
-                    shape.fill(SettingsPalette.surface(scheme, opaque: true))
-                } else {
-                    shape.fill(scheme == .dark ? Color.white.opacity(0.065) : Color.white.opacity(0.52))
-                }
-            }
+            .background(
+                scheme == .dark
+                    ? Color(.sRGB, red: 0.135, green: 0.140, blue: 0.160, opacity: 0.92)
+                    : Color.white.opacity(0.92),
+                in: shape
+            )
             .overlay {
                 shape.strokeBorder(
-                    LinearGradient(
-                        colors: scheme == .dark
-                            ? [Color.white.opacity(0.16), Color.white.opacity(0.04)]
-                            : [Color.white.opacity(0.85), Color.black.opacity(0.06)],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    ),
+                    scheme == .dark ? Color.white.opacity(0.09) : Color.black.opacity(0.065),
                     lineWidth: 1
                 )
                 .allowsHitTesting(false)
             }
-            .shadow(color: Color.black.opacity(scheme == .dark ? 0.16 : 0.04), radius: 14, y: 6)
+            .shadow(color: Color.black.opacity(scheme == .dark ? 0.22 : 0.035), radius: 10, y: 3)
+    }
+}
+
+// MARK: - Silky Light-Sweep Reveal Modifier
+
+private struct SilkSweepReveal: ViewModifier {
+    let progress: CGFloat
+
+    func body(content: Content) -> some View {
+        content
+            .mask {
+                GeometryReader { geo in
+                    let w = max(geo.size.width, 1)
+                    // Soft leading edge sweeps smoothly from left to right
+                    LinearGradient(
+                        stops: [
+                            .init(color: .black, location: 0),
+                            .init(color: .black, location: max(0, progress - 0.18)),
+                            .init(color: .clear, location: min(1, progress)),
+                        ],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                    .frame(width: w * 1.25)
+                }
+            }
     }
 }
 
@@ -291,11 +228,11 @@ struct OnboardingView: View {
     @State private var step: OnboardingStep = .welcome
     @State private var transitionForward = true
 
-    // Hero welcome entrance choreography
-    @State private var helloProgress: CGFloat = 0
-    @State private var showBrand = false
-    @State private var showChips = false
-    @State private var showCTA = false
+    // Welcome choreography
+    @State private var showLogo = false
+    @State private var greetingSweep: CGFloat = 0
+    @State private var showSubtitle = false
+    @State private var showActions = false
 
     // Permissions
     @State private var permissionModel = PermissionSettingsModel()
@@ -317,34 +254,33 @@ struct OnboardingView: View {
 
     var body: some View {
         ZStack {
-            OnboardingAmbientBackdrop(step: step)
+            OnboardingLuminousCanvas(step: step)
 
             VStack(spacing: 0) {
-                // Invisible drag handle across the titlebar area
                 Color.clear
-                    .frame(height: 36)
+                    .frame(height: 32)
                     .compatibleWindowDrag()
 
                 ZStack {
                     switch step {
                     case .welcome:
-                        welcomeStep
-                            .transition(stepTransition)
+                        welcomeStep.transition(stepTransition)
                     case .permissions:
-                        permissionsStep
-                            .transition(stepTransition)
+                        permissionsStep.transition(stepTransition)
                     case .ready:
-                        readyStep
-                            .transition(stepTransition)
+                        readyStep.transition(stepTransition)
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding(.horizontal, 36)
 
-                footerBar
-                    .padding(.horizontal, 32)
-                    .padding(.top, 8)
-                    .padding(.bottom, 22)
+                if step != .welcome {
+                    footerBar
+                        .padding(.horizontal, 36)
+                        .padding(.top, 8)
+                        .padding(.bottom, 22)
+                        .transition(.opacity)
+                }
             }
         }
         .frame(width: OnboardingWindow.size.width, height: OnboardingWindow.size.height)
@@ -381,121 +317,111 @@ struct OnboardingView: View {
 
     private var stepTransition: AnyTransition {
         if reduceMotion { return .opacity }
-        let insertionOffset: CGFloat = transitionForward ? 28 : -28
-        let removalOffset: CGFloat = transitionForward ? -24 : 24
+        let enterX: CGFloat = transitionForward ? 24 : -24
+        let exitX: CGFloat = transitionForward ? -20 : 20
         return .asymmetric(
-            insertion: .opacity.combined(with: .offset(x: insertionOffset)).combined(with: .scale(scale: 0.985)),
-            removal: .opacity.combined(with: .offset(x: removalOffset)).combined(with: .scale(scale: 0.985))
+            insertion: .opacity.combined(with: .offset(x: enterX)),
+            removal: .opacity.combined(with: .offset(x: exitX))
         )
     }
 
     private func playWelcomeChoreography() {
         if reduceMotion {
-            helloProgress = 1
-            showBrand = true
-            showChips = true
-            showCTA = true
+            showLogo = true
+            greetingSweep = 1.2
+            showSubtitle = true
+            showActions = true
             return
         }
-        helloProgress = 0
-        showBrand = false
-        showChips = false
-        showCTA = false
+        showLogo = false
+        greetingSweep = 0
+        showSubtitle = false
+        showActions = false
 
-        withAnimation(.timingCurve(0.28, 0.05, 0.22, 1.0, duration: 1.75)) {
-            helloProgress = 1
+        withAnimation(.spring(response: 0.78, dampingFraction: 0.90)) {
+            showLogo = true
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.65) {
-            withAnimation(.spring(response: 0.72, dampingFraction: 0.92)) {
-                showBrand = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+            withAnimation(.timingCurve(0.25, 0.1, 0.25, 1.0, duration: 0.95)) {
+                greetingSweep = 1.2
             }
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.05) {
-            withAnimation(.spring(response: 0.68, dampingFraction: 0.90)) {
-                showChips = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.52) {
+            withAnimation(.spring(response: 0.65, dampingFraction: 0.92)) {
+                showSubtitle = true
             }
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.32) {
-            withAnimation(.spring(response: 0.6, dampingFraction: 0.92)) {
-                showCTA = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.78) {
+            withAnimation(.spring(response: 0.58, dampingFraction: 0.92)) {
+                showActions = true
             }
         }
     }
 
-    // MARK: - Step 1: Welcome ("hello")
+    // MARK: - Step 1: Pure, Airy Welcome
 
     private var welcomeStep: some View {
         VStack(spacing: 0) {
-            Spacer(minLength: 10)
+            Spacer()
 
-            HelloCalligraphyView(progress: helloProgress)
-                .padding(.bottom, 18)
+            Image("AskyLogo")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 76, height: 76)
+                .shadow(color: Color.black.opacity(scheme == .dark ? 0.35 : 0.08), radius: 18, y: 8)
+                .scaleEffect(showLogo ? 1 : 0.88)
+                .opacity(showLogo ? 1 : 0)
+                .blur(radius: showLogo ? 0 : 8)
+                .accessibilityHidden(true)
+
+            Spacer().frame(height: 24)
+
+            Text(NSLocalizedString("你好，欢迎使用 Asky", comment: ""))
+                .font(.system(size: 28, weight: .semibold))
+                .tracking(-0.5)
+                .modifier(SilkSweepReveal(progress: greetingSweep))
+                .offset(y: greetingSweep > 0 ? 0 : 8)
+
+            Spacer().frame(height: 10)
+
+            Text(NSLocalizedString("搜索、剪贴板与 AI，一个快捷键呼出", comment: ""))
+                .font(.system(size: 15))
+                .foregroundStyle(ThemeColor.kTextSubtle)
+                .opacity(showSubtitle ? 1 : 0)
+                .offset(y: showSubtitle ? 0 : 8)
+
+            Spacer()
 
             VStack(spacing: 12) {
-                Image("AskyLogo")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 52, height: 52)
-                    .shadow(color: Color.black.opacity(scheme == .dark ? 0.35 : 0.10), radius: 14, y: 6)
-                    .accessibilityHidden(true)
-
-                VStack(spacing: 6) {
-                    Text(NSLocalizedString("欢迎使用 Asky", comment: ""))
-                        .font(.system(size: 26, weight: .semibold))
-                        .tracking(-0.4)
-                    Text(NSLocalizedString("搜索、剪贴板与 AI，一个快捷键呼出", comment: ""))
-                        .font(.system(size: 14.5))
-                        .foregroundStyle(ThemeColor.kTextSubtle)
+                Button {
+                    navigate(to: .permissions)
+                } label: {
+                    Text(NSLocalizedString("开始设置", comment: ""))
+                        .font(.system(size: 14, weight: .medium))
+                        .frame(minWidth: 132)
                 }
-            }
-            .opacity(showBrand ? 1 : 0)
-            .offset(y: showBrand ? 0 : 14)
-            .blur(radius: showBrand ? 0 : 6)
+                .compatibleGlassButtonStyle(prominent: true)
+                .controlSize(.large)
 
-            Spacer(minLength: 24)
-
-            HStack(spacing: 10) {
-                welcomeChip(icon: .applications, title: NSLocalizedString("快速搜索", comment: ""), shortcut: app.preferences.hotKeyLabel)
-                welcomeChip(icon: .clipboardText, title: NSLocalizedString("剪贴板历史", comment: ""), shortcut: app.preferences.clipboardHotKeyLabel)
-                welcomeChip(icon: .ai, title: NSLocalizedString("AI 助手", comment: ""), shortcut: app.preferences.agentHotKeyLabel)
-            }
-            .opacity(showChips ? 1 : 0)
-            .offset(y: showChips ? 0 : 12)
-            .blur(radius: showChips ? 0 : 4)
-
-            Spacer(minLength: 18)
-
-            Text(NSLocalizedString("Asky 常驻顶部菜单栏，随时通过快捷键唤起", comment: ""))
-                .font(.system(size: 12))
+                Button(NSLocalizedString("跳过", comment: "")) {
+                    app.preferences.hasCompletedOnboarding = true
+                    onSkip()
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 12.5))
                 .foregroundStyle(ThemeColor.kTextSubtlest)
-                .opacity(showCTA ? 1 : 0)
-
-            Spacer(minLength: 8)
-        }
-    }
-
-    private func welcomeChip(icon: LauncherFunctionIcon.Kind, title: String, shortcut: String) -> some View {
-        OnboardingGlassCard {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    LauncherFunctionIcon(kind: icon)
-                        .accessibilityHidden(true)
-                    Spacer(minLength: 0)
-                    shortcutPill(shortcut)
-                }
-                Text(title)
-                    .font(.system(size: 13.5, weight: .medium))
-                    .lineLimit(1)
             }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .opacity(showActions ? 1 : 0)
+            .offset(y: showActions ? 0 : 10)
+
+            Spacer().frame(height: 30)
         }
     }
 
-    // MARK: - Step 2: Essential Permissions
+    // MARK: - Step 2: Recommended Permissions
 
     private var permissionsStep: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 20) {
             VStack(alignment: .leading, spacing: 6) {
                 Text(NSLocalizedString("开启常用权限", comment: ""))
                     .font(.system(size: 22, weight: .semibold))
@@ -504,175 +430,165 @@ struct OnboardingView: View {
                     .font(.system(size: 13.5))
                     .foregroundStyle(ThemeColor.kTextSubtle)
             }
-            .padding(.top, 4)
+            .padding(.top, 8)
 
-            VStack(spacing: 10) {
-                permissionCard(
-                    symbol: "accessibility",
-                    tint: ToolIconPalette.blue,
-                    title: NSLocalizedString("辅助功能", comment: ""),
-                    badge: NSLocalizedString("必备", comment: ""),
-                    badgeHighlighted: true,
-                    description: NSLocalizedString("用于剪贴板自动粘贴与应用窗口搜索", comment: ""),
-                    granted: permissionModel.states[.accessibility] == .authorized
-                ) {
-                    if permissionModel.states[.accessibility] == .authorized {
-                        grantedBadge
-                    } else {
-                        SettingsButton(NSLocalizedString("去授权", comment: "")) {
-                            PermissionAuthorizationWindow.shared.show(.accessibility, colorScheme: scheme)
-                        }
-                    }
-                }
-
-                permissionCard(
-                    symbol: "bookmark",
-                    tint: ToolIconPalette.orange,
-                    title: NSLocalizedString("Chrome 书签与链接", comment: ""),
-                    badge: NSLocalizedString("推荐", comment: ""),
-                    badgeHighlighted: false,
-                    description: NSLocalizedString("用于检索 Chrome 本地书签与已知站点，不读取浏览历史", comment: ""),
-                    granted: app.chromeBookmarkAccessState == .authorized
-                ) {
-                    if app.chromeBookmarkAccessState == .authorized {
-                        grantedBadge
-                    } else {
-                        SettingsButton(NSLocalizedString(requestingChrome ? "正在请求…" : "去授权", comment: "")) {
-                            requestingChrome = true
-                            Task {
-                                await app.authorizeChromeBookmarkFolder()
-                                await app.refreshChromeBookmarkAccess()
-                                requestingChrome = false
+            OnboardingCleanCard {
+                VStack(spacing: 0) {
+                    permissionRow(
+                        symbol: "accessibility",
+                        tint: ToolIconPalette.blue,
+                        title: NSLocalizedString("辅助功能", comment: ""),
+                        badge: NSLocalizedString("必备", comment: ""),
+                        accentBadge: true,
+                        description: NSLocalizedString("用于剪贴板自动粘贴与应用窗口搜索", comment: "")
+                    ) {
+                        if permissionModel.states[.accessibility] == .authorized {
+                            grantedPill
+                        } else {
+                            SettingsButton(NSLocalizedString("去授权", comment: "")) {
+                                PermissionAuthorizationWindow.shared.show(.accessibility, colorScheme: scheme)
                             }
                         }
-                        .disabled(requestingChrome)
                     }
-                }
 
-                permissionCard(
-                    symbol: "power",
-                    tint: ToolIconPalette.teal,
-                    title: NSLocalizedString("登录时启动", comment: ""),
-                    badge: NSLocalizedString("推荐", comment: ""),
-                    badgeHighlighted: false,
-                    description: NSLocalizedString("开机自动在菜单栏就绪，随时用快捷键呼出", comment: ""),
-                    granted: loginStatus == .enabled
-                ) {
-                    Toggle("", isOn: Binding(
-                        get: { loginStatus == .enabled },
-                        set: { on in
-                            _ = try? ToolService.setLaunchAtLogin(on)
-                            loginStatus = ToolService.launchAtLoginStatus
+                    rowDivider
+
+                    permissionRow(
+                        symbol: "bookmark",
+                        tint: ToolIconPalette.orange,
+                        title: NSLocalizedString("Chrome 书签与链接", comment: ""),
+                        badge: NSLocalizedString("可选", comment: ""),
+                        accentBadge: false,
+                        description: NSLocalizedString("用于检索 Chrome 本地书签与已知站点，不读取浏览历史", comment: "")
+                    ) {
+                        if app.chromeBookmarkAccessState == .authorized {
+                            grantedPill
+                        } else {
+                            SettingsButton(NSLocalizedString(requestingChrome ? "正在请求…" : "去授权", comment: "")) {
+                                requestingChrome = true
+                                Task {
+                                    await app.authorizeChromeBookmarkFolder()
+                                    await app.refreshChromeBookmarkAccess()
+                                    requestingChrome = false
+                                }
+                            }
+                            .disabled(requestingChrome)
                         }
-                    ))
-                    .labelsHidden()
-                    .toggleStyle(.switch)
+                    }
+
+                    rowDivider
+
+                    permissionRow(
+                        symbol: "power",
+                        tint: ToolIconPalette.teal,
+                        title: NSLocalizedString("登录时启动", comment: ""),
+                        badge: NSLocalizedString("推荐", comment: ""),
+                        accentBadge: false,
+                        description: NSLocalizedString("开机自动在菜单栏就绪，随时用快捷键呼出", comment: "")
+                    ) {
+                        Toggle("", isOn: Binding(
+                            get: { loginStatus == .enabled },
+                            set: { on in
+                                _ = try? ToolService.setLaunchAtLogin(on)
+                                loginStatus = ToolService.launchAtLoginStatus
+                            }
+                        ))
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                    }
                 }
             }
 
             Spacer(minLength: 0)
-
-            HStack(spacing: 6) {
-                Image(mingCute: "info.circle", size: 13)
-                    .foregroundStyle(ThemeColor.kTextSubtlest)
-                    .accessibilityHidden(true)
-                Text(NSLocalizedString("权限随时可在「设置 › 系统权限」中调整或撤销", comment: ""))
-                    .font(.system(size: 12))
-                    .foregroundStyle(ThemeColor.kTextSubtlest)
-            }
         }
     }
 
-    private func permissionCard<Trailing: View>(
+    private func permissionRow<Trailing: View>(
         symbol: String,
         tint: Color,
         title: String,
         badge: String,
-        badgeHighlighted: Bool,
+        accentBadge: Bool,
         description: String,
-        granted: Bool,
         @ViewBuilder trailing: () -> Trailing
     ) -> some View {
-        OnboardingGlassCard {
-            HStack(spacing: 14) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(tint.gradient)
-                    Image(systemName: symbol)
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(.white)
-                }
-                .frame(width: 36, height: 36)
-                .shadow(color: tint.opacity(scheme == .dark ? 0.35 : 0.25), radius: 8, y: 3)
-                .accessibilityHidden(true)
-
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 6) {
-                        Text(title)
-                            .font(.system(size: 14, weight: .medium))
-                        Text(badge)
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(badgeHighlighted ? tint : ThemeColor.kTextSubtle.color(for: scheme))
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 2)
-                            .background(
-                                badgeHighlighted ? tint.opacity(scheme == .dark ? 0.22 : 0.12)
-                                    : ThemeColor.kBackgroundNeutral.color(for: scheme),
-                                in: Capsule()
-                            )
-                    }
-                    Text(description)
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(ThemeColor.kTextSubtle)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer(minLength: 12)
-                trailing()
+        HStack(spacing: 14) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(tint)
+                Image(systemName: symbol)
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(.white)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 14)
+            .frame(width: 32, height: 32)
+            .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(title)
+                        .font(.system(size: 14, weight: .medium))
+                    Text(badge)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(accentBadge ? tint : ThemeColor.kTextSubtle.color(for: scheme))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 1.5)
+                        .background(
+                            accentBadge ? tint.opacity(scheme == .dark ? 0.20 : 0.11)
+                                : ThemeColor.kBackgroundNeutral.color(for: scheme),
+                            in: Capsule()
+                        )
+                }
+                Text(description)
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(ThemeColor.kTextSubtle)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 12)
+            trailing()
         }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
     }
 
-    private var grantedBadge: some View {
-        HStack(spacing: 5) {
+    private var grantedPill: some View {
+        HStack(spacing: 4) {
             Image(mingCute: "checkmark", size: 12)
             Text(NSLocalizedString("已开启", comment: ""))
         }
         .font(.system(size: 12.5, weight: .medium))
         .foregroundStyle(ThemeColor.kTextPositive)
         .padding(.horizontal, 10)
-        .padding(.vertical, 5)
-        .background(ThemeColor.kTextPositive.color(for: scheme).opacity(0.14), in: Capsule())
+        .padding(.vertical, 4)
+        .background(ThemeColor.kTextPositive.color(for: scheme).opacity(0.12), in: Capsule())
     }
 
-    // MARK: - Step 3: Ready — Shortcuts & Optional AI
+    // MARK: - Step 3: Shortcuts & Optional AI
 
     private var readyStep: some View {
         ScrollView(.vertical, showsIndicators: false) {
             VStack(alignment: .leading, spacing: 16) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(NSLocalizedString("一切就绪", comment: ""))
+                    Text(NSLocalizedString("随时呼出 Asky", comment: ""))
                         .font(.system(size: 22, weight: .semibold))
                         .tracking(-0.3)
-                    Text(NSLocalizedString("随时按快捷键呼出 Asky，AI 助手可在需要时再配置", comment: ""))
+                    Text(NSLocalizedString("你可以在这里微调快捷键，AI 助手留到需要时再配置", comment: ""))
                         .font(.system(size: 13.5))
                         .foregroundStyle(ThemeColor.kTextSubtle)
                 }
-                .padding(.top, 4)
+                .padding(.top, 8)
 
-                OnboardingGlassCard {
+                OnboardingCleanCard {
                     VStack(spacing: 0) {
                         shortcutRow(title: NSLocalizedString("唤起启动器", comment: ""),
                                     label: app.preferences.hotKeyLabel,
                                     status: app.hotKeyStatus,
                                     apply: setLauncherHotKey)
-                        cardDivider
+                        rowDivider
                         shortcutRow(title: NSLocalizedString("打开剪贴板历史", comment: ""),
                                     label: app.preferences.clipboardHotKeyLabel,
                                     status: app.clipboardHotKeyStatus,
                                     apply: setClipboardHotKey)
-                        cardDivider
+                        rowDivider
                         shortcutRow(title: NSLocalizedString("打开 AI 对话", comment: ""),
                                     label: app.preferences.agentHotKeyLabel,
                                     status: app.agentHotKeyStatus,
@@ -691,10 +607,10 @@ struct OnboardingView: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text(title)
-                    .font(.system(size: 13.5, weight: .medium))
+                    .font(.system(size: 13.5))
                 Spacer(minLength: 12)
                 HotKeyRecorder(label: label, allowsPlainKey: false, apply: apply)
-                    .frame(width: 148, height: 28)
+                    .frame(width: 140, height: 28)
             }
             if !status.isEmpty, status != NSLocalizedString("已注册", comment: "") {
                 Text(status)
@@ -707,50 +623,48 @@ struct OnboardingView: View {
     }
 
     private var aiOptionalCard: some View {
-        OnboardingGlassCard {
+        OnboardingCleanCard {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 12) {
                     LauncherFunctionIcon(kind: .ai)
-                        .scaleEffect(1.15)
-                        .frame(width: 32, height: 32)
+                        .frame(width: 28, height: 28)
                         .accessibilityHidden(true)
-                    VStack(alignment: .leading, spacing: 3) {
+                    VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 6) {
                             Text(NSLocalizedString("AI 助手", comment: ""))
-                                .font(.system(size: 14, weight: .medium))
+                                .font(.system(size: 13.5, weight: .medium))
                             Text(NSLocalizedString("可选", comment: ""))
                                 .font(.system(size: 11, weight: .medium))
                                 .foregroundStyle(ThemeColor.kTextSubtle)
-                                .padding(.horizontal, 7)
-                                .padding(.vertical, 2)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 1.5)
                                 .background(ThemeColor.kBackgroundNeutral.color(for: scheme), in: Capsule())
                         }
                         if app.isModelConfigured && !showAIForm, let cfg = app.modelConfiguration {
-                            HStack(spacing: 5) {
-                                Image(mingCute: "checkmark", size: 12)
+                            HStack(spacing: 4) {
+                                Image(mingCute: "checkmark", size: 11)
                                     .foregroundStyle(ThemeColor.kTextPositive)
-                                Text("\(cfg.modelName) · \(cfg.baseURL.host ?? cfg.baseURL.absoluteString)")
+                                Text(cfg.modelName)
                                     .font(.system(size: 12, design: .monospaced))
                                     .foregroundStyle(ThemeColor.kTextSubtle)
-                                    .lineLimit(1)
                             }
                         } else {
                             Text(NSLocalizedString("不配置模型也能畅用搜索、剪贴板与预览", comment: ""))
-                                .font(.system(size: 12.5))
+                                .font(.system(size: 12))
                                 .foregroundStyle(ThemeColor.kTextSubtle)
                         }
                     }
                     Spacer(minLength: 8)
                     SettingsButton(NSLocalizedString(showAIForm ? "收起" : (app.isModelConfigured ? "修改配置" : "现在配置"), comment: "")) {
                         let toggle = { showAIForm.toggle() }
-                        if reduceMotion { toggle() } else { withAnimation(.spring(response: 0.42, dampingFraction: 0.9), toggle) }
+                        if reduceMotion { toggle() } else { withAnimation(.spring(response: 0.4, dampingFraction: 0.92), toggle) }
                     }
                 }
                 .padding(.horizontal, 16)
-                .padding(.vertical, 14)
+                .padding(.vertical, 12)
 
                 if showAIForm {
-                    cardDivider
+                    rowDivider
                     VStack(spacing: 10) {
                         HStack {
                             Text(NSLocalizedString("供应商", comment: ""))
@@ -809,25 +723,24 @@ struct OnboardingView: View {
                     }
                     .padding(16)
                     .disabled(savingModel || checkingModel)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+                    .transition(.opacity)
                 }
             }
         }
     }
 
-    // MARK: - Footer
+    // MARK: - Footer (Steps 2 & 3)
 
     private var footerBar: some View {
         ZStack {
-            // Centered morphing step dots
-            HStack(spacing: 7) {
+            HStack(spacing: 6) {
                 ForEach(OnboardingStep.allCases) { item in
                     Button { navigate(to: item) } label: {
                         Capsule()
                             .fill(item == step
-                                  ? ThemeColor.kText.color(for: scheme).opacity(0.85)
-                                  : ThemeColor.kTextSubtlest.color(for: scheme).opacity(0.35))
-                            .frame(width: item == step ? 18 : 6, height: 6)
+                                  ? ThemeColor.kText.color(for: scheme).opacity(0.75)
+                                  : ThemeColor.kTextSubtlest.color(for: scheme).opacity(0.28))
+                            .frame(width: item == step ? 16 : 6, height: 6)
                             .padding(.vertical, 6)
                             .contentShape(Rectangle())
                     }
@@ -835,45 +748,25 @@ struct OnboardingView: View {
                     .accessibilityLabel("\(item.rawValue + 1)")
                 }
             }
-            .animation(reduceMotion ? nil : .spring(response: 0.36, dampingFraction: 0.85), value: step)
+            .animation(reduceMotion ? nil : .spring(response: 0.36, dampingFraction: 0.88), value: step)
 
             HStack {
-                if step == .welcome {
-                    Button(NSLocalizedString("跳过", comment: "")) {
-                        app.preferences.hasCompletedOnboarding = true
-                        onSkip()
-                    }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 13))
-                    .foregroundStyle(ThemeColor.kTextSubtle)
-                    .opacity(showCTA ? 1 : 0)
-                } else {
-                    SettingsButton(NSLocalizedString("上一步", comment: "")) {
-                        if let previous = OnboardingStep(rawValue: step.rawValue - 1) {
-                            navigate(to: previous)
-                        }
+                SettingsButton(NSLocalizedString("上一步", comment: "")) {
+                    if let previous = OnboardingStep(rawValue: step.rawValue - 1) {
+                        navigate(to: previous)
                     }
                 }
 
                 Spacer()
 
-                switch step {
-                case .welcome:
-                    Button(NSLocalizedString("开始设置", comment: "")) {
-                        navigate(to: .permissions)
-                    }
-                    .compatibleGlassButtonStyle(prominent: true)
-                    .controlSize(.large)
-                    .opacity(showCTA ? 1 : 0)
-                    .scaleEffect(showCTA ? 1 : 0.95)
-                case .permissions:
+                if step == .permissions {
                     Button(NSLocalizedString("继续", comment: "")) {
                         navigate(to: .ready)
                     }
                     .compatibleGlassButtonStyle(prominent: true)
                     .controlSize(.large)
-                case .ready:
-                    Button(NSLocalizedString("开始使用 Asky", comment: "")) {
+                } else {
+                    Button(NSLocalizedString("开始使用", comment: "")) {
                         app.preferences.hasCompletedOnboarding = true
                         onFinish()
                     }
@@ -886,20 +779,11 @@ struct OnboardingView: View {
 
     // MARK: - Helpers
 
-    private var cardDivider: some View {
+    private var rowDivider: some View {
         Rectangle()
-            .fill(SettingsPalette.separator(scheme))
+            .fill(scheme == .dark ? Color.white.opacity(0.07) : Color.black.opacity(0.06))
             .frame(height: 1)
             .padding(.horizontal, 16)
-    }
-
-    private func shortcutPill(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: 11.5, weight: .medium, design: .rounded))
-            .foregroundStyle(ThemeColor.kTextSubtle)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3.5)
-            .background(scheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.05), in: Capsule())
     }
 
     private func navigate(to target: OnboardingStep) {
@@ -908,7 +792,7 @@ struct OnboardingView: View {
         if reduceMotion {
             step = target
         } else {
-            withAnimation(.spring(response: 0.48, dampingFraction: 0.92)) {
+            withAnimation(.spring(response: 0.44, dampingFraction: 0.94)) {
                 step = target
             }
         }
@@ -1009,7 +893,7 @@ struct OnboardingView: View {
                     if reduceMotion {
                         showAIForm = false
                     } else {
-                        withAnimation(.spring(response: 0.42, dampingFraction: 0.9)) {
+                        withAnimation(.spring(response: 0.4, dampingFraction: 0.92)) {
                             showAIForm = false
                         }
                     }
