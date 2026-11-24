@@ -86,17 +86,15 @@ struct ChatBubbleAnchorReader: NSViewRepresentable {
     }
 }
 
-enum ChatUserReactionCatalog {
-    static let quickEmojis = ["👍", "❤️", "😂", "🎉", "😮", "🙏"]
-}
-
 struct ChatBubblePopoverPresentation: ViewModifier {
     var controller: ChatBubblePopoverController
     @Binding var showingApprovalMenu: Bool
     var headerHeight: CGFloat
     @State private var monitor: Any?
     @State private var menuView = BubblePopoverWeakViewBox()
+    @State private var expandedPanelView = BubblePopoverWeakViewBox()
     @State private var measuredSize: CGSize = .zero
+    @State private var emojiPickerExpanded = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func body(content: Content) -> some View {
@@ -106,18 +104,56 @@ struct ChatBubblePopoverPresentation: ViewModifier {
                     GeometryReader { geometry in
                         let menuSize = effectiveSize(for: target)
                         let origin = menuOrigin(for: target, trigger: trigger, menuSize: menuSize, container: geometry.size)
+
+                        if case .emojiPicker(let selectedEmoji, let accentColor, let onSelect) = payload,
+                           emojiPickerExpanded {
+                            let panelLayout = expandedEmojiPanelLayout(
+                                quickBarOrigin: origin,
+                                quickBarSize: menuSize,
+                                container: geometry.size
+                            )
+                            ChatEmojiFullPickerView(
+                                selectedEmoji: selectedEmoji,
+                                accentColor: accentColor,
+                                panelHeight: panelLayout.size.height,
+                                onSelect: { emoji in
+                                    controller.dismiss()
+                                    onSelect(emoji)
+                                }
+                            )
+                            .nativeGlassBackground(in: RoundedRectangle(cornerRadius: 18))
+                            .background(BubblePopoverViewReader(box: expandedPanelView).allowsHitTesting(false))
+                            .fixedSize()
+                            .position(
+                                x: panelLayout.origin.x + panelLayout.size.width / 2,
+                                y: panelLayout.origin.y + panelLayout.size.height / 2
+                            )
+                            .transition(
+                                reduceMotion
+                                    ? .opacity
+                                    : .opacity.combined(with: .scale(scale: 0.94, anchor: panelLayout.placedAbove ? .bottom : .top))
+                            )
+                            .zIndex(1)
+                        }
+
                         popoverContent(for: payload)
                             .background(BubblePopoverViewReader(box: menuView).allowsHitTesting(false))
                             .fixedSize()
                             .onGeometryChange(for: CGSize.self) { $0.size } action: { measuredSize = $0 }
                             .position(x: origin.x + menuSize.width / 2, y: origin.y + menuSize.height / 2)
+                            .zIndex(2)
                     }
+                    .animation(
+                        reduceMotion ? nil : .spring(response: 0.24, dampingFraction: 0.82),
+                        value: emojiPickerExpanded
+                    )
                     .transition(.opacity)
                 }
             }
             .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: controller.target)
             .onChange(of: controller.target) { _, newTarget in
                 measuredSize = .zero
+                emojiPickerExpanded = false
                 if newTarget != nil {
                     if showingApprovalMenu { showingApprovalMenu = false }
                     startMonitoring()
@@ -153,9 +189,19 @@ struct ChatBubblePopoverPresentation: ViewModifier {
             ChatEmojiReactionPickerView(
                 selectedEmoji: selectedEmoji,
                 accentColor: accentColor,
+                isExpanded: emojiPickerExpanded,
                 onSelect: { emoji in
                     controller.dismiss()
                     onSelect(emoji)
+                },
+                onToggleExpand: {
+                    if reduceMotion {
+                        emojiPickerExpanded.toggle()
+                    } else {
+                        withAnimation(.spring(response: 0.24, dampingFraction: 0.82)) {
+                            emojiPickerExpanded.toggle()
+                        }
+                    }
                 }
             )
             .nativeGlassBackground(in: Capsule())
@@ -204,10 +250,61 @@ struct ChatBubblePopoverPresentation: ViewModifier {
         if measuredSize.width > 0, measuredSize.height > 0 { return measuredSize }
         switch target {
         case .emojiPicker:
-            return CGSize(width: 214, height: 40)
+            return CGSize(width: 244, height: 40)
         case .assistantMore, .userMore:
             return CGSize(width: 196, height: 110)
         }
+    }
+
+    private struct ExpandedEmojiPanelLayout {
+        let origin: CGPoint
+        let size: CGSize
+        let placedAbove: Bool
+    }
+
+    private func expandedEmojiPanelLayout(
+        quickBarOrigin: CGPoint,
+        quickBarSize: CGSize,
+        container: CGSize
+    ) -> ExpandedEmojiPanelLayout {
+        let edgeMargin: CGFloat = 12
+        let topLimit = headerHeight + 4
+        let bottomLimit = container.height - edgeMargin
+        let gap: CGFloat = 8
+        let width = min(ChatEmojiFullPickerLayout.width, max(240, container.width - edgeMargin * 2))
+        let preferredHeight = ChatEmojiFullPickerLayout.preferredHeight
+
+        let spaceAbove = max(0, quickBarOrigin.y - gap - topLimit)
+        let spaceBelow = max(0, bottomLimit - (quickBarOrigin.y + quickBarSize.height + gap))
+
+        let placedAbove: Bool
+        let height: CGFloat
+        let y: CGFloat
+        if spaceAbove >= preferredHeight {
+            placedAbove = true
+            height = preferredHeight
+            y = quickBarOrigin.y - gap - height
+        } else if spaceBelow >= preferredHeight {
+            placedAbove = false
+            height = preferredHeight
+            y = quickBarOrigin.y + quickBarSize.height + gap
+        } else if spaceAbove >= spaceBelow {
+            placedAbove = true
+            height = max(180, spaceAbove)
+            y = max(topLimit, quickBarOrigin.y - gap - height)
+        } else {
+            placedAbove = false
+            height = max(180, spaceBelow)
+            y = min(quickBarOrigin.y + quickBarSize.height + gap, max(topLimit, bottomLimit - height))
+        }
+
+        let preferredX = quickBarOrigin.x + quickBarSize.width / 2 - width / 2
+        let x = min(max(edgeMargin, preferredX), max(edgeMargin, container.width - edgeMargin - width))
+        return ExpandedEmojiPanelLayout(
+            origin: CGPoint(x: x, y: y),
+            size: CGSize(width: width, height: height),
+            placedAbove: placedAbove
+        )
     }
 
     private func menuOrigin(for target: ChatBubblePopoverTarget, trigger: CGRect, menuSize: CGSize, container: CGSize) -> CGPoint {
@@ -262,27 +359,41 @@ struct ChatBubblePopoverPresentation: ViewModifier {
     private func startMonitoring() {
         stopMonitoring()
         let box = menuView
+        let panelBox = expandedPanelView
         let controller = self.controller
         monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .scrollWheel, .keyDown]) { event in
+            let point = event.locationInWindow
+            let window = event.window
             if event.type == .scrollWheel {
-                MainActor.assumeIsolated { controller.dismiss() }
+                MainActor.assumeIsolated {
+                    let insidePanel = Self.contains(point: point, in: window, box: panelBox)
+                    let insideMenu = Self.contains(point: point, in: window, box: box)
+                    if !insidePanel && !insideMenu {
+                        controller.dismiss()
+                    }
+                }
                 return event
             }
             let isEscape = event.type == .keyDown && event.keyCode == 53
             if event.type == .keyDown && !isEscape { return event }
-            let point = event.locationInWindow
-            let window = event.window
             let consumed = MainActor.assumeIsolated {
-                if !isEscape, let view = box.view, window === view.window,
-                   view.bounds.contains(view.convert(point, from: nil)) {
+                if !isEscape,
+                   Self.contains(point: point, in: window, box: box)
+                    || Self.contains(point: point, in: window, box: panelBox) {
                     return false
                 }
-                let sameWindow = window != nil && window === box.view?.window
+                let sameWindow = window != nil && (window === box.view?.window || window === panelBox.view?.window)
                 controller.dismiss()
                 return sameWindow
             }
             return consumed ? nil : event
         }
+    }
+
+    @MainActor
+    private static func contains(point: NSPoint, in window: NSWindow?, box: BubblePopoverWeakViewBox) -> Bool {
+        guard let view = box.view, window === view.window else { return false }
+        return view.bounds.contains(view.convert(point, from: nil))
     }
 
     private func stopMonitoring() {
@@ -291,10 +402,28 @@ struct ChatBubblePopoverPresentation: ViewModifier {
     }
 }
 
+private enum ChatEmojiFullPickerLayout {
+    static let columns = 8
+    static let cellSize: CGFloat = 34
+    static let columnSpacing: CGFloat = 2
+    static let horizontalPadding: CGFloat = 10
+    static let width: CGFloat = CGFloat(columns) * cellSize
+        + CGFloat(columns - 1) * columnSpacing
+        + horizontalPadding * 2
+    static let preferredHeight: CGFloat = 310
+}
+
 private struct ChatEmojiReactionPickerView: View {
     let selectedEmoji: String?
     let accentColor: Color
+    let isExpanded: Bool
     let onSelect: (String) -> Void
+    let onToggleExpand: () -> Void
+
+    private var hasCustomSelectedEmoji: Bool {
+        guard let selectedEmoji else { return false }
+        return !ChatUserReactionCatalog.quickEmojis.contains(selectedEmoji)
+    }
 
     var body: some View {
         HStack(spacing: 2) {
@@ -307,9 +436,325 @@ private struct ChatEmojiReactionPickerView: View {
                     onSelect(emoji)
                 }
             }
+
+            ChatEmojiExpandButton(
+                isExpanded: isExpanded,
+                hasCustomSelection: hasCustomSelectedEmoji,
+                accentColor: accentColor,
+                action: onToggleExpand
+            )
         }
         .padding(4)
         .accessibilityIdentifier("bubble-emoji-picker")
+    }
+}
+
+private struct ChatEmojiExpandButton: View {
+    let isExpanded: Bool
+    let hasCustomSelection: Bool
+    let accentColor: Color
+    let action: () -> Void
+    @State private var hovered = false
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var discFill: Color {
+        if hasCustomSelection && !isExpanded {
+            return accentColor.opacity(hovered ? 0.28 : 0.22)
+        }
+        if scheme == .dark {
+            if isExpanded { return .white.opacity(hovered ? 0.26 : 0.20) }
+            return .white.opacity(hovered ? 0.18 : 0.12)
+        } else {
+            if isExpanded { return .black.opacity(hovered ? 0.15 : 0.11) }
+            return .black.opacity(hovered ? 0.10 : 0.06)
+        }
+    }
+
+    var body: some View {
+        Button(action: action) {
+            ZStack {
+                Circle()
+                    .fill(discFill)
+                    .overlay {
+                        if hasCustomSelection && !isExpanded {
+                            Circle()
+                                .strokeBorder(accentColor.opacity(0.45), lineWidth: 1)
+                        }
+                    }
+                    .frame(width: 28, height: 28)
+
+                Image(mingCute: "plus", size: 14)
+                    .foregroundStyle(ThemeColor.kText.color(for: scheme).opacity(isExpanded || hovered ? 0.95 : 0.78))
+            }
+            .frame(width: 32, height: 32)
+            .contentShape(Circle())
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: hovered)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: isExpanded)
+        }
+        .buttonStyle(ChatEmojiPressStyle())
+        .onHover { hovered = $0 }
+        .actionArrowCursor()
+        .help(isExpanded ? NSLocalizedString("收起全部表情", comment: "") : NSLocalizedString("展开全部表情", comment: ""))
+        .accessibilityLabel(isExpanded ? NSLocalizedString("收起全部表情", comment: "") : NSLocalizedString("展开全部表情", comment: ""))
+        .accessibilityAddTraits(isExpanded ? .isSelected : [])
+        .accessibilityIdentifier("bubble-emoji-expand")
+    }
+}
+
+private struct ChatEmojiCategoryBoundsKey: PreferenceKey {
+    static let defaultValue: [String: CGRect] = [:]
+    static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, latest in latest })
+    }
+}
+
+private struct ChatEmojiFullPickerView: View {
+    let selectedEmoji: String?
+    let accentColor: Color
+    let panelHeight: CGFloat
+    let onSelect: (String) -> Void
+
+    @State private var activeCategoryID: String
+    @State private var ignoreScrollSyncUntil: Date = .distantPast
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private static let scrollSpaceName = "chat-emoji-full-scroll"
+    private let columns = Array(
+        repeating: GridItem(.fixed(ChatEmojiFullPickerLayout.cellSize), spacing: ChatEmojiFullPickerLayout.columnSpacing),
+        count: ChatEmojiFullPickerLayout.columns
+    )
+
+    init(
+        selectedEmoji: String?,
+        accentColor: Color,
+        panelHeight: CGFloat,
+        onSelect: @escaping (String) -> Void
+    ) {
+        self.selectedEmoji = selectedEmoji
+        self.accentColor = accentColor
+        self.panelHeight = panelHeight
+        self.onSelect = onSelect
+        let shouldJumpToSelected = selectedEmoji.map { !ChatUserReactionCatalog.quickEmojis.contains($0) } ?? false
+        let initialCategory = (shouldJumpToSelected ? selectedEmoji.flatMap(ChatUserReactionCatalog.categoryID(containing:)) : nil)
+            ?? ChatUserReactionCatalog.categories.first?.id
+            ?? "smileys"
+        _activeCategoryID = State(initialValue: initialCategory)
+    }
+
+    var body: some View {
+        ScrollViewReader { scrollProxy in
+            VStack(spacing: 0) {
+                HStack(spacing: ChatEmojiFullPickerLayout.columnSpacing) {
+                    ForEach(ChatUserReactionCatalog.categories) { category in
+                        ChatEmojiCategoryTabButton(
+                            category: category,
+                            selected: activeCategoryID == category.id
+                        ) {
+                            activeCategoryID = category.id
+                            ignoreScrollSyncUntil = Date().addingTimeInterval(0.32)
+                            if reduceMotion {
+                                scrollProxy.scrollTo(category.id, anchor: .top)
+                            } else {
+                                withAnimation(.easeOut(duration: 0.2)) {
+                                    scrollProxy.scrollTo(category.id, anchor: .top)
+                                }
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, ChatEmojiFullPickerLayout.horizontalPadding)
+                .frame(height: 44)
+
+                Rectangle()
+                    .fill(ThemeColor.kBorder.color(for: scheme))
+                    .frame(height: 1)
+
+                ScrollView(.vertical) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(ChatUserReactionCatalog.categories) { category in
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(category.title)
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundStyle(ThemeColor.kTextSubtle.color(for: scheme))
+                                    .padding(.horizontal, 4)
+
+                                LazyVGrid(columns: columns, spacing: 4) {
+                                    ForEach(category.emojis, id: \.self) { emoji in
+                                        ChatEmojiGridOptionButton(
+                                            emoji: emoji,
+                                            selected: selectedEmoji == emoji,
+                                            accentColor: accentColor
+                                        ) {
+                                            onSelect(emoji)
+                                        }
+                                    }
+                                }
+                            }
+                            .padding(.top, 8)
+                            .id(category.id)
+                            .background {
+                                GeometryReader { proxy in
+                                    Color.clear.preference(
+                                        key: ChatEmojiCategoryBoundsKey.self,
+                                        value: [category.id: proxy.frame(in: .named(Self.scrollSpaceName))]
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    .padding(.horizontal, ChatEmojiFullPickerLayout.horizontalPadding)
+                    .padding(.top, 2)
+                    .padding(.bottom, 12)
+                }
+                .coordinateSpace(name: Self.scrollSpaceName)
+                .onPreferenceChange(ChatEmojiCategoryBoundsKey.self) { bounds in
+                    updateActiveCategory(from: bounds)
+                }
+                .onAppear {
+                    if let selectedEmoji,
+                       !ChatUserReactionCatalog.quickEmojis.contains(selectedEmoji),
+                       let categoryID = ChatUserReactionCatalog.categoryID(containing: selectedEmoji),
+                       categoryID != ChatUserReactionCatalog.categories.first?.id {
+                        activeCategoryID = categoryID
+                        ignoreScrollSyncUntil = Date().addingTimeInterval(0.25)
+                        scrollProxy.scrollTo(categoryID, anchor: .top)
+                    }
+                }
+            }
+        }
+        .frame(width: ChatEmojiFullPickerLayout.width, height: panelHeight)
+        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .accessibilityIdentifier("bubble-emoji-full-picker")
+    }
+
+    private func updateActiveCategory(from bounds: [String: CGRect]) {
+        guard Date() >= ignoreScrollSyncUntil else { return }
+        let threshold: CGFloat = 18
+        if let spanning = ChatUserReactionCatalog.categories.first(where: { category in
+            guard let frame = bounds[category.id] else { return false }
+            return frame.minY <= threshold && frame.maxY > threshold
+        }) {
+            if activeCategoryID != spanning.id {
+                activeCategoryID = spanning.id
+            }
+            return
+        }
+        if let passed = ChatUserReactionCatalog.categories.last(where: { category in
+            guard let frame = bounds[category.id] else { return false }
+            return frame.minY <= threshold
+        }) {
+            if activeCategoryID != passed.id {
+                activeCategoryID = passed.id
+            }
+        }
+    }
+}
+
+private struct ChatEmojiCategoryTabButton: View {
+    let category: ChatEmojiCategory
+    let selected: Bool
+    let action: () -> Void
+    @State private var hovered = false
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var pillFill: Color {
+        if scheme == .dark {
+            if selected { return .white.opacity(0.18) }
+            if hovered { return .white.opacity(0.09) }
+            return .clear
+        } else {
+            if selected { return .black.opacity(0.09) }
+            if hovered { return .black.opacity(0.05) }
+            return .clear
+        }
+    }
+
+    var body: some View {
+        Button(action: action) {
+            Text(category.icon)
+                .font(.system(size: 16))
+                .frame(width: 30, height: 30)
+                .background(Circle().fill(pillFill))
+                .frame(width: ChatEmojiFullPickerLayout.cellSize, height: 32)
+                .contentShape(Circle())
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: hovered)
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: selected)
+        }
+        .buttonStyle(ChatEmojiPressStyle())
+        .onHover { hovered = $0 }
+        .actionArrowCursor()
+        .help(category.title)
+        .accessibilityLabel(category.title)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityIdentifier("bubble-emoji-category-" + category.id)
+    }
+}
+
+private struct ChatEmojiGridOptionButton: View {
+    let emoji: String
+    let selected: Bool
+    let accentColor: Color
+    let action: () -> Void
+    @State private var hovered = false
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var hoverFill: Color {
+        scheme == .dark ? .white.opacity(0.12) : .black.opacity(0.07)
+    }
+
+    var body: some View {
+        Button(action: action) {
+            ZStack(alignment: .topTrailing) {
+                Text(emoji)
+                    .font(.system(size: 21))
+                    .frame(width: ChatEmojiFullPickerLayout.cellSize, height: ChatEmojiFullPickerLayout.cellSize)
+                    .scaleEffect(!reduceMotion && hovered ? 1.14 : 1)
+                    .background {
+                        if selected {
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(accentColor.opacity(scheme == .dark ? 0.20 : 0.14))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .strokeBorder(accentColor, lineWidth: 1.5)
+                                )
+                        } else if hovered {
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(hoverFill)
+                        }
+                    }
+
+                if selected {
+                    ZStack {
+                        Circle()
+                            .fill(scheme == .dark ? Color(white: 0.14) : accentColor)
+                            .overlay(
+                                Circle()
+                                    .strokeBorder(
+                                        scheme == .dark ? Color.white.opacity(0.28) : Color.white.opacity(0.85),
+                                        lineWidth: 1
+                                    )
+                            )
+                        Image(mingCute: "checkmark", size: 8)
+                            .foregroundStyle(.white)
+                    }
+                    .frame(width: 14, height: 14)
+                    .offset(x: 2, y: -2)
+                    .allowsHitTesting(false)
+                }
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 8))
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: hovered)
+        }
+        .buttonStyle(ChatEmojiPressStyle())
+        .onHover { hovered = $0 }
+        .actionArrowCursor()
+        .accessibilityLabel(emoji)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityIdentifier("bubble-emoji-grid-option-" + emoji)
     }
 }
 

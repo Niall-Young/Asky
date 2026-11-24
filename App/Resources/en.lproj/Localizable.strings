@@ -1071,3 +1071,13 @@
 "已贴表情 %@" = "Reacted with %@";
 "删除这条消息？" = "Delete this message?";
 "这会永久删除你的消息。此操作无法撤销" = "This will permanently delete your message. This action cannot be undone.";
+"展开全部表情" = "Show all emojis";
+"收起全部表情" = "Hide all emojis";
+"笑脸和人物" = "Smileys & People";
+"手势与动作" = "Gestures & Actions";
+"爱心与符号" = "Hearts & Symbols";
+"动物与自然" = "Animals & Nature";
+"食物与饮品" = "Food & Drink";
+"活动与运动" = "Activities";
+"旅行与地点" = "Travel & Places";
+"物品与工具" = "Objects";

@@ -101,6 +101,29 @@ extension AgentReplyRegression {
         model.open(reactionCID)
         precondition(model.items.first { $0.id == reactionReply.id }?.userReaction == nil, "Cleared user reaction stays cleared")
 
+        // Full emoji catalog integrity: every quick and expanded emoji must be valid and unique.
+        precondition(ChatUserReactionCatalog.categories.count == 8, "Full emoji picker must expose 8 categories")
+        var seenEmojis = Set<String>()
+        for category in ChatUserReactionCatalog.categories {
+            precondition(!category.emojis.isEmpty, "Category \(category.id) must not be empty")
+            precondition(AgentReactionReply.isEmoji(category.icon), "Category icon \(category.icon) must be a valid emoji")
+            for emoji in category.emojis {
+                precondition(AgentReactionReply.isEmoji(emoji), "Catalog emoji \(emoji) in \(category.id) must pass AgentReactionReply.isEmoji")
+                precondition(seenEmojis.insert(emoji).inserted, "Catalog emoji \(emoji) must not be duplicated")
+            }
+        }
+        for quick in ChatUserReactionCatalog.quickEmojis {
+            precondition(seenEmojis.contains(quick), "Quick emoji \(quick) must also exist in full catalog")
+        }
+
+        // User reacting with a non-quick emoji from the full catalog persists and toggles cleanly.
+        model.toggleUserReaction("🚀", for: reactionReply.id)
+        precondition(model.items.first { $0.id == reactionReply.id }?.userReaction == "🚀", "Expanded catalog emoji must attach cleanly")
+        model.open(reactionCID)
+        precondition(model.items.first { $0.id == reactionReply.id }?.userReaction == "🚀", "Expanded catalog emoji must survive reload")
+        model.toggleUserReaction("🚀", for: reactionReply.id)
+        precondition(model.items.first { $0.id == reactionReply.id }?.userReaction == nil, "Expanded catalog emoji must clear on second selection")
+
         // Deleting a single user message removes only that message and keeps the AI reply.
         let deleted = await model.deleteUserMessage(reactionUser.id)
         precondition(deleted, "Deleting an idle user message must succeed")
@@ -254,12 +277,29 @@ extension AgentReplyRegression {
         model.handle(.taskState(taskID: "menu-turn", .completed), conversationID: cid)
         model.finishTask(conversationID: cid)
         let replyID = model.items.first { $0.kind == .assistant }!.id
-        model.setUserReaction("👍", for: replyID)
+        model.setUserReaction("😂", for: replyID)
+
+        // Add earlier/later turns so we also verify expanding the full picker upward from a lower bubble.
+        let lowerUserText = "顺便帮我确认一下发布清单"
+        let lowerReplyText = "没问题，发布前我们会核对变更日志、签名与公证状态、自动更新清单以及核心路径的回归测试结果。"
+        try store.append(conversationID: cid, role: "user", text: "好的，还有其他需要提前准备的事项吗？")
+        try store.append(conversationID: cid, role: "assistant", text: "建议提前冻结接口字段，并同步一份给测试同学核对边界用例。")
+        try store.append(conversationID: cid, role: "user", text: lowerUserText)
+        let lowerReply = try store.append(conversationID: cid, role: "assistant", text: lowerReplyText)
+        model.open(cid)
+        model.setUserReaction("😂", for: lowerReply.id)
 
         let controller = AgentWindowController(model: model, presentation: WindowPresentation())
         controller.show()
         let window = NSApp.windows.first { $0.title == "Asky AI" && $0.isVisible }!
         defer { window.orderOut(nil) }
+        if let screen = NSScreen.screens.first {
+            let origin = NSPoint(
+                x: max(screen.visibleFrame.minX + 24, screen.visibleFrame.maxX - window.frame.width - 24),
+                y: max(screen.visibleFrame.minY + 24, screen.visibleFrame.midY - window.frame.height / 2)
+            )
+            window.setFrameOrigin(origin)
+        }
         window.level = .floating
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -292,10 +332,12 @@ extension AgentReplyRegression {
             let texts = descendants(surface).compactMap { $0 as? NSTextView }
             let userView = texts.first { $0.string == userText }!
             let replyView = texts.first { $0.string == replyText }!
+            let lowerReplyView = texts.first { $0.string == lowerReplyText }!
             let userFrame = userView.convert(userView.bounds, to: nil)
             let replyFrame = replyView.convert(replyView.bounds, to: nil)
+            let lowerReplyFrame = lowerReplyView.convert(lowerReplyView.bounds, to: nil)
 
-            // 1. Hover AI bubble -> click Emoji button (first button in 86pt bar, 8pt right of bubble + 18pt inset)
+            // 1. Hover top AI bubble -> click Emoji button -> capture quick bar, then expand downward.
             window.makeKeyAndOrderFront(nil)
             move(window.convertPoint(toScreen: NSPoint(x: replyFrame.midX, y: replyFrame.midY)))
             try await Task.sleep(for: .milliseconds(250))
@@ -304,6 +346,53 @@ extension AgentReplyRegression {
             let aiMorePoint = NSPoint(x: aiBarLeft + 72, y: replyFrame.midY)
             try await click(aiEmojiPoint, in: window)
             try capture("emoji-\(name)")
+
+            // Click '+' at the right end of the quick bar (clamped near right edge: 560 - 12 - 20 = 528).
+            let topExpandPoint = NSPoint(x: min(560 - 12 - 20, aiEmojiPoint.x + 102), y: replyFrame.midY + 14 + 6 + 20)
+            try await click(topExpandPoint, in: window)
+            try await Task.sleep(for: .milliseconds(250))
+            try capture("emoji-expanded-below-\(name)")
+
+            // Dismiss, then hover lower AI bubble -> click Emoji -> click '+' to expand upward (above quick bar).
+            try await click(NSPoint(x: 20, y: 200), in: window)
+            model.setUserReaction("😂", for: lowerReply.id)
+            try await Task.sleep(for: .milliseconds(120))
+            window.makeKeyAndOrderFront(nil)
+            move(window.convertPoint(toScreen: NSPoint(x: lowerReplyFrame.midX, y: lowerReplyFrame.midY)))
+            try await Task.sleep(for: .milliseconds(250))
+            let lowerBarLeft = lowerReplyFrame.maxX + 18 + 8
+            let lowerEmojiPoint = NSPoint(x: lowerBarLeft + 14, y: lowerReplyFrame.midY)
+            try await click(lowerEmojiPoint, in: window)
+            let lowerExpandPoint = NSPoint(x: min(560 - 12 - 20, lowerEmojiPoint.x + 102), y: lowerReplyFrame.midY + 14 + 6 + 20)
+            try await click(lowerExpandPoint, in: window)
+            try await Task.sleep(for: .milliseconds(280))
+            try capture("emoji-expanded-above-\(name)")
+
+            // Scroll wheel inside the expanded full panel must not dismiss it; clicking a category tab jumps sections;
+            // clicking an emoji cell inside the expanded grid selects that reaction.
+            let panelRight = 560.0 - 12.0
+            let panelLeft = panelRight - 306.0
+            let quickBarTopAppKit = lowerReplyFrame.midY + 14 + 6 + 40
+            let panelBottomAppKit = quickBarTopAppKit + 8
+            let panelTopAppKit = panelBottomAppKit + 310
+            let scrollCenter = NSPoint(x: (panelLeft + panelRight) / 2, y: (panelBottomAppKit + panelTopAppKit) / 2)
+            move(window.convertPoint(toScreen: scrollCenter))
+            try await Task.sleep(for: .milliseconds(100))
+            CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: -40, wheel2: 0, wheel3: 0)?.post(tap: .cghidEventTap)
+            try await Task.sleep(for: .milliseconds(180))
+            // Click the 7th category tab (🚀 Travel & Places) at the top bar of the expanded panel.
+            let travelTabPoint = NSPoint(x: panelLeft + 10 + 6 * 36 + 17, y: panelTopAppKit - 22)
+            try await click(travelTabPoint, in: window)
+            try await Task.sleep(for: .milliseconds(260))
+            try capture("emoji-expanded-category-\(name)")
+            // Click the first visible emoji cell in the Travel & Places section (🚗) and verify reaction updates.
+            let firstCellPoint = NSPoint(x: panelLeft + 10 + 17, y: panelTopAppKit - 45 - 42)
+            try await click(firstCellPoint, in: window)
+            try await Task.sleep(for: .milliseconds(220))
+            let updatedReaction = model.items.first { $0.id == lowerReply.id }?.userReaction
+            precondition(updatedReaction != nil && updatedReaction != "😂",
+                         "Clicking an emoji inside the expanded picker must update the message reaction (got \(String(describing: updatedReaction)))")
+            model.setUserReaction("😂", for: lowerReply.id)
 
             // Dismiss then open AI More menu
             try await click(NSPoint(x: 20, y: 200), in: window)
@@ -352,6 +441,13 @@ extension AgentReplyRegression {
         controller.show()
         let window = NSApp.windows.first { $0.title == "Asky AI" && $0.isVisible }!
         defer { window.orderOut(nil) }
+        if let screen = NSScreen.screens.first {
+            let origin = NSPoint(
+                x: max(screen.visibleFrame.minX + 24, screen.visibleFrame.maxX - window.frame.width - 24),
+                y: max(screen.visibleFrame.minY + 24, screen.visibleFrame.midY - window.frame.height / 2)
+            )
+            window.setFrameOrigin(origin)
+        }
         window.level = .floating
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
