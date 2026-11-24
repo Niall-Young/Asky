@@ -1,14 +1,18 @@
 import SwiftUI
+import Theme
 
 /// A readable month grid; changing the date preserves the selected hour and minute.
 struct CalendarMonthPicker: View {
     @Binding var selection: Date
+    var monochrome = false
     @State private var displayedMonth: Date
+    @Environment(\.colorScheme) private var scheme
     private let calendar = Calendar.current
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 4), count: 7)
 
-    init(selection: Binding<Date>) {
+    init(selection: Binding<Date>, monochrome: Bool = false) {
         _selection = selection
+        self.monochrome = monochrome
         _displayedMonth = State(initialValue: selection.wrappedValue)
     }
 
@@ -19,10 +23,11 @@ struct CalendarMonthPicker: View {
     }
 
     var body: some View {
-        VStack(spacing: 14) {
-            HStack {
+        VStack(spacing: 12) {
+            HStack(spacing: 4) {
                 Text(displayedMonth, format: .dateTime.year().month(.wide))
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.system(size: monochrome ? 14 : 16, weight: .semibold))
+                    .foregroundStyle(monochrome ? ThemeColor.kText.color(for: scheme) : Color.primary)
                 Spacer()
                 monthButton("上一月", symbol: "chevron.left", offset: -1)
                 monthButton("下一月", symbol: "chevron.right", offset: 1)
@@ -30,26 +35,25 @@ struct CalendarMonthPicker: View {
             LazyVGrid(columns: columns, spacing: 4) {
                 ForEach(0..<7, id: \.self) { index in
                     Text(calendar.veryShortStandaloneWeekdaySymbols[(index + calendar.firstWeekday - 1) % 7])
-                        .font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(monochrome ? ThemeColor.kTextSubtlest.color(for: scheme) : Color.secondary)
                         .frame(height: 24).accessibilityHidden(true)
                 }
                 ForEach(days, id: \.self) { day in
                     let selected = calendar.isDate(day, inSameDayAs: selection)
+                    let isToday = calendar.isDateInToday(day)
                     let currentMonth = calendar.isDate(day, equalTo: displayedMonth, toGranularity: .month)
-                    Button {
+                    CalendarDayCell(
+                        dayNumber: calendar.component(.day, from: day),
+                        selected: selected,
+                        isToday: isToday,
+                        currentMonth: currentMonth,
+                        monochrome: monochrome
+                    ) {
                         if let date = Self.selecting(day, preservingTimeFrom: selection, calendar: calendar) {
                             selection = date
                         }
-                    } label: {
-                        Text("\(calendar.component(.day, from: day))")
-                            .font(.system(size: 14, weight: selected ? .semibold : .regular))
-                            .foregroundStyle(selected ? Color.white : calendar.isDateInToday(day)
-                                ? Color.accentColor : currentMonth ? Color.primary : Color.secondary.opacity(0.55))
-                            .frame(maxWidth: .infinity).frame(height: 34)
-                            .background(selected ? Color.accentColor : .clear, in: Circle())
-                            .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
                     .accessibilityLabel(Text(day, format: .dateTime.year().month().day().weekday(.wide)))
                     .accessibilityAddTraits(selected ? .isSelected : [])
                 }
@@ -61,21 +65,94 @@ struct CalendarMonthPicker: View {
     }
 
     private func monthButton(_ title: String, symbol: String, offset: Int) -> some View {
-        Button {
+        CalendarMonthNavButton(title: title, symbol: symbol, monochrome: monochrome) {
             if let date = calendar.date(byAdding: .month, value: offset, to: displayedMonth) {
                 displayedMonth = calendar.dateInterval(of: .month, for: date)?.start ?? date
             }
-        } label: {
-            Image(mingCute: symbol, size: 12)
-                .frame(width: 28, height: 28).contentShape(Rectangle())
         }
-        .buttonStyle(.plain).accessibilityLabel(Text(NSLocalizedString(title, comment: "")))
     }
 
     static func selecting(_ day: Date, preservingTimeFrom date: Date, calendar: Calendar) -> Date? {
         calendar.date(bySettingHour: calendar.component(.hour, from: date),
                       minute: calendar.component(.minute, from: date),
                       second: calendar.component(.second, from: date), of: day)
+    }
+}
+
+private struct CalendarDayCell: View {
+    let dayNumber: Int
+    let selected: Bool
+    let isToday: Bool
+    let currentMonth: Bool
+    let monochrome: Bool
+    let action: () -> Void
+    @State private var hovered = false
+    @Environment(\.colorScheme) private var scheme
+
+    private var foreground: Color {
+        if selected {
+            return monochrome ? ThemeColor("textInverted").color(for: scheme) : .white
+        }
+        if isToday {
+            return monochrome ? ThemeColor.kText.color(for: scheme) : Color.accentColor
+        }
+        if currentMonth {
+            return monochrome ? ThemeColor.kText.color(for: scheme) : Color.primary
+        }
+        return monochrome ? ThemeColor.kTextSubtlest.color(for: scheme).opacity(0.6) : Color.secondary.opacity(0.55)
+    }
+
+    private var fill: Color {
+        if selected {
+            return monochrome ? ThemeColor.kBackgroundPrimary.color(for: scheme) : Color.accentColor
+        }
+        if hovered {
+            return ThemeColor.kInteractionHover.color(for: scheme)
+        }
+        return .clear
+    }
+
+    var body: some View {
+        Button(action: action) {
+            Text("\(dayNumber)")
+                .font(.system(size: 13.5, weight: selected || (monochrome && isToday) ? .semibold : .regular))
+                .monospacedDigit()
+                .foregroundStyle(foreground)
+                .frame(maxWidth: .infinity)
+                .frame(height: 32)
+                .background(fill, in: Circle())
+                .overlay {
+                    if monochrome && isToday && !selected {
+                        Circle()
+                            .strokeBorder(ThemeColor("borderPrimary").color(for: scheme), lineWidth: 1)
+                    }
+                }
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
+    }
+}
+
+private struct CalendarMonthNavButton: View {
+    let title: String
+    let symbol: String
+    let monochrome: Bool
+    let action: () -> Void
+    @State private var hovered = false
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        Button(action: action) {
+            Image(mingCute: symbol, size: 12)
+                .foregroundStyle(monochrome ? ThemeColor.kIcon.color(for: scheme) : Color.primary)
+                .frame(width: 28, height: 28)
+                .background(hovered ? ThemeColor.kInteractionHover.color(for: scheme) : .clear, in: Circle())
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
+        .accessibilityLabel(Text(NSLocalizedString(title, comment: "")))
     }
 }
 

@@ -54,6 +54,50 @@ struct ChatForm: Equatable {
         func temporalString(_ values: [Int]) -> String {
             values.map { String(format: "%02d", $0) }.joined(separator: ":")
         }
+        var temporalPlaceholder: String {
+            timeUnits.map {
+                switch $0 {
+                case .hour: "HH"
+                case .minute: "MM"
+                case .second: "SS"
+                }
+            }.joined(separator: ":")
+        }
+        /// Accepts user-typed time/duration variants such as `9:5`, `14:30`, `14：30`, or `1430`.
+        func parseTemporalInput(_ raw: String) -> [Int]? {
+            let normalized = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                .replacingOccurrences(of: "：", with: ":")
+                .replacingOccurrences(of: ".", with: ":")
+            guard !normalized.isEmpty else { return nil }
+            let parts: [Substring]
+            if normalized.contains(":") {
+                parts = normalized.split(separator: ":", omittingEmptySubsequences: false)
+            } else if timeUnits.count == 1 {
+                parts = [normalized[...]]
+            } else if normalized.utf8.count == timeUnits.count * 2,
+                      normalized.utf8.allSatisfy({ (48...57).contains($0) }) {
+                var chunks: [Substring] = []
+                var start = normalized.startIndex
+                for _ in 0..<timeUnits.count {
+                    let end = normalized.index(start, offsetBy: 2)
+                    chunks.append(normalized[start..<end])
+                    start = end
+                }
+                parts = chunks
+            } else {
+                return nil
+            }
+            guard parts.count == timeUnits.count else { return nil }
+            var result: [Int] = []
+            for (index, part) in parts.enumerated() {
+                guard (1...2).contains(part.utf8.count),
+                      part.utf8.allSatisfy({ (48...57).contains($0) }),
+                      let number = Int(part),
+                      number <= maximum(at: index) else { return nil }
+                result.append(number)
+            }
+            return result
+        }
         func initialTemporalValues(now: Date = Date()) -> [Int] {
             timeUnits.map { type == .duration ? 0 : Calendar.current.component($0.calendarComponent, from: now) }
         }
@@ -132,6 +176,26 @@ struct ChatForm: Equatable {
     static func date(_ value: String) -> Date? {
         guard value.count == 10, let date = formatter().date(from: value), dateString(date) == value else { return nil }
         return date
+    }
+    /// Accepts user-typed date variants such as `2026-11-24`, `2026/11/5`, `2026.11.24`, or `20261124`.
+    static func parseDateInput(_ raw: String) -> Date? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        if trimmed.utf8.count == 8, trimmed.utf8.allSatisfy({ (48...57).contains($0) }) {
+            let y = trimmed.prefix(4)
+            let m = trimmed.dropFirst(4).prefix(2)
+            let d = trimmed.suffix(2)
+            return date("\(y)-\(m)-\(d)")
+        }
+        let normalized = trimmed
+            .replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: ".", with: "-")
+        let parts = normalized.split(separator: "-", omittingEmptySubsequences: false)
+        guard parts.count == 3,
+              parts[0].utf8.count == 4, (1...2).contains(parts[1].utf8.count), (1...2).contains(parts[2].utf8.count),
+              parts.allSatisfy({ $0.utf8.allSatisfy({ (48...57).contains($0) }) }),
+              let year = Int(parts[0]), let month = Int(parts[1]), let day = Int(parts[2]) else { return nil }
+        return date(String(format: "%04d-%02d-%02d", year, month, day))
     }
     static func dateString(_ date: Date) -> String { formatter().string(from: date) }
     private static func formatter(_ format: String = "yyyy-MM-dd") -> DateFormatter {

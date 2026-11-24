@@ -62,6 +62,14 @@ enum ChatFormParserRegression {
         for value in ["24:00", "12:60", "9:05", "上午九点", "14:30:00", " 14:30", "14:30 "] {
             precondition(!timeForm.accepts(["start": [value]]), value)
         }
+        let startField = timeForm.fields[0]
+        precondition(startField.parseTemporalInput("9:5") == [9, 5])
+        precondition(startField.parseTemporalInput("14：30") == [14, 30])
+        precondition(startField.parseTemporalInput("1430") == [14, 30])
+        precondition(startField.parseTemporalInput("24:00") == nil)
+        precondition(ChatForm.parseDateInput("2026/11/5").map(ChatForm.dateString) == "2026-11-05")
+        precondition(ChatForm.parseDateInput("20261124").map(ChatForm.dateString) == "2026-11-24")
+        precondition(ChatForm.parseDateInput("2026-02-30") == nil)
         func temporalForm(_ type: String, _ components: String) -> ChatForm? {
             ChatFormParser.form(in: "```asky-form\n{\"title\":\"测试\"}\n{\"id\":\"value\",\"type\":\"\(type)\",\"label\":\"值\",\"components\":\(components)}\n```")
         }

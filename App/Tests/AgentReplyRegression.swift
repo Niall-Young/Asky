@@ -1209,7 +1209,7 @@ enum AgentReplyRegression {
         // show() restores the global timeline; bind the simulated reply to its real segment.
         model.open(cid)
         let window = NSApplication.shared.windows.first { $0.title == "Asky AI" }!
-        window.setContentSize(NSSize(width: 760, height: 800))
+        window.setContentSize(NSSize(width: 760, height: testingCustom ? 960 : 800))
         defer { window.orderOut(nil) }
         func capture(_ name: String) throws {
             let view = window.contentView!
@@ -1254,8 +1254,9 @@ enum AgentReplyRegression {
             NSApplication.shared.sendAction(picker.action!, to: picker.target, from: picker)
             try await Task.sleep(for: .milliseconds(100))
             func customInput(_ view: NSView) -> NSTextField? {
+                let target = NSLocalizedString("输入你的回答", comment: "")
                 if let field = view as? NSTextField, field.isEditable,
-                   field.placeholderString == NSLocalizedString("输入你的回答", comment: "") { return field }
+                   field.placeholderString == target || field.placeholderAttributedString?.string == target { return field }
                 return view.subviews.compactMap { customInput($0) }.first
             }
             let input = customInput(window.contentView!)!
@@ -1268,43 +1269,87 @@ enum AgentReplyRegression {
             try await Task.sleep(for: .milliseconds(100))
             precondition(model.formValues[messageID]?["duration"] == ["30 分钟"])
         }
+        func allViews(_ view: NSView) -> [NSView] {
+            [view] + view.subviews.flatMap(allViews)
+        }
+        func editableFields(_ view: NSView) -> [NSTextField] {
+            allViews(view).compactMap { ($0 as? NSTextField).flatMap { $0.isEditable ? $0 : nil } }
+        }
+        func findMarker(_ id: String, in root: NSView) -> NSView {
+            if let match = allViews(root).first(where: { $0.identifier?.rawValue == id }) {
+                return match
+            }
+            let ids = allViews(root).compactMap { $0.identifier?.rawValue }.filter { $0.hasPrefix("chat-form-") }
+            preconditionFailure("Missing chat form control '\(id)'. Found: \(ids)")
+        }
+        func clickView(_ view: NSView, in targetWindow: NSWindow) {
+            if let scroll = view.enclosingScrollView, let doc = scroll.documentView {
+                let rectInDoc = doc.convert(view.bounds, from: view)
+                let visibleHeight = scroll.contentView.bounds.height
+                let targetY = rectInDoc.midY - visibleHeight * 0.45
+                var bounds = scroll.contentView.bounds
+                bounds.origin.y = targetY
+                scroll.contentView.scroll(to: scroll.contentView.constrainBoundsRect(bounds).origin)
+                scroll.reflectScrolledClipView(scroll.contentView)
+                targetWindow.contentView?.layoutSubtreeIfNeeded()
+            }
+            let rect = view.convert(view.bounds, to: nil)
+            let point = NSPoint(x: rect.minX + min(40, rect.width / 2), y: rect.midY)
+            for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                let event = NSEvent.mouseEvent(with: type, location: point, modifierFlags: [],
+                    timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: targetWindow.windowNumber,
+                    context: nil, eventNumber: 0, clickCount: 1, pressure: type == .leftMouseDown ? 1 : 0)!
+                targetWindow.sendEvent(event)
+            }
+        }
+        func fieldNearMarker(_ id: String, in root: NSView) -> NSTextField {
+            let marker = findMarker(id, in: root)
+            let markerRect = marker.convert(marker.bounds, to: root)
+            let candidates = editableFields(root)
+            guard let match = candidates.first(where: { field in
+                let rect = field.convert(field.bounds, to: root)
+                return markerRect.insetBy(dx: -4, dy: -4).intersects(rect)
+            }) else {
+                preconditionFailure("Missing editable field inside marker '\(id)'")
+            }
+            return match
+        }
         model.formValues[messageID]?["topics"] = ["设计方案"]
         model.formValues[messageID]?["day"] = ["2026-10-22"]
         if testingRadio {
-            func radio(_ title: String, in view: NSView) -> NSButton? {
-                if let button = view as? NSButton, button.title == title { return button }
-                return view.subviews.compactMap { radio(title, in: $0) }.first
-            }
-            let a = radio("方案 A", in: window.contentView!)!
-            let b = radio("方案 B", in: window.contentView!)!
-            let c = radio("方案 C", in: window.contentView!)!
-            let later = radio("稍后", in: window.contentView!)!
-            precondition(a.accessibilityRole() == .radioButton, "single choice must expose native radio semantics")
-            precondition([a, b, c, later].allSatisfy { $0.state == .off }, "radio must not silently preselect an answer")
-            // Dispatch native actions without performClick's nested event loop in async main.
-            func choose(_ button: NSButton) {
-                button.state = .on
-                NSApplication.shared.sendAction(button.action!, to: button.target, from: button)
-            }
-            choose(a)
-            try await Task.sleep(for: .milliseconds(50))
+            let a = findMarker("chat-form-option-方案 A", in: window.contentView!)
+            let _ = findMarker("chat-form-option-方案 B", in: window.contentView!)
+            let c = findMarker("chat-form-option-方案 C", in: window.contentView!)
+            let later = findMarker("chat-form-option-稍后", in: window.contentView!)
+            precondition(model.formValues[messageID]?["plan"] == nil, "radio must not silently preselect an answer")
+            clickView(a, in: window)
+            try await Task.sleep(for: .milliseconds(80))
             precondition(model.formValues[messageID]?["plan"] == ["方案 A"])
-            choose(c)
-            try await Task.sleep(for: .milliseconds(50))
-            precondition(model.formValues[messageID]?["plan"] == ["方案 C"])
-            precondition(a.state == .off && b.state == .off && c.state == .on, "a radio group must keep only one selection")
-            choose(later)
-            try await Task.sleep(for: .milliseconds(50))
-            precondition(c.state == .on && later.state == .on, "separate groups must not clear each other")
+            clickView(c, in: window)
+            try await Task.sleep(for: .milliseconds(80))
+            precondition(model.formValues[messageID]?["plan"] == ["方案 C"], "a radio group must keep only one selection")
+            clickView(later, in: window)
+            try await Task.sleep(for: .milliseconds(80))
+            precondition(model.formValues[messageID]?["plan"] == ["方案 C"] && model.formValues[messageID]?["when"] == ["稍后"],
+                         "separate groups must not clear each other")
+            // Also verify toggling multi-select checkbox rows via real clicks.
+            let devTopic = findMarker("chat-form-option-开发计划", in: window.contentView!)
+            clickView(devTopic, in: window)
+            try await Task.sleep(for: .milliseconds(80))
+            precondition(Set(model.formValues[messageID]?["topics"] ?? []) == Set(["设计方案", "开发计划"]))
+            clickView(devTopic, in: window)
+            try await Task.sleep(for: .milliseconds(80))
+            precondition(model.formValues[messageID]?["topics"] == ["设计方案"])
             if testingCustom {
                 // Each group owns a separate custom field and remembers its draft across switches.
-                let custom = radio(NSLocalizedString("自己填写", comment: ""), in: window.contentView!)!
-                choose(custom)
+                let custom = findMarker("chat-form-option-" + NSLocalizedString("自己填写", comment: ""), in: window.contentView!)
+                clickView(custom, in: window)
                 try await Task.sleep(for: .milliseconds(100))
                 precondition(!ChatFormParser.form(in: prefix + rest)!.accepts(model.formValues[messageID]!))
                 func customField(_ view: NSView) -> NSTextField? {
+                    let target = NSLocalizedString("输入你的回答", comment: "")
                     if let field = view as? NSTextField, field.isEditable,
-                       field.placeholderString == NSLocalizedString("输入你的回答", comment: "") { return field }
+                       field.placeholderString == target || field.placeholderAttributedString?.string == target { return field }
                     return view.subviews.compactMap { customField($0) }.first
                 }
                 let field = customField(window.contentView!)!
@@ -1312,45 +1357,85 @@ enum AgentReplyRegression {
                 field.currentEditor()!.insertText("先给我看改动，再决定")
                 try await Task.sleep(for: .milliseconds(100))
                 precondition(model.formValues[messageID]?["plan"] == ["先给我看改动，再决定"])
-                choose(a)
+                clickView(a, in: window)
                 try await Task.sleep(for: .milliseconds(100))
                 precondition(model.formValues[messageID]?["plan"] == ["方案 A"])
-                choose(custom)
+                clickView(custom, in: window)
                 try await Task.sleep(for: .milliseconds(100))
                 precondition(model.formValues[messageID]?["plan"] == ["先给我看改动，再决定"])
                 precondition(model.formValues[messageID]?["when"] == ["稍后"])
             }
         }
         if testingTime {
-            func choices(_ view: NSView) -> [NSPopUpButton] {
-                (view as? NSPopUpButton).map { [$0] } ?? view.subviews.flatMap(choices)
+            func typeValue(_ text: String, into field: NSTextField) async throws {
+                precondition(window.makeFirstResponder(field))
+                field.currentEditor()?.selectAll(nil)
+                field.currentEditor()?.insertText(text)
+                window.makeFirstResponder(nil)
+                try await Task.sleep(for: .milliseconds(80))
             }
-            let pickers = choices(window.contentView!)
-            let hour = pickers.first { $0.numberOfItems == 24 }!
-            func rect(_ picker: NSPopUpButton) -> NSRect { window.contentView!.convert(picker.bounds, from: picker) }
-            func row(_ picker: NSPopUpButton) -> [NSPopUpButton] {
-                pickers.filter { abs(rect($0).midY - rect(picker).midY) < 2 }.sorted { rect($0).minX < rect($1).minX }
-            }
-            func choose(_ picker: NSPopUpButton, _ value: Int) async throws {
-                picker.selectItem(at: value)
-                NSApplication.shared.sendAction(picker.action!, to: picker.target, from: picker)
-                try await Task.sleep(for: .milliseconds(50))
-            }
-            let clock = row(hour)
-            try await choose(clock[0], 14)
-            try await choose(clock[1], 30)
+            let timeField = fieldNearMarker("chat-form-field-time", in: window.contentView!)
+            try await typeValue(testingComponents ? "14:30:45" : "14:30", into: timeField)
             if testingComponents {
-                try await choose(clock[2], 45)
-                let leading = pickers.filter { $0.numberOfItems == 100 }.sorted {
-                    window.contentView!.isFlipped ? rect($0).minY < rect($1).minY : rect($0).maxY > rect($1).maxY
-                }
-                try await choose(leading[0], 3)
-                try await choose(row(leading[0])[1], 30)
-                try await choose(leading[1], 30)
+                let countdownField = fieldNearMarker("chat-form-field-countdown", in: window.contentView!)
+                let secondsField = fieldNearMarker("chat-form-field-seconds", in: window.contentView!)
+                try await typeValue("3:30", into: countdownField)
+                try await typeValue("30", into: secondsField)
                 precondition(model.formValues[messageID]?["countdown"] == ["03:30"])
                 precondition(model.formValues[messageID]?["seconds"] == ["30"])
             }
             precondition(model.formValues[messageID]?["time"] == [testingComponents ? "14:30:45" : "14:30"], "only requested time components must be submitted")
+
+            // Open the time picker popover via its trigger button, verify clicking a unit cell, and capture real light/dark screenshots.
+            for (schemeName, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {
+                window.appearance = NSAppearance(named: appearance)
+                NSApplication.shared.activate()
+                window.makeKeyAndOrderFront(nil)
+                try await Task.sleep(for: .milliseconds(200))
+                let timeTrigger = findMarker("chat-form-picker-time", in: window.contentView!)
+                clickView(timeTrigger, in: window)
+                try await Task.sleep(for: .milliseconds(350))
+                let popoverWindow = NSApplication.shared.windows.first { $0 !== window && $0.isVisible && String(describing: type(of: $0)).contains("Popover") }
+                precondition(popoverWindow != nil, "Clicking the time button must open a picker popover")
+                if schemeName == "dark", let popoverWindow, let content = popoverWindow.contentView {
+                    let minuteCell = findMarker("chat-form-unit-minute-31", in: content)
+                    clickView(minuteCell, in: popoverWindow)
+                    try await Task.sleep(for: .milliseconds(120))
+                    let expectedAfterClick = testingComponents ? "14:31:45" : "14:31"
+                    precondition(model.formValues[messageID]?["time"] == [expectedAfterClick],
+                                 "Clicking a minute cell in the popover must update the time value")
+                    let restoreCell = findMarker("chat-form-unit-minute-30", in: content)
+                    clickView(restoreCell, in: popoverWindow)
+                    try await Task.sleep(for: .milliseconds(120))
+                }
+                if let popoverWindow {
+                    let shot = Process()
+                    shot.executableURL = URL(filePath: "/usr/sbin/screencapture")
+                    shot.arguments = ["-x", "-o", "-l", String(popoverWindow.windowNumber), "build/form-time-popover-\(schemeName).png"]
+                    try shot.run(); shot.waitUntilExit()
+                    popoverWindow.close()
+                }
+                try await Task.sleep(for: .milliseconds(120))
+            }
+            if !testingComponents {
+                for (schemeName, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {
+                    window.appearance = NSAppearance(named: appearance)
+                    NSApplication.shared.activate()
+                    window.makeKeyAndOrderFront(nil)
+                    try await Task.sleep(for: .milliseconds(200))
+                    let dateTrigger = findMarker("chat-form-picker-day", in: window.contentView!)
+                    clickView(dateTrigger, in: window)
+                    try await Task.sleep(for: .milliseconds(350))
+                    if let popoverWindow = NSApplication.shared.windows.first(where: { $0 !== window && $0.isVisible && String(describing: type(of: $0)).contains("Popover") }) {
+                        let shot = Process()
+                        shot.executableURL = URL(filePath: "/usr/sbin/screencapture")
+                        shot.arguments = ["-x", "-o", "-l", String(popoverWindow.windowNumber), "build/form-date-popover-\(schemeName).png"]
+                        try shot.run(); shot.waitUntilExit()
+                        popoverWindow.close()
+                    }
+                    try await Task.sleep(for: .milliseconds(120))
+                }
+            }
         }
         precondition(editableField(window.contentView!) === answerField, "Editing must retain the same native field")
         precondition(model.formIsActive(messageID))
@@ -3298,6 +3383,12 @@ enum AgentReplyRegression {
         }
         if CommandLine.arguments.contains("--prefill-preview") {
             try await formPrefillRegression(app: app)
+            return
+        }
+        if CommandLine.arguments.contains("--forms-only") {
+            try await formLifecycleRegression(app: app)
+            let model = AgentModel(app: app)
+            try await formPreview(app: app, model: model)
             return
         }
         try await formLifecycleRegression(app: app)

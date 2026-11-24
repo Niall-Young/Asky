@@ -1056,3 +1056,9 @@
 "生成分享图片失败" = "Failed to generate share image";
 "分享失败" = "Share failed";
 "复制选中内容" = "Copy Selection";
+"选择时间" = "Choose time";
+"选择时长" = "Choose duration";
+"选择日期" = "Choose date";
+"归零" = "Reset";
+"今天" = "Today";
+"完成" = "Done";

@@ -163,9 +163,7 @@ struct SettingsSecureField: View {
 
 extension View {
     func settingsInputSurface(scheme: ColorScheme, focused: Bool) -> some View {
-        padding(.horizontal, 12).frame(height: 28)
-            .settingsInputChrome(scheme: scheme, focused: focused)
-            .alignmentGuide(.settingsInput) { $0[VerticalAlignment.center] }
+        modifier(SettingsInputSurface(scheme: scheme, focused: focused))
     }
 
     /// Translucent field fill with a focus ring, shared by fields of any height.
@@ -174,14 +172,45 @@ extension View {
     }
 }
 
+private struct SettingsInputSurface: ViewModifier {
+    let scheme: ColorScheme
+    let focused: Bool
+    @Environment(\.settingsInputHeight) private var height
+    @Environment(\.settingsInputCornerRadius) private var cornerRadius
+
+    func body(content: Content) -> some View {
+        content
+            .padding(.horizontal, 12)
+            .frame(height: height)
+            .settingsInputChrome(scheme: scheme, focused: focused, cornerRadius: cornerRadius)
+            .alignmentGuide(.settingsInput) { $0[VerticalAlignment.center] }
+    }
+}
+
 private struct SettingsInputFillKey: EnvironmentKey {
     static let defaultValue: Color? = nil
+}
+
+private struct SettingsInputHeightKey: EnvironmentKey {
+    static let defaultValue: CGFloat = 28
+}
+
+private struct SettingsInputCornerRadiusKey: EnvironmentKey {
+    static let defaultValue: CGFloat = 14
 }
 
 extension EnvironmentValues {
     var settingsInputFill: Color? {
         get { self[SettingsInputFillKey.self] }
         set { self[SettingsInputFillKey.self] = newValue }
+    }
+    var settingsInputHeight: CGFloat {
+        get { self[SettingsInputHeightKey.self] }
+        set { self[SettingsInputHeightKey.self] = newValue }
+    }
+    var settingsInputCornerRadius: CGFloat {
+        get { self[SettingsInputCornerRadiusKey.self] }
+        set { self[SettingsInputCornerRadiusKey.self] = newValue }
     }
 }
 
