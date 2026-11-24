@@ -3276,6 +3276,26 @@ enum AgentReplyRegression {
             precondition(completed, "Native selection regression must run to completion")
             return
         }
+        if CommandLine.arguments.contains("--share-and-user-reply") {
+            // Outside-click local event monitors require a live NSApplication run loop.
+            var completed = false
+            Task { @MainActor in
+                let root = FileManager.default.temporaryDirectory.appending(path: "Asky-reply-\(UUID())")
+                defer { try? FileManager.default.removeItem(at: root) }
+                do {
+                    let app = try AppModel(root: root)
+                    try await shareAndUserReplyRegression(app: app)
+                } catch { preconditionFailure("Share card and user reply regression failed: \(error)") }
+                completed = true
+                application.stop(nil)
+                application.postEvent(NSEvent.otherEvent(with: .applicationDefined, location: .zero,
+                    modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil,
+                    subtype: 0, data1: 0, data2: 0)!, atStart: true)
+            }
+            application.run()
+            precondition(completed, "Share card and user reply regression must run to completion")
+            return
+        }
         if CommandLine.arguments.contains("--sources-preview") {
             try await sourcesPreview()
             return
@@ -3778,26 +3798,20 @@ enum AgentReplyRegression {
         externalWindow.orderFrontRegardless()
         defer { externalWindow.close() }
 
-        func dispatchMouseDown(in targetWindow: NSWindow, point: NSPoint) {
-            let event = NSEvent.mouseEvent(
-                with: .leftMouseDown,
-                location: point,
-                modifierFlags: [],
-                timestamp: ProcessInfo.processInfo.systemUptime,
-                windowNumber: targetWindow.windowNumber,
-                context: nil,
-                eventNumber: 0,
-                clickCount: 1,
-                pressure: 1
-            )!
-            NSApp.postEvent(event, atStart: true)
-            if let next = NSApp.nextEvent(
-                matching: .leftMouseDown,
-                until: Date(timeIntervalSinceNow: 0.1),
-                inMode: .default,
-                dequeue: true
-            ) {
-                NSApp.sendEvent(next)
+        func dispatchClick(in targetWindow: NSWindow, point: NSPoint) {
+            for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                let event = NSEvent.mouseEvent(
+                    with: type,
+                    location: point,
+                    modifierFlags: [],
+                    timestamp: ProcessInfo.processInfo.systemUptime,
+                    windowNumber: targetWindow.windowNumber,
+                    context: nil,
+                    eventNumber: 0,
+                    clickCount: 1,
+                    pressure: type == .leftMouseDown ? 1 : 0
+                )!
+                NSApp.postEvent(event, atStart: false)
             }
         }
 
@@ -3815,14 +3829,14 @@ enum AgentReplyRegression {
                      "Expected external click point to lie outside share window frame")
 
         // Internal click must keep the share window open.
-        dispatchMouseDown(in: shareWindow, point: NSPoint(x: shareWindow.frame.width / 2, y: shareWindow.frame.height / 2))
+        dispatchClick(in: shareWindow, point: NSPoint(x: shareWindow.frame.width / 2, y: shareWindow.frame.height / 2))
         try await Task.sleep(for: .milliseconds(120))
         precondition(shareWindow.isVisible && shareWindow.contentView != nil,
                      "Internal click must not dismiss share window")
 
         // Suspended auto-dismiss (save sheet / system share picker) must ignore outside clicks and resign-key.
         let resume = ChatShareWindowController.shared.suspendAutoDismiss()
-        dispatchMouseDown(in: externalWindow, point: NSPoint(x: 40, y: 40))
+        dispatchClick(in: externalWindow, point: NSPoint(x: 40, y: 40))
         try await Task.sleep(for: .milliseconds(120))
         precondition(shareWindow.isVisible && shareWindow.contentView != nil,
                      "Outside click must not dismiss share window while auto-dismiss is suspended")
@@ -3832,7 +3846,7 @@ enum AgentReplyRegression {
 
         // After resuming, an outside click must automatically close the share window.
         resume()
-        dispatchMouseDown(in: externalWindow, point: NSPoint(x: 40, y: 40))
+        dispatchClick(in: externalWindow, point: NSPoint(x: 40, y: 40))
         try await Task.sleep(for: .milliseconds(120))
         precondition(!shareWindow.isVisible && shareWindow.contentView == nil,
                      "Outside click must automatically dismiss share window")
@@ -3847,7 +3861,6 @@ enum AgentReplyRegression {
                      "Resign-key must automatically dismiss share window")
 
         print("Share card and user reply regression passed")
-        fflush(stdout)
     }
 
     static func bubbleChainRegression(app: AppModel) async throws {
