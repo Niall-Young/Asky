@@ -241,6 +241,19 @@ struct SettingsMoreMenu<Content: View>: View {
     @ViewBuilder var content: Content
     @State private var hovered = false
     @Environment(\.isEnabled) private var enabled
+    @Environment(\.colorScheme) private var scheme
+
+    private var icon: NSImage {
+        // The native borderless menu can draw a custom label image in its asset color.
+        let mask = MingCute.image("ellipsis.vertical", size: 15, canvas: 28)
+        let tint = NSColor(ThemeColor.kIconSubtle.color(for: scheme))
+        return NSImage(size: mask.size, flipped: false) { bounds in
+            mask.draw(in: bounds)
+            tint.setFill()
+            bounds.fill(using: .sourceIn)
+            return true
+        }
+    }
 
     var body: some View {
         Menu {
@@ -248,9 +261,7 @@ struct SettingsMoreMenu<Content: View>: View {
         } label: {
             // Pad the glyph into the hit target itself; the borderless menu only accepts
             // clicks on the label's image, not on a surrounding frame.
-            Image(nsImage: MingCute.image("ellipsis.vertical", size: 15, canvas: 28))
-                .renderingMode(.template)
-                .foregroundStyle(.secondary)
+            Image(nsImage: icon).renderingMode(.original)
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
