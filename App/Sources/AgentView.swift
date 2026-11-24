@@ -1245,6 +1245,51 @@ private struct ChatReplyButton: View {
     }
 }
 
+private struct ChatShareButton: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image("ChatShare").resizable().scaledToFit().frame(width: 14, height: 14)
+                .frame(width: 16, height: 16).padding(6)
+        }
+        .buttonStyle(AgentIconButtonStyle())
+        .foregroundStyle(ThemeColor("iconSubtlest"))
+        .accessibilityLabel(NSLocalizedString("分享回复", comment: ""))
+        .help(NSLocalizedString("分享回复", comment: ""))
+    }
+}
+
+private struct AssistantSideActionBar: View {
+    let text: String
+    let hoverState: UserMessageHoverState
+    let onReply: () -> Void
+    let onShare: () -> Void
+    @State private var rowHovering = false
+    @State private var copyFeedbackID: UUID?
+    @FocusState private var actionFocused: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var isVisible: Bool {
+        hoverState.bubbleHovered || rowHovering || actionFocused || copyFeedbackID != nil
+    }
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ChatCopyButton(text: text, copyFeedbackID: $copyFeedbackID)
+                .focused($actionFocused)
+            ChatReplyButton(action: onReply)
+                .focused($actionFocused)
+            ChatShareButton(action: onShare)
+                .focused($actionFocused)
+        }
+        .onHover { rowHovering = $0 }
+        .opacity(isVisible ? 1 : 0)
+        .allowsHitTesting(isVisible)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.14), value: isVisible)
+    }
+}
+
 private struct UserMessageActionRow: View {
     let text: String
     let hoverState: UserMessageHoverState
@@ -1358,48 +1403,72 @@ private struct ChatBubble: View {
             }
         case .assistant:
             let contextActions = item.id == "streaming" ? nil : assistantContextActions
-            ChatReplyView(text: item.text, isStreaming: item.id == "streaming",
-                values: Binding(get: { model.formAnswers(item.id) },
-                                set: { model.setFormAnswers($0, for: item.id) }),
-                active: model.formIsActive(item.id), submit: { model.submitForm(item.id) })
-                .environment(\.chatSelectionColor, model.avatarColor.tint)
-                .environment(\.chatQuoteAction, { model.addQuote($0, sourceMessageID: item.id) })
-                .environment(\.chatBubbleContextActions, contextActions)
-                .multilineTextAlignment(.leading)
-                .fixedSize(horizontal: false, vertical: true)
-                .background {
-                    TranscriptReplyPosition(id: item.id)
-                }
-                .padding(.horizontal, AgentLayout.messageHorizontalInset).padding(.vertical, AgentLayout.messageVerticalInset)
-                .background {
-                    RoundedRectangle(cornerRadius: 16).fill(ThemeColor.kBackgroundNeutral)
-                        .replySurfaceMotion(morphsFromTyping ? bubbleMotion : nil, reduceMotion: reduceMotion)
-                }
-                .contextMenu {
-                    if let actions = contextActions {
-                        assistantContextMenuItems(actions)
+            HStack(alignment: .center, spacing: 8) {
+                ChatReplyView(text: item.text, isStreaming: item.id == "streaming",
+                    values: Binding(get: { model.formAnswers(item.id) },
+                                    set: { model.setFormAnswers($0, for: item.id) }),
+                    active: model.formIsActive(item.id), submit: { model.submitForm(item.id) })
+                    .environment(\.chatSelectionColor, model.avatarColor.tint)
+                    .environment(\.chatQuoteAction, { model.addQuote($0, sourceMessageID: item.id) })
+                    .environment(\.chatBubbleContextActions, contextActions)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .background {
+                        TranscriptReplyPosition(id: item.id)
                     }
+                    .padding(.horizontal, AgentLayout.messageHorizontalInset).padding(.vertical, AgentLayout.messageVerticalInset)
+                    .background {
+                        RoundedRectangle(cornerRadius: 16).fill(ThemeColor.kBackgroundNeutral)
+                            .replySurfaceMotion(morphsFromTyping ? bubbleMotion : nil, reduceMotion: reduceMotion)
+                    }
+                    .contextMenu {
+                        if let actions = contextActions {
+                            assistantContextMenuItems(actions)
+                        }
+                    }
+                if let actions = contextActions {
+                    AssistantSideActionBar(
+                        text: item.text,
+                        hoverState: hoverState,
+                        onReply: actions.reply,
+                        onShare: actions.share
+                    )
+                    .fixedSize()
+                    .layoutPriority(1)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.trailing, 40)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(.rect)
+            .onHover { hoverState.bubbleHovered = $0 }
         case .toolNarration:
             let contextActions = assistantContextActions
-            ChatMarkdownView(text: item.text).equatable()
-                .environment(\.chatSelectionColor, model.avatarColor.tint)
-                .environment(\.chatQuoteAction, { model.addQuote($0, sourceMessageID: item.id) })
-                .environment(\.chatBubbleContextActions, contextActions)
-                .multilineTextAlignment(.leading)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.horizontal, AgentLayout.messageHorizontalInset)
-                .padding(.vertical, AgentLayout.messageVerticalInset)
-                .background {
-                    RoundedRectangle(cornerRadius: 16).fill(ThemeColor.kBackgroundNeutral)
-                }
-                .contextMenu {
-                    assistantContextMenuItems(contextActions)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.trailing, 40)
+            HStack(alignment: .center, spacing: 8) {
+                ChatMarkdownView(text: item.text).equatable()
+                    .environment(\.chatSelectionColor, model.avatarColor.tint)
+                    .environment(\.chatQuoteAction, { model.addQuote($0, sourceMessageID: item.id) })
+                    .environment(\.chatBubbleContextActions, contextActions)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, AgentLayout.messageHorizontalInset)
+                    .padding(.vertical, AgentLayout.messageVerticalInset)
+                    .background {
+                        RoundedRectangle(cornerRadius: 16).fill(ThemeColor.kBackgroundNeutral)
+                    }
+                    .contextMenu {
+                        assistantContextMenuItems(contextActions)
+                    }
+                AssistantSideActionBar(
+                    text: item.text,
+                    hoverState: hoverState,
+                    onReply: contextActions.reply,
+                    onShare: contextActions.share
+                )
+                .fixedSize()
+                .layoutPriority(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(.rect)
+            .onHover { hoverState.bubbleHovered = $0 }
         case .tool:
             if let card = item.resultCard {
                 ToolResultCardView(card: card) { action in
