@@ -68,7 +68,7 @@ enum SettingsPage: String, CaseIterable, Identifiable {
 /// The app and regression harness share the same AppKit window and sidebar chrome.
 @MainActor
 enum SettingsWindow {
-    static let initialSize = NSSize(width: 900, height: 640)
+    static let initialSize = NSSize(width: 900, height: 700)
     static let minimumSize = NSSize(width: 820, height: 560)
 
     static func make(app: AppModel) -> NSWindow {
@@ -256,7 +256,7 @@ private struct SettingsSidebar: View {
                 sidebarGroup("Tools", pages: [.aliases, .keywords, .terminal, .plugins])
                 sidebarGroup("Others", pages: [.about, .author])
             }
-            .padding(.horizontal, 12).padding(.top, 0)
+            .padding(.horizontal, 12).padding(.top, 0).padding(.bottom, 16)
         }
         .onChange(of: app.settingsTab) { _, _ in updateChrome() }
         .onChange(of: app.preferences.appearance) { _, _ in updateChrome() }
