@@ -1143,7 +1143,7 @@ private struct ResponseGroupView: View {
     private func message(_ item: ChatItem) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             ChatBubble(item: item, model: model, bubbleMotion: isLatest ? bubbleMotion : nil,
-                showsReplyActions: !group.isRunning && group.content.last(where: { $0.kind == .assistant })?.id == item.id)
+                morphsFromTyping: !group.isRunning && group.content.last(where: { $0.kind == .assistant })?.id == item.id)
             if item.needsPermissionSettings {
                 Button(NSLocalizedString("管理权限…", comment: "")) { model.openSettings(permissions: true) }
                     .buttonStyle(.link)
@@ -1190,43 +1190,6 @@ private struct FallbackClipShape<S: Shape>: ViewModifier {
     }
 }
 
-private struct CompletionTimeSchedule: TimelineSchedule {
-    let completedAt: Date
-
-    func entries(from startDate: Date, mode: TimelineScheduleMode) -> Entries {
-        Entries(completedAt: completedAt, cursor: startDate, emittedStart: false)
-    }
-
-    struct Entries: Sequence, IteratorProtocol {
-        let completedAt: Date
-        var cursor: Date
-        var emittedStart: Bool
-
-        mutating func next() -> Date? {
-            if !emittedStart {
-                emittedStart = true
-                return cursor
-            }
-            let elapsed = cursor.timeIntervalSince(completedAt)
-            let nextOffset: TimeInterval
-            if elapsed < 60 {
-                nextOffset = 60
-            } else if elapsed < 3600 {
-                nextOffset = floor(elapsed / 60 + 1) * 60
-            } else if elapsed < 86400 {
-                nextOffset = floor(elapsed / 3600 + 1) * 3600
-            } else if elapsed < 3 * 86400 {
-                nextOffset = floor(elapsed / 86400 + 1) * 86400
-            } else {
-                return nil
-            }
-            let nextDate = completedAt.addingTimeInterval(nextOffset)
-            cursor = nextDate
-            return nextDate
-        }
-    }
-}
-
 @MainActor @Observable
 private final class UserMessageHoverState {
     var bubbleHovered = false
@@ -1267,15 +1230,6 @@ private struct ChatCopyButton: View {
     }
 }
 
-private struct AssistantCopyButton: View {
-    let text: String
-    @State private var copyFeedbackID: UUID?
-
-    var body: some View {
-        ChatCopyButton(text: text, copyFeedbackID: $copyFeedbackID)
-    }
-}
-
 private struct ChatReplyButton: View {
     let action: () -> Void
 
@@ -1288,21 +1242,6 @@ private struct ChatReplyButton: View {
         .foregroundStyle(ThemeColor("iconSubtlest"))
         .accessibilityLabel(NSLocalizedString("回复消息", comment: ""))
         .help(NSLocalizedString("回复消息", comment: ""))
-    }
-}
-
-private struct ChatShareButton: View {
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Image("ChatShare").resizable().scaledToFit().frame(width: 14, height: 14)
-                .frame(width: 16, height: 16).padding(6)
-        }
-        .buttonStyle(AgentIconButtonStyle())
-        .foregroundStyle(ThemeColor("iconSubtlest"))
-        .accessibilityLabel(NSLocalizedString("分享回复", comment: ""))
-        .help(NSLocalizedString("分享回复", comment: ""))
     }
 }
 
@@ -1343,7 +1282,7 @@ private struct ChatBubble: View {
     let item: ChatItem
     let model: AgentModel
     let bubbleMotion: Namespace.ID?
-    var showsReplyActions = true
+    var morphsFromTyping = true
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hoverState = UserMessageHoverState()
     @State private var replyUnavailable = false
@@ -1418,63 +1357,49 @@ private struct ChatBubble: View {
                 Button(NSLocalizedString("确定", comment: ""), role: .cancel) {}
             }
         case .assistant:
-            VStack(alignment: .leading, spacing: 6) {
-                ChatReplyView(text: item.text, isStreaming: item.id == "streaming",
-                    values: Binding(get: { model.formAnswers(item.id) },
-                                    set: { model.setFormAnswers($0, for: item.id) }),
-                    active: model.formIsActive(item.id), submit: { model.submitForm(item.id) })
-                    .environment(\.chatSelectionColor, model.avatarColor.tint)
-                    .environment(\.chatQuoteAction, { model.addQuote($0, sourceMessageID: item.id) })
-                    .multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .background {
-                        TranscriptReplyPosition(id: item.id)
-                    }
-                    .padding(.horizontal, AgentLayout.messageHorizontalInset).padding(.vertical, AgentLayout.messageVerticalInset)
-                    .background {
-                        RoundedRectangle(cornerRadius: 16).fill(ThemeColor.kBackgroundNeutral)
-                            .replySurfaceMotion(showsReplyActions ? bubbleMotion : nil, reduceMotion: reduceMotion)
-                    }
-                if showsReplyActions {
-                    HStack(spacing: 16) {
-                        HStack(spacing: 0) {
-                            AssistantCopyButton(text: item.text)
-                            ChatReplyButton {
-                                model.addQuote(item.text, sourceMessageID: item.id, kind: .reply)
-                            }
-                            ChatShareButton {
-                                ChatShareWindowController.shared.show(text: item.text, colorScheme: scheme)
-                            }
-                        }
-                        if let completed = item.completedAt {
-                            TimelineView(CompletionTimeSchedule(completedAt: completed)) { context in
-                                Text(ChatCompletionTime.label(completed, now: context.date))
-                                    .textStyle(.secondary)
-                                    .foregroundStyle(ThemeColor.kTextSubtlest)
-                            }
-                            .help(ChatCompletionTime.exact(completed))
-                        }
-                        Spacer(minLength: 0)
+            let contextActions = item.id == "streaming" ? nil : assistantContextActions
+            ChatReplyView(text: item.text, isStreaming: item.id == "streaming",
+                values: Binding(get: { model.formAnswers(item.id) },
+                                set: { model.setFormAnswers($0, for: item.id) }),
+                active: model.formIsActive(item.id), submit: { model.submitForm(item.id) })
+                .environment(\.chatSelectionColor, model.avatarColor.tint)
+                .environment(\.chatQuoteAction, { model.addQuote($0, sourceMessageID: item.id) })
+                .environment(\.chatBubbleContextActions, contextActions)
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .background {
+                    TranscriptReplyPosition(id: item.id)
+                }
+                .padding(.horizontal, AgentLayout.messageHorizontalInset).padding(.vertical, AgentLayout.messageVerticalInset)
+                .background {
+                    RoundedRectangle(cornerRadius: 16).fill(ThemeColor.kBackgroundNeutral)
+                        .replySurfaceMotion(morphsFromTyping ? bubbleMotion : nil, reduceMotion: reduceMotion)
+                }
+                .contextMenu {
+                    if let actions = contextActions {
+                        assistantContextMenuItems(actions)
                     }
                 }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.trailing, 40)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.trailing, 40)
         case .toolNarration:
-            VStack(alignment: .leading, spacing: 6) {
-                ChatMarkdownView(text: item.text).equatable()
-                    .environment(\.chatSelectionColor, model.avatarColor.tint)
-                    .environment(\.chatQuoteAction, { model.addQuote($0, sourceMessageID: item.id) })
-                    .multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, AgentLayout.messageHorizontalInset)
-                    .padding(.vertical, AgentLayout.messageVerticalInset)
-                    .background {
-                        RoundedRectangle(cornerRadius: 16).fill(ThemeColor.kBackgroundNeutral)
-                    }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.trailing, 40)
+            let contextActions = assistantContextActions
+            ChatMarkdownView(text: item.text).equatable()
+                .environment(\.chatSelectionColor, model.avatarColor.tint)
+                .environment(\.chatQuoteAction, { model.addQuote($0, sourceMessageID: item.id) })
+                .environment(\.chatBubbleContextActions, contextActions)
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, AgentLayout.messageHorizontalInset)
+                .padding(.vertical, AgentLayout.messageVerticalInset)
+                .background {
+                    RoundedRectangle(cornerRadius: 16).fill(ThemeColor.kBackgroundNeutral)
+                }
+                .contextMenu {
+                    assistantContextMenuItems(contextActions)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.trailing, 40)
         case .tool:
             if let card = item.resultCard {
                 ToolResultCardView(card: card) { action in
@@ -1492,6 +1417,21 @@ private struct ChatBubble: View {
             Label { Text(item.text) } icon: { Image(mingCute: "warning", size: 16) }.textStyle(.secondary).foregroundStyle(ThemeColor.kTextNegative)
                 .padding(12).background(ThemeColor.kBackgroundNeutral, in: .rect(cornerRadius: 16))
         }
+    }
+
+    private var assistantContextActions: ChatBubbleContextActions {
+        ChatBubbleContextActions(
+            copy: { _ = MessageClipboard.copy(item.text) },
+            reply: { model.addQuote(item.text, sourceMessageID: item.id, kind: .reply) },
+            share: { ChatShareWindowController.shared.show(text: item.text, colorScheme: scheme) }
+        )
+    }
+
+    @ViewBuilder
+    private func assistantContextMenuItems(_ actions: ChatBubbleContextActions) -> some View {
+        Button(NSLocalizedString("复制", comment: ""), action: actions.copy)
+        Button(NSLocalizedString("回复消息", comment: ""), action: actions.reply)
+        Button(NSLocalizedString("分享回复", comment: ""), action: actions.share)
     }
 
     private var attachmentCards: some View {

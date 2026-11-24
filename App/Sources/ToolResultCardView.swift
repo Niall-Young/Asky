@@ -27,14 +27,6 @@ struct ToolResultCardView: View {
 
             content
 
-            if let footnote = card.footnote, !footnote.isEmpty {
-                Text(footnote)
-                    .font(.system(size: 12))
-                    .foregroundStyle(ThemeColor.kTextSubtlest)
-                    .lineLimit(3)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
             if let action = card.action {
                 actionButton(action)
                     .padding(.top, 2)
@@ -77,8 +69,8 @@ struct ToolResultCardView: View {
 
             if !card.title.isEmpty {
                 Text(card.title)
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(ThemeColor.kText)
+                    .font(.system(size: 14, weight: .regular))
+                    .foregroundStyle(usesLargeHeadline ? ThemeColor.kText : ThemeColor.kTextSubtle)
                     .lineLimit(3)
                     .fixedSize(horizontal: false, vertical: true)
             }

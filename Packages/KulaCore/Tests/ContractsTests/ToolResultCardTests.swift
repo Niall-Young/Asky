@@ -113,6 +113,7 @@ struct ToolResultCardTests {
         #expect(card?.kind == .messagesDraft)
         #expect(card?.headline == "张三（13800138000）")
         #expect(card?.title == "晚上七点见")
+        #expect(card?.footnote == nil)
         #expect(card?.action?.kind == .openMessagesDraft)
     }
 }

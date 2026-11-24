@@ -215,9 +215,6 @@ public struct ToolResultCard: Sendable, Hashable, Codable, Identifiable {
         }
         guard !rows.isEmpty else { return nil }
         let firstStart = items.first?["start"]?.stringValue
-        let footnote = items.count > 5
-            ? CoreLocalization.format("共 %@ 个日程，显示前 5 条", String(items.count))
-            : nil
 
         return ToolResultCard(
             id: id,
@@ -226,7 +223,6 @@ public struct ToolResultCard: Sendable, Hashable, Codable, Identifiable {
             categoryTitle: CoreLocalization.text("日历日程"),
             headline: CoreLocalization.format("%@ 个日程", String(items.count)),
             rows: rows,
-            footnote: footnote,
             action: Action(kind: .openCalendar, label: CoreLocalization.text("查看日历"), target: firstStart)
         )
     }
@@ -287,9 +283,6 @@ public struct ToolResultCard: Sendable, Hashable, Codable, Identifiable {
             )
         }
         guard !rows.isEmpty else { return nil }
-        let footnote = items.count > 5
-            ? CoreLocalization.format("共 %@ 条未完成提醒，显示前 5 条", String(items.count))
-            : nil
 
         return ToolResultCard(
             id: id,
@@ -298,7 +291,6 @@ public struct ToolResultCard: Sendable, Hashable, Codable, Identifiable {
             categoryTitle: CoreLocalization.text("提醒事项"),
             headline: CoreLocalization.format("%@ 条待办", String(items.count)),
             rows: rows,
-            footnote: footnote,
             action: Action(kind: .openReminders, label: CoreLocalization.text("查看提醒事项"))
         )
     }
@@ -326,8 +318,8 @@ public struct ToolResultCard: Sendable, Hashable, Codable, Identifiable {
             source: .notes,
             categoryTitle: isAppend ? CoreLocalization.text("已追加备忘录") : CoreLocalization.text("备忘录"),
             headline: title,
+            title: excerpt.map { truncate($0, limit: 120) } ?? "",
             subtitle: folder,
-            footnote: excerpt.map { truncate($0, limit: 120) },
             action: Action(kind: .openNotes, label: CoreLocalization.text("打开备忘录"), target: noteID)
         )
     }
@@ -340,7 +332,6 @@ public struct ToolResultCard: Sendable, Hashable, Codable, Identifiable {
         guard let recipient else { return nil }
         let body = nonEmpty(output["body"]?.stringValue) ?? nonEmpty(arguments?["body"]?.stringValue) ?? ""
         let handle = nonEmpty(output["handle"]?.stringValue) ?? targets.first?.identifier
-        let note = nonEmpty(output["note"]?.stringValue)
 
         return ToolResultCard(
             id: id,
@@ -349,7 +340,6 @@ public struct ToolResultCard: Sendable, Hashable, Codable, Identifiable {
             categoryTitle: CoreLocalization.text("信息草稿"),
             headline: recipient,
             title: truncate(body, limit: 160),
-            footnote: note,
             action: Action(kind: .openMessagesDraft, label: CoreLocalization.text("在信息中打开"),
                            target: handle, detail: body)
         )

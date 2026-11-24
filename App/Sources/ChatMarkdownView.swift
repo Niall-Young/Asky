@@ -723,6 +723,7 @@ private struct ChatInlineNativeText: NSViewRepresentable {
     var bullet: ChatListBullet? = nil
     @Environment(\.chatSelectionColor) private var selectionColor
     @Environment(\.chatQuoteAction) private var quoteAction
+    @Environment(\.chatBubbleContextActions) private var bubbleContextActions
     @Environment(\.chatSelectionGroup) private var selectionGroup
     let images: [URL: Data]
     let sourceName: String?
@@ -826,6 +827,7 @@ private struct ChatInlineNativeText: NSViewRepresentable {
     func updateNSView(_ view: NSTextView, context: Context) {
         if let selectable = view as? ChatSelectableTextView {
             selectable.quoteAction = quoteAction
+            selectable.contextActions = bubbleContextActions
             selectable.selectionGroup = selectionGroup
             selectionGroup?.register(selectable)
             selectable.selectedTextAttributes = [.backgroundColor: NSColor(selectionColor).withAlphaComponent(0.45)]

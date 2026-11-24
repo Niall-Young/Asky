@@ -3,11 +3,20 @@ import SwiftUI
 import Theme
 import ToolService
 
+struct ChatBubbleContextActions {
+    let copy: () -> Void
+    let reply: () -> Void
+    let share: () -> Void
+}
+
 private struct ChatSelectionColorKey: EnvironmentKey {
     static let defaultValue = AgentAvatarColor.blue.tint
 }
 private struct ChatQuoteActionKey: EnvironmentKey {
     static var defaultValue: ((String) -> Void)? { nil }
+}
+private struct ChatBubbleContextActionsKey: EnvironmentKey {
+    static var defaultValue: ChatBubbleContextActions? { nil }
 }
 extension EnvironmentValues {
     var chatSelectionColor: Color {
@@ -18,6 +27,10 @@ extension EnvironmentValues {
         get { self[ChatQuoteActionKey.self] }
         set { self[ChatQuoteActionKey.self] = newValue }
     }
+    var chatBubbleContextActions: ChatBubbleContextActions? {
+        get { self[ChatBubbleContextActionsKey.self] }
+        set { self[ChatBubbleContextActionsKey.self] = newValue }
+    }
 }
 extension NSAttributedString.Key {
     static let chatSelectionText = NSAttributedString.Key("AskySelectionText")
@@ -26,6 +39,7 @@ extension NSAttributedString.Key {
 /// Attachment glyphs retain readable source when copied or quoted.
 class ChatSelectableTextView: NSTextView {
     var quoteAction: ((String) -> Void)?
+    var contextActions: ChatBubbleContextActions?
     weak var selectionGroup: ChatSelectionGroup?
     private var selectionMenu: ChatSelectionMenu?
 
@@ -51,6 +65,74 @@ class ChatSelectableTextView: NSTextView {
     }
 
     override func copy(_ sender: Any?) { _ = MessageClipboard.copy(selectedContent) }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        guard contextActions != nil else { return super.menu(for: event) }
+        selectionMenu?.close(clearSelection: false)
+        let menu = NSMenu()
+        let hasSelection = !selectedContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if hasSelection {
+            let copySelection = NSMenuItem(
+                title: NSLocalizedString("复制选中内容", comment: ""),
+                action: #selector(copy(_:)),
+                keyEquivalent: ""
+            )
+            copySelection.target = self
+            menu.addItem(copySelection)
+            if quoteAction != nil {
+                let quoteSelection = NSMenuItem(
+                    title: NSLocalizedString("添加到对话", comment: ""),
+                    action: #selector(performQuoteSelection(_:)),
+                    keyEquivalent: ""
+                )
+                quoteSelection.target = self
+                menu.addItem(quoteSelection)
+            }
+            menu.addItem(.separator())
+        }
+        let copyItem = NSMenuItem(
+            title: NSLocalizedString("复制", comment: ""),
+            action: #selector(performBubbleCopy(_:)),
+            keyEquivalent: ""
+        )
+        copyItem.target = self
+        menu.addItem(copyItem)
+
+        let replyItem = NSMenuItem(
+            title: NSLocalizedString("回复消息", comment: ""),
+            action: #selector(performBubbleReply(_:)),
+            keyEquivalent: ""
+        )
+        replyItem.target = self
+        menu.addItem(replyItem)
+
+        let shareItem = NSMenuItem(
+            title: NSLocalizedString("分享回复", comment: ""),
+            action: #selector(performBubbleShare(_:)),
+            keyEquivalent: ""
+        )
+        shareItem.target = self
+        menu.addItem(shareItem)
+        return menu
+    }
+
+    @objc private func performQuoteSelection(_ sender: Any?) {
+        let content = selectedContent
+        guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        quoteAction?(content)
+    }
+
+    @objc private func performBubbleCopy(_ sender: Any?) {
+        contextActions?.copy()
+    }
+
+    @objc private func performBubbleReply(_ sender: Any?) {
+        contextActions?.reply()
+    }
+
+    @objc private func performBubbleShare(_ sender: Any?) {
+        contextActions?.share()
+    }
 
     override func cursorUpdate(with event: NSEvent) {
         guard !ActionArrowCursor.applyIfCovered(event, in: window) else { return }
