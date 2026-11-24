@@ -3765,7 +3765,89 @@ enum AgentReplyRegression {
                 shareWindow.close()
             }
         }
+
+        // 4. Verify share window stays open on internal clicks and auto-dismisses on outside clicks or focus loss,
+        //    while staying open when auto-dismiss is suspended for save panels / system share sheets.
+        let externalWindow = NSWindow(
+            contentRect: NSRect(x: 40, y: 40, width: 220, height: 140),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        externalWindow.isReleasedWhenClosed = false
+        externalWindow.orderFrontRegardless()
+        defer { externalWindow.close() }
+
+        func dispatchMouseDown(in targetWindow: NSWindow, point: NSPoint) {
+            let event = NSEvent.mouseEvent(
+                with: .leftMouseDown,
+                location: point,
+                modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime,
+                windowNumber: targetWindow.windowNumber,
+                context: nil,
+                eventNumber: 0,
+                clickCount: 1,
+                pressure: 1
+            )!
+            NSApp.postEvent(event, atStart: true)
+            if let next = NSApp.nextEvent(
+                matching: .leftMouseDown,
+                until: Date(timeIntervalSinceNow: 0.1),
+                inMode: .default,
+                dequeue: true
+            ) {
+                NSApp.sendEvent(next)
+            }
+        }
+
+        ChatShareWindowController.shared.show(text: sampleReply, colorScheme: .dark)
+        try await Task.sleep(for: .milliseconds(150))
+        guard let shareWindow = ChatShareWindowController.shared.window else {
+            preconditionFailure("Expected share window to exist after show()")
+        }
+        precondition(shareWindow.isVisible && shareWindow.contentView != nil,
+                     "Expected share window to be visible after show()")
+
+        // Place external window clearly outside the share window frame.
+        externalWindow.setFrameOrigin(NSPoint(x: max(20, shareWindow.frame.minX - 280), y: shareWindow.frame.minY))
+        precondition(!shareWindow.frame.contains(externalWindow.convertPoint(toScreen: NSPoint(x: 40, y: 40))),
+                     "Expected external click point to lie outside share window frame")
+
+        // Internal click must keep the share window open.
+        dispatchMouseDown(in: shareWindow, point: NSPoint(x: shareWindow.frame.width / 2, y: shareWindow.frame.height / 2))
+        try await Task.sleep(for: .milliseconds(120))
+        precondition(shareWindow.isVisible && shareWindow.contentView != nil,
+                     "Internal click must not dismiss share window")
+
+        // Suspended auto-dismiss (save sheet / system share picker) must ignore outside clicks and resign-key.
+        let resume = ChatShareWindowController.shared.suspendAutoDismiss()
+        dispatchMouseDown(in: externalWindow, point: NSPoint(x: 40, y: 40))
+        try await Task.sleep(for: .milliseconds(120))
+        precondition(shareWindow.isVisible && shareWindow.contentView != nil,
+                     "Outside click must not dismiss share window while auto-dismiss is suspended")
+        ChatShareWindowController.shared.windowDidResignKey(Notification(name: NSWindow.didResignKeyNotification, object: shareWindow))
+        precondition(shareWindow.isVisible && shareWindow.contentView != nil,
+                     "Resign-key must not dismiss share window while auto-dismiss is suspended")
+
+        // After resuming, an outside click must automatically close the share window.
+        resume()
+        dispatchMouseDown(in: externalWindow, point: NSPoint(x: 40, y: 40))
+        try await Task.sleep(for: .milliseconds(120))
+        precondition(!shareWindow.isVisible && shareWindow.contentView == nil,
+                     "Outside click must automatically dismiss share window")
+
+        // Reopen and verify resign-key (e.g. Cmd+Tab / clicking another app) also closes the share window.
+        ChatShareWindowController.shared.show(text: sampleReply, colorScheme: .light)
+        try await Task.sleep(for: .milliseconds(150))
+        precondition(shareWindow.isVisible && shareWindow.contentView != nil,
+                     "Expected share window to reopen cleanly")
+        ChatShareWindowController.shared.windowDidResignKey(Notification(name: NSWindow.didResignKeyNotification, object: shareWindow))
+        precondition(!shareWindow.isVisible && shareWindow.contentView == nil,
+                     "Resign-key must automatically dismiss share window")
+
         print("Share card and user reply regression passed")
+        fflush(stdout)
     }
 
     static func bubbleChainRegression(app: AppModel) async throws {

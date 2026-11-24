@@ -411,11 +411,22 @@ final class ChatShareWindowController: NSWindowController, NSWindowDelegate {
 
     private static let cornerRadius: CGFloat = 24
     private let presentation = WindowPresentation()
+    private let outsideClickDismissal = OutsideClickDismissal()
+    private var autoDismissSuspensionCount = 0
+    private var shareCoordinator: SystemShareCoordinator?
 
     private init() { super.init(window: nil) }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+    private var isAutoDismissSuspended: Bool {
+        autoDismissSuspensionCount > 0 || window?.attachedSheet != nil
+    }
+
     func show(text: String, colorScheme: ColorScheme) {
+        shareCoordinator?.cancel()
+        shareCoordinator = nil
+        autoDismissSuspensionCount = 0
+
         let level = NSApp.keyWindow?.level ?? .normal
         let window = self.window ?? makeWindow()
         window.title = NSLocalizedString("分享回复", comment: "")
@@ -423,9 +434,14 @@ final class ChatShareWindowController: NSWindowController, NSWindowDelegate {
             text: text,
             initialAppearance: ShareCardAppearance(colorScheme: colorScheme),
             windowProvider: { [weak window] in window },
+            suspendAutoDismiss: { [weak self] in
+                self?.suspendAutoDismiss() ?? {}
+            },
+            presentSystemShare: { [weak self] url, anchor in
+                self?.presentSystemShare(url: url, anchor: anchor)
+            },
             close: { [weak self] in
-                self?.window?.orderOut(nil)
-                self?.window?.close()
+                self?.dismiss()
             }
         )
         let host = NSHostingView(rootView: content
@@ -439,10 +455,87 @@ final class ChatShareWindowController: NSWindowController, NSWindowDelegate {
             WindowSurface.updateCorners(of: surface, radius: Self.cornerRadius, circular: true)
         }
         presentation.show(window, level: level)
+        updateOutsideClickDismissal()
+    }
+
+    func dismiss() {
+        outsideClickDismissal.hide()
+        shareCoordinator?.cancel()
+        shareCoordinator = nil
+        autoDismissSuspensionCount = 0
+        guard let window else { return }
+        let shouldClose = window.isVisible || window.contentView != nil
+        window.orderOut(nil)
+        if shouldClose {
+            window.close()
+        }
+        window.contentView = nil
+    }
+
+    func suspendAutoDismiss() -> () -> Void {
+        autoDismissSuspensionCount += 1
+        updateOutsideClickDismissal()
+        var active = true
+        return { [weak self] in
+            guard active else { return }
+            active = false
+            guard let self else { return }
+            self.autoDismissSuspensionCount = max(0, self.autoDismissSuspensionCount - 1)
+            self.updateOutsideClickDismissal()
+        }
+    }
+
+    func windowDidResignKey(_ notification: Notification) {
+        guard let window, window.isVisible, !isAutoDismissSuspended else { return }
+        dismiss()
     }
 
     func windowWillClose(_ notification: Notification) {
+        outsideClickDismissal.hide()
+        shareCoordinator?.cancel()
+        shareCoordinator = nil
+        autoDismissSuspensionCount = 0
         window?.contentView = nil
+    }
+
+    private func updateOutsideClickDismissal() {
+        guard let window, window.isVisible, !isAutoDismissSuspended else {
+            outsideClickDismissal.hide()
+            return
+        }
+        outsideClickDismissal.show(contains: { [weak self] point in
+            guard let self, let window = self.window else { return false }
+            if self.isAutoDismissSuspended { return true }
+            return window.isVisible && window.frame.contains(point)
+        }, dismiss: { [weak self] in
+            self?.dismiss()
+        })
+    }
+
+    private func presentSystemShare(url: URL, anchor: NSView) {
+        shareCoordinator?.cancel()
+        let resume = suspendAutoDismiss()
+        var coordinator: SystemShareCoordinator?
+        let created = SystemShareCoordinator(
+            sourceWindow: window,
+            onFinish: { [weak self] cancelled in
+                resume()
+                guard let self else { return }
+                if self.shareCoordinator === coordinator {
+                    self.shareCoordinator = nil
+                }
+                if cancelled {
+                    Task { @MainActor [weak self] in
+                        guard let self, let window = self.window,
+                              window.isVisible, !window.isKeyWindow, !self.isAutoDismissSuspended else { return }
+                        self.dismiss()
+                    }
+                }
+            }
+        )
+        coordinator = created
+        shareCoordinator = created
+        created.present(items: [url], relativeTo: anchor.bounds, of: anchor)
     }
 
     private func makeWindow() -> NSWindow {
@@ -466,6 +559,82 @@ final class ChatShareWindowController: NSWindowController, NSWindowDelegate {
     }
 }
 
+@MainActor
+private final class SystemShareCoordinator: NSObject, @MainActor NSSharingServicePickerDelegate, NSSharingServiceDelegate {
+    private weak var sourceWindow: NSWindow?
+    private var onFinish: ((_ cancelled: Bool) -> Void)?
+    private var fallbackTask: Task<Void, Never>?
+    private var isPresentingService = false
+
+    init(sourceWindow: NSWindow?, onFinish: @escaping (_ cancelled: Bool) -> Void) {
+        self.sourceWindow = sourceWindow
+        self.onFinish = onFinish
+    }
+
+    func present(items: [Any], relativeTo rect: NSRect, of view: NSView) {
+        let picker = NSSharingServicePicker(items: items)
+        picker.delegate = self
+        picker.show(relativeTo: rect, of: view, preferredEdge: .minY)
+    }
+
+    func cancel() {
+        complete(cancelled: false)
+    }
+
+    private func complete(cancelled: Bool) {
+        fallbackTask?.cancel()
+        fallbackTask = nil
+        isPresentingService = false
+        let finish = onFinish
+        onFinish = nil
+        finish?(cancelled)
+    }
+
+    nonisolated func sharingServicePicker(_ sharingServicePicker: NSSharingServicePicker,
+                                          delegateFor sharingService: NSSharingService) -> (any NSSharingServiceDelegate)? {
+        MainActor.assumeIsolated { self }
+    }
+
+    nonisolated func sharingServicePicker(_ sharingServicePicker: NSSharingServicePicker,
+                                          didChoose service: NSSharingService?) {
+        let choseService = service != nil
+        MainActor.assumeIsolated {
+            guard choseService else {
+                complete(cancelled: true)
+                return
+            }
+            fallbackTask?.cancel()
+            fallbackTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .milliseconds(800))
+                guard let self, !Task.isCancelled, !self.isPresentingService else { return }
+                self.complete(cancelled: false)
+            }
+        }
+    }
+
+    func sharingService(_ sharingService: NSSharingService,
+                        sourceWindowForShareItems items: [Any],
+                        sharingContentScope: UnsafeMutablePointer<NSSharingService.SharingContentScope>) -> NSWindow? {
+        sourceWindow
+    }
+
+    func sharingService(_ sharingService: NSSharingService, willShareItems items: [Any]) {
+        isPresentingService = true
+        fallbackTask?.cancel()
+        fallbackTask = nil
+    }
+
+    func sharingService(_ sharingService: NSSharingService, didShareItems items: [Any]) {
+        complete(cancelled: false)
+    }
+
+    func sharingService(_ sharingService: NSSharingService,
+                        didFailToShareItems items: [Any],
+                        error: any Error) {
+        complete(cancelled: false)
+    }
+}
+
 private final class ChatShareWindow: NSWindow {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
@@ -484,6 +653,8 @@ private struct ChatSharePreviewSheet: View {
 
     let text: String
     let windowProvider: () -> NSWindow?
+    let suspendAutoDismiss: () -> () -> Void
+    let presentSystemShareAction: (URL, NSView) -> Void
     let close: () -> Void
 
     @State private var appearance: ShareCardAppearance
@@ -491,11 +662,21 @@ private struct ChatSharePreviewSheet: View {
     @State private var copied = false
     @State private var saved = false
     @State private var errorMessage: String?
+    @State private var resumeErrorSuspension: (() -> Void)?
     @State private var shareAnchor = ShareAnchorBox()
 
-    init(text: String, initialAppearance: ShareCardAppearance, windowProvider: @escaping () -> NSWindow?, close: @escaping () -> Void) {
+    init(
+        text: String,
+        initialAppearance: ShareCardAppearance,
+        windowProvider: @escaping () -> NSWindow?,
+        suspendAutoDismiss: @escaping () -> () -> Void,
+        presentSystemShare: @escaping (URL, NSView) -> Void,
+        close: @escaping () -> Void
+    ) {
         self.text = text
         self.windowProvider = windowProvider
+        self.suspendAutoDismiss = suspendAutoDismiss
+        self.presentSystemShareAction = presentSystemShare
         self.close = close
         _appearance = State(initialValue: initialAppearance)
     }
@@ -643,10 +824,23 @@ private struct ChatSharePreviewSheet: View {
         .environment(\.colorScheme, appearance.colorScheme)
         .appDialog(
             NSLocalizedString("分享失败", comment: ""),
-            isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } }),
+            isPresented: Binding(
+                get: { errorMessage != nil },
+                set: { presented in
+                    if !presented {
+                        errorMessage = nil
+                        resumeErrorSuspension?()
+                        resumeErrorSuspension = nil
+                    }
+                }
+            ),
             message: errorMessage ?? "",
             buttons: [NSLocalizedString("好", comment: "")]
         )
+        .onDisappear {
+            resumeErrorSuspension?()
+            resumeErrorSuspension = nil
+        }
         .task(id: copied) {
             guard copied else { return }
             try? await Task.sleep(for: .milliseconds(1400))
@@ -659,21 +853,27 @@ private struct ChatSharePreviewSheet: View {
         }
     }
 
+    private func showError(_ message: String) {
+        if resumeErrorSuspension == nil {
+            resumeErrorSuspension = suspendAutoDismiss()
+        }
+        errorMessage = message
+    }
+
     private func presentSystemShare() {
         guard let anchor = shareAnchor.view,
               let png = ChatShareCardRenderer.renderPNG(text: text, appearance: appearance),
               let url = try? ShareImageService.writeTemporarySharePNG(png) else {
-            errorMessage = NSLocalizedString("生成分享图片失败", comment: "")
+            showError(NSLocalizedString("生成分享图片失败", comment: ""))
             return
         }
-        let picker = NSSharingServicePicker(items: [url])
-        picker.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .minY)
+        presentSystemShareAction(url, anchor)
     }
 
     private func copyImage() {
         guard let png = ChatShareCardRenderer.renderPNG(text: text, appearance: appearance),
               ShareImageService.copyPNG(png) else {
-            errorMessage = NSLocalizedString("生成分享图片失败", comment: "")
+            showError(NSLocalizedString("生成分享图片失败", comment: ""))
             return
         }
         copied = true
@@ -681,16 +881,18 @@ private struct ChatSharePreviewSheet: View {
 
     private func saveImage() {
         guard let png = ChatShareCardRenderer.renderPNG(text: text, appearance: appearance) else {
-            errorMessage = NSLocalizedString("生成分享图片失败", comment: "")
+            showError(NSLocalizedString("生成分享图片失败", comment: ""))
             return
         }
+        let resume = suspendAutoDismiss()
         Task {
+            defer { resume() }
             do {
                 if try await ShareImageService.savePNG(png, for: windowProvider()) != nil {
                     saved = true
                 }
             } catch {
-                errorMessage = error.localizedDescription
+                showError(error.localizedDescription)
             }
         }
     }
