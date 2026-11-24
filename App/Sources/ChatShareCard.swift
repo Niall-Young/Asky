@@ -47,13 +47,13 @@ final class ShareCardBackdropCache {
     func backdrop(for appearance: ShareCardAppearance) -> Pair {
         if let cached = cache[appearance] { return cached }
         let sharp = NSImage(named: appearance.assetName) ?? fallbackBackdrop(for: appearance)
-        let blurred = blur(sharp, radius: 34) ?? sharp
+        let blurred = blur(sharp, radius: 28, isDark: appearance == .dark) ?? sharp
         let pair = Pair(sharp: sharp, blurred: blurred)
         cache[appearance] = pair
         return pair
     }
 
-    private func blur(_ image: NSImage, radius: Double) -> NSImage? {
+    private func blur(_ image: NSImage, radius: Double, isDark: Bool) -> NSImage? {
         guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
         let input = CIImage(cgImage: cgImage)
         let extent = input.extent
@@ -65,9 +65,9 @@ final class ShareCardBackdropCache {
 
         let colorControls = CIFilter.colorControls()
         colorControls.inputImage = blurred
-        colorControls.saturation = 1.22
-        colorControls.brightness = 0.0
-        colorControls.contrast = 1.02
+        colorControls.saturation = 1.48
+        colorControls.brightness = isDark ? 0.04 : 0.03
+        colorControls.contrast = 1.06
 
         let finalImage = (colorControls.outputImage ?? blurred).cropped(to: extent)
         guard let outputCG = ciContext.createCGImage(finalImage, from: extent) else { return nil }
@@ -288,22 +288,32 @@ struct ChatShareCardView: View {
 
     private var glassTint: Color {
         isDark
-            ? Color(red: 0.08, green: 0.10, blue: 0.14).opacity(0.62)
-            : Color.white.opacity(0.64)
+            ? Color(red: 0.07, green: 0.09, blue: 0.14).opacity(0.36)
+            : Color.white.opacity(0.46)
     }
 
     private var glassSheen: LinearGradient {
         if isDark {
             LinearGradient(
-                colors: [Color.white.opacity(0.11), Color.white.opacity(0.02)],
-                startPoint: .top,
-                endPoint: .bottom
+                stops: [
+                    .init(color: Color.white.opacity(0.18), location: 0.0),
+                    .init(color: Color.white.opacity(0.05), location: 0.18),
+                    .init(color: Color.white.opacity(0.01), location: 0.72),
+                    .init(color: Color.white.opacity(0.06), location: 1.0)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
             )
         } else {
             LinearGradient(
-                colors: [Color.white.opacity(0.28), Color.white.opacity(0.05)],
-                startPoint: .top,
-                endPoint: .bottom
+                stops: [
+                    .init(color: Color.white.opacity(0.42), location: 0.0),
+                    .init(color: Color.white.opacity(0.12), location: 0.22),
+                    .init(color: Color.white.opacity(0.04), location: 0.75),
+                    .init(color: Color.white.opacity(0.18), location: 1.0)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
             )
         }
     }
@@ -311,13 +321,23 @@ struct ChatShareCardView: View {
     private var glassBorder: LinearGradient {
         if isDark {
             LinearGradient(
-                colors: [Color.white.opacity(0.26), Color.white.opacity(0.08)],
+                stops: [
+                    .init(color: Color.white.opacity(0.46), location: 0.0),
+                    .init(color: Color.white.opacity(0.12), location: 0.35),
+                    .init(color: Color.white.opacity(0.08), location: 0.68),
+                    .init(color: Color.white.opacity(0.30), location: 1.0)
+                ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
         } else {
             LinearGradient(
-                colors: [Color.white.opacity(0.84), Color.white.opacity(0.32)],
+                stops: [
+                    .init(color: Color.white.opacity(0.95), location: 0.0),
+                    .init(color: Color.white.opacity(0.42), location: 0.35),
+                    .init(color: Color.white.opacity(0.30), location: 0.68),
+                    .init(color: Color.white.opacity(0.76), location: 1.0)
+                ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
@@ -403,7 +423,10 @@ final class ChatShareWindowController: NSWindowController, NSWindowDelegate {
             text: text,
             initialAppearance: ShareCardAppearance(colorScheme: colorScheme),
             windowProvider: { [weak window] in window },
-            close: { [weak window] in window?.close() }
+            close: { [weak self] in
+                self?.window?.orderOut(nil)
+                self?.window?.close()
+            }
         )
         let host = NSHostingView(rootView: content
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -488,40 +511,8 @@ private struct ChatSharePreviewSheet: View {
         isDark ? Color.white.opacity(0.94) : Color(white: 0.12)
     }
 
-    private var chromeSubtleTextColor: Color {
-        isDark ? Color.white.opacity(0.84) : Color(white: 0.16)
-    }
-
-    private var glassTint: Color {
-        isDark
-            ? Color(red: 0.08, green: 0.10, blue: 0.14).opacity(0.62)
-            : Color.white.opacity(0.64)
-    }
-
-    private var glassSheen: LinearGradient {
-        if isDark {
-            LinearGradient(colors: [Color.white.opacity(0.11), Color.white.opacity(0.02)], startPoint: .top, endPoint: .bottom)
-        } else {
-            LinearGradient(colors: [Color.white.opacity(0.28), Color.white.opacity(0.05)], startPoint: .top, endPoint: .bottom)
-        }
-    }
-
-    private var glassBorder: LinearGradient {
-        if isDark {
-            LinearGradient(colors: [Color.white.opacity(0.26), Color.white.opacity(0.08)], startPoint: .topLeading, endPoint: .bottomTrailing)
-        } else {
-            LinearGradient(colors: [Color.white.opacity(0.84), Color.white.opacity(0.32)], startPoint: .topLeading, endPoint: .bottomTrailing)
-        }
-    }
-
     var body: some View {
-        let cardShape = UnevenRoundedRectangle(
-            topLeadingRadius: 24,
-            bottomLeadingRadius: isOverflowing ? 0 : 24,
-            bottomTrailingRadius: isOverflowing ? 0 : 24,
-            topTrailingRadius: 24,
-            style: .continuous
-        )
+        let cardShape = RoundedRectangle(cornerRadius: 24, style: .continuous)
 
         ZStack {
             // Full-bleed scenic landscape as the modal's own backdrop.
@@ -531,55 +522,53 @@ private struct ChatSharePreviewSheet: View {
                 .frame(width: Self.modalWidth, height: Self.modalHeight)
                 .clipped()
 
-            // Subtle top & bottom scrim so floating chrome stays legible in both appearances.
+            // Subtle top & bottom scrim so floating title and labels stay legible in both appearances.
             VStack(spacing: 0) {
                 LinearGradient(
                     colors: [
-                        (isDark ? Color.black : Color.white).opacity(isDark ? 0.34 : 0.24),
+                        (isDark ? Color.black : Color.white).opacity(isDark ? 0.30 : 0.22),
                         .clear
                     ],
                     startPoint: .top,
                     endPoint: .bottom
                 )
-                .frame(height: 84)
+                .frame(height: 80)
                 Spacer(minLength: 0)
                 LinearGradient(
                     colors: [
                         .clear,
-                        (isDark ? Color.black : Color.white).opacity(isDark ? 0.44 : 0.36)
+                        (isDark ? Color.black : Color.white).opacity(isDark ? 0.38 : 0.32)
                     ],
                     startPoint: .top,
                     endPoint: .bottom
                 )
-                .frame(height: 132)
+                .frame(height: 124)
             }
             .allowsHitTesting(false)
 
             VStack(spacing: 0) {
                 HStack(spacing: 12) {
-                    Text(NSLocalizedString("分享回复", comment: ""))
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(chromeTextColor)
-                    Spacer(minLength: 0)
+                    HStack(spacing: 0) {
+                        Text(NSLocalizedString("分享回复", comment: ""))
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(chromeTextColor)
+                        Spacer(minLength: 0)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 28, alignment: .leading)
+                    .contentShape(.rect)
+                    .background(WindowDragArea())
+
                     Button(action: close) {
                         Image(mingCute: "xmark", size: 12.5)
-                            .foregroundStyle(chromeTextColor.opacity(0.9))
+                            .foregroundStyle(chromeTextColor.opacity(0.92))
                             .frame(width: 28, height: 28)
-                            .background(
-                                (isDark ? Color.black.opacity(0.32) : Color.white.opacity(0.62)),
-                                in: Circle()
-                            )
-                            .overlay {
-                                Circle().strokeBorder(Color.white.opacity(isDark ? 0.16 : 0.65), lineWidth: 0.75)
-                            }
                     }
-                    .buttonStyle(ShareCloseButtonStyle())
+                    .buttonStyle(ShareGlassCircleButtonStyle())
                     .accessibilityLabel(NSLocalizedString("关闭", comment: ""))
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 18)
                 .padding(.bottom, 10)
-                .background(WindowDragArea())
 
                 Spacer(minLength: 0)
 
@@ -589,24 +578,8 @@ private struct ChatSharePreviewSheet: View {
                     .frame(width: Self.modalWidth - Self.cardHorizontalInset * 2, alignment: .leading)
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { cardHeight = $0 }
                     .frame(width: Self.modalWidth - Self.cardHorizontalInset * 2, height: visibleCardHeight, alignment: .top)
-                    .background {
-                        GeometryReader { cardProxy in
-                            let origin = cardProxy.frame(in: .named("share-modal-canvas")).origin
-                            Image(nsImage: backdrop.blurred)
-                                .resizable()
-                                .scaledToFill()
-                                .frame(width: Self.modalWidth, height: Self.modalHeight)
-                                .clipped()
-                                .offset(x: -origin.x, y: -origin.y)
-                                .frame(width: cardProxy.size.width, height: cardProxy.size.height, alignment: .topLeading)
-                        }
-                        .overlay(glassTint)
-                        .overlay(glassSheen)
-                    }
-                    .clipShape(cardShape)
-                    .overlay {
-                        cardShape.strokeBorder(glassBorder, lineWidth: 1)
-                    }
+                    .clipped()
+                    .nativeGlassBackground(in: cardShape)
                     .mask {
                         VStack(spacing: 0) {
                             Color.black
@@ -625,7 +598,6 @@ private struct ChatSharePreviewSheet: View {
                             }
                         }
                     }
-                    .shadow(color: .black.opacity(isOverflowing ? 0 : (isDark ? 0.38 : 0.16)), radius: 22, x: 0, y: 10)
 
                 Spacer(minLength: 0)
 
@@ -663,7 +635,6 @@ private struct ChatSharePreviewSheet: View {
             }
         }
         .frame(width: Self.modalWidth, height: Self.modalHeight)
-        .coordinateSpace(name: "share-modal-canvas")
         .overlay {
             RoundedRectangle(cornerRadius: 24, style: .continuous)
                 .strokeBorder(Color.white.opacity(isDark ? 0.16 : 0.45), lineWidth: 0.75)
@@ -725,19 +696,12 @@ private struct ChatSharePreviewSheet: View {
     }
 }
 
-private struct ShareCloseButtonStyle: ButtonStyle {
-    @State private var hovering = false
-
+private struct ShareGlassCircleButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .overlay {
-                if hovering || configuration.isPressed {
-                    Circle().fill(Color.white.opacity(0.14))
-                }
-            }
-            .contentShape(Circle())
-            .onHover { hovering = $0 }
-            .glassPointerFeedback(pressed: configuration.isPressed, in: Circle(), illumination: false)
+            .nativeGlassBackground(in: Circle(), interactive: true)
+            .contentShape(.interaction, Circle())
+            .glassPointerFeedback(pressed: configuration.isPressed, in: Circle())
     }
 }
 
@@ -748,11 +712,9 @@ private struct ShareCircleActionButton: View {
     let isDark: Bool
     let action: () -> Void
 
-    @State private var hovering = false
-
     var body: some View {
-        Button(action: action) {
-            VStack(spacing: 8) {
+        VStack(spacing: 8) {
+            Button(action: action) {
                 Group {
                     if let mingCute {
                         Image(mingCute: mingCute, size: 19)
@@ -765,29 +727,13 @@ private struct ShareCircleActionButton: View {
                 }
                 .foregroundStyle(isDark ? Color.white.opacity(0.95) : Color(white: 0.12))
                 .frame(width: 46, height: 46)
-                .background(
-                    (isDark ? Color.black.opacity(hovering ? 0.46 : 0.34) : Color.white.opacity(hovering ? 0.84 : 0.68)),
-                    in: Circle()
-                )
-                .overlay {
-                    Circle().strokeBorder(Color.white.opacity(isDark ? 0.18 : 0.78), lineWidth: 0.75)
-                }
-                Text(title)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(isDark ? Color.white.opacity(0.90) : Color(white: 0.14))
-                    .lineLimit(1)
             }
+            .buttonStyle(ShareGlassCircleButtonStyle())
+            Text(title)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(isDark ? Color.white.opacity(0.90) : Color(white: 0.14))
+                .lineLimit(1)
         }
-        .buttonStyle(ShareCircleButtonStyle())
-        .onHover { hovering = $0 }
-    }
-}
-
-private struct ShareCircleButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .scaleEffect(configuration.isPressed ? 0.94 : 1.0)
-            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
 }
 

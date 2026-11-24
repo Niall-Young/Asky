@@ -21,4 +21,4 @@
    - 验证用户消息回复引用添加、跨页 `revealReply` 定位以及 `transcript-reply-<id>` 锚点存在。
    - 验证亮暗两种模式分享卡片渲染：`Share card light: 1200x872 (1486617 bytes)`、`Share card dark: 1200x872 (1442033 bytes)`。
 4. 视觉核查 `build/share-card-light.png`、`build/share-card-dark.png`、`build/share-preview-window.png` 与 `build/share-preview-long.png`
-   - 结果：通过。分享弹窗采用 `448 × 516` 全出血科技感风景背景，顶部标题与圆形关闭按钮、中部全尺寸对齐毛玻璃回复卡片（长图在 `310 pt` 处通过底部透明渐变直接融入风景背景）、底部居中四枚圆形毛玻璃操作按钮（复制图片、保存图片、系统分享、深色/浅色切换）全部浮于风景之上，亮暗两版对比度与层次清晰自然；导出 PNG 保持完整 2× 高清长图。
+   - 结果：通过。分享弹窗采用 `448 × 516` 全出血科技感风景背景，保留顶部「分享回复」标题；右上角关闭按钮、底部四枚圆形操作按钮与中部回复卡片全部接入原生 macOS 26 液态玻璃（`.nativeGlassBackground`），并将窗口拖拽区限定在左侧标题与空白区域以修复关闭按钮点击响应；同时提升了导出 2× PNG 的毛玻璃通透度、饱和度与对角高光折射层次。
