@@ -96,17 +96,11 @@ final class ShareCardBackdropCache {
     }
 }
 
-struct ChatShareCardView: View {
-    static let canvasWidth: CGFloat = 600
-    private static let outerHorizontalPadding: CGFloat = 36
-    private static let outerVerticalPadding: CGFloat = 40
-    private static let cardCornerRadius: CGFloat = 28
-
+struct ChatShareCardContent: View {
     let text: String
     let appearance: ShareCardAppearance
 
     private var isDark: Bool { appearance == .dark }
-    private var backdrop: ShareCardBackdropCache.Pair { ShareCardBackdropCache.shared.backdrop(for: appearance) }
 
     private var primaryTextColor: Color {
         isDark ? Color(white: 0.95) : Color(white: 0.11)
@@ -127,6 +121,170 @@ struct ChatShareCardView: View {
     private var borderColor: Color {
         isDark ? Color.white.opacity(0.14) : Color.black.opacity(0.10)
     }
+
+    private var formattedMarkdown: String {
+        let parts = ChatFormParser.parse(text, streaming: false)
+        return parts.map { part in
+            switch part.content {
+            case .markdown(let body):
+                return body
+            case .form(let form):
+                var lines: [String] = []
+                if !form.title.isEmpty { lines.append("**\(form.title)**") }
+                for field in form.fields {
+                    lines.append("- \(field.label)")
+                }
+                return lines.joined(separator: "\n")
+            }
+        }
+        .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        .joined(separator: "\n\n")
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 8) {
+                Image("AskyLogo")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 24, height: 24)
+                Text(verbatim: "Asky")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(brandTextColor)
+                Spacer(minLength: 0)
+            }
+
+            Markdown(formattedMarkdown)
+                .markdownTextStyle {
+                    FontSize(14)
+                    FontWeight(.regular)
+                    ForegroundColor(primaryTextColor)
+                }
+                .markdownTextStyle(\.strong) {
+                    FontWeight(.semibold)
+                }
+                .markdownTextStyle(\.code) {
+                    FontSize(12.5)
+                    FontFamilyVariant(.monospaced)
+                    BackgroundColor(codeBackgroundColor)
+                }
+                .markdownTextStyle(\.link) {
+                    ForegroundColor(isDark ? Color(red: 0.45, green: 0.72, blue: 1.0) : Color(red: 0.08, green: 0.42, blue: 0.85))
+                    UnderlineStyle(.single)
+                }
+                .markdownBlockStyle(\.heading1) { configuration in
+                    configuration.label
+                        .markdownTextStyle {
+                            FontSize(17.5)
+                            FontWeight(.semibold)
+                            ForegroundColor(primaryTextColor)
+                        }
+                        .markdownMargin(top: 4, bottom: 10)
+                }
+                .markdownBlockStyle(\.heading2) { configuration in
+                    configuration.label
+                        .markdownTextStyle {
+                            FontSize(16)
+                            FontWeight(.semibold)
+                            ForegroundColor(primaryTextColor)
+                        }
+                        .markdownMargin(top: 4, bottom: 8)
+                }
+                .markdownBlockStyle(\.heading3) { configuration in
+                    configuration.label
+                        .markdownTextStyle {
+                            FontSize(15)
+                            FontWeight(.semibold)
+                            ForegroundColor(primaryTextColor)
+                        }
+                        .markdownMargin(top: 2, bottom: 8)
+                }
+                .markdownBlockStyle(\.paragraph) { configuration in
+                    configuration.label
+                        .lineSpacing(5)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .markdownMargin(top: 0, bottom: 11)
+                }
+                .markdownBlockStyle(\.listItem) { configuration in
+                    configuration.label
+                        .markdownMargin(top: 4, bottom: 4)
+                }
+                .markdownBlockStyle(\.codeBlock) { configuration in
+                    configuration.label
+                        .markdownTextStyle {
+                            FontSize(12)
+                            FontFamilyVariant(.monospaced)
+                            ForegroundColor(primaryTextColor)
+                        }
+                        .lineSpacing(4)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 13)
+                        .padding(.vertical, 11)
+                        .background(codeBackgroundColor, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .strokeBorder(borderColor, lineWidth: 0.5)
+                        }
+                        .markdownMargin(top: 4, bottom: 12)
+                }
+                .markdownBlockStyle(\.blockquote) { configuration in
+                    HStack(spacing: 10) {
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(subtleTextColor.opacity(0.45))
+                            .frame(width: 3)
+                        configuration.label
+                            .markdownTextStyle {
+                                ForegroundColor(subtleTextColor)
+                            }
+                    }
+                    .fixedSize(horizontal: false, vertical: true)
+                    .markdownMargin(top: 2, bottom: 11)
+                }
+                .markdownBlockStyle(\.table) { configuration in
+                    configuration.label
+                        .markdownTableBorderStyle(.init(.allBorders, color: borderColor, width: 0.5))
+                        .markdownTableBackgroundStyle(.alternatingRows(
+                            Color.clear,
+                            isDark ? Color.white.opacity(0.03) : Color.black.opacity(0.025),
+                            header: codeBackgroundColor
+                        ))
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .strokeBorder(borderColor, lineWidth: 0.5)
+                        }
+                        .markdownMargin(top: 4, bottom: 12)
+                }
+                .markdownBlockStyle(\.tableCell) { configuration in
+                    configuration.label
+                        .markdownTextStyle {
+                            FontSize(12.5)
+                        }
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 6)
+                }
+                .markdownBlockStyle(\.thematicBreak) {
+                    Rectangle()
+                        .fill(borderColor)
+                        .frame(height: 1)
+                        .markdownMargin(top: 10, bottom: 10)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
+struct ChatShareCardView: View {
+    static let canvasWidth: CGFloat = 600
+    private static let outerHorizontalPadding: CGFloat = 36
+    private static let outerVerticalPadding: CGFloat = 40
+    private static let cardCornerRadius: CGFloat = 28
+
+    let text: String
+    let appearance: ShareCardAppearance
+
+    private var isDark: Bool { appearance == .dark }
+    private var backdrop: ShareCardBackdropCache.Pair { ShareCardBackdropCache.shared.backdrop(for: appearance) }
 
     private var glassTint: Color {
         isDark
@@ -166,25 +324,6 @@ struct ChatShareCardView: View {
         }
     }
 
-    private var formattedMarkdown: String {
-        let parts = ChatFormParser.parse(text, streaming: false)
-        return parts.map { part in
-            switch part.content {
-            case .markdown(let body):
-                return body
-            case .form(let form):
-                var lines: [String] = []
-                if !form.title.isEmpty { lines.append("**\(form.title)**") }
-                for field in form.fields {
-                    lines.append("- \(field.label)")
-                }
-                return lines.joined(separator: "\n")
-            }
-        }
-        .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-        .joined(separator: "\n\n")
-    }
-
     var body: some View {
         let outerH = Self.outerHorizontalPadding
         let outerV = Self.outerVerticalPadding
@@ -199,160 +338,32 @@ struct ChatShareCardView: View {
                     .clipped()
             }
 
-            VStack(alignment: .leading, spacing: 18) {
-                HStack(spacing: 8) {
-                    Image("AskyLogo")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 24, height: 24)
-                    Text(verbatim: "Asky")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(brandTextColor)
-                    Spacer(minLength: 0)
+            ChatShareCardContent(text: text, appearance: appearance)
+                .padding(.horizontal, 28)
+                .padding(.vertical, 26)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background {
+                    GeometryReader { cardProxy in
+                        let canvasWidth = cardProxy.size.width + outerH * 2
+                        let canvasHeight = cardProxy.size.height + outerV * 2
+                        Image(nsImage: backdrop.blurred)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: canvasWidth, height: canvasHeight)
+                            .clipped()
+                            .offset(x: -outerH, y: -outerV)
+                            .frame(width: cardProxy.size.width, height: cardProxy.size.height, alignment: .topLeading)
+                    }
+                    .overlay(glassTint)
+                    .overlay(glassSheen)
+                    .clipShape(shape)
+                    .overlay {
+                        shape.strokeBorder(glassBorder, lineWidth: 1)
+                    }
+                    .shadow(color: .black.opacity(isDark ? 0.42 : 0.18), radius: 26, x: 0, y: 12)
                 }
-
-                Markdown(formattedMarkdown)
-                    .markdownTextStyle {
-                        FontSize(14.5)
-                        FontWeight(.regular)
-                        ForegroundColor(primaryTextColor)
-                    }
-                    .markdownTextStyle(\.strong) {
-                        FontWeight(.semibold)
-                    }
-                    .markdownTextStyle(\.code) {
-                        FontSize(13)
-                        FontFamilyVariant(.monospaced)
-                        BackgroundColor(codeBackgroundColor)
-                    }
-                    .markdownTextStyle(\.link) {
-                        ForegroundColor(isDark ? Color(red: 0.45, green: 0.72, blue: 1.0) : Color(red: 0.08, green: 0.42, blue: 0.85))
-                        UnderlineStyle(.single)
-                    }
-                    .markdownBlockStyle(\.heading1) { configuration in
-                        configuration.label
-                            .markdownTextStyle {
-                                FontSize(18)
-                                FontWeight(.semibold)
-                                ForegroundColor(primaryTextColor)
-                            }
-                            .markdownMargin(top: 4, bottom: 10)
-                    }
-                    .markdownBlockStyle(\.heading2) { configuration in
-                        configuration.label
-                            .markdownTextStyle {
-                                FontSize(16.5)
-                                FontWeight(.semibold)
-                                ForegroundColor(primaryTextColor)
-                            }
-                            .markdownMargin(top: 4, bottom: 8)
-                    }
-                    .markdownBlockStyle(\.heading3) { configuration in
-                        configuration.label
-                            .markdownTextStyle {
-                                FontSize(15.5)
-                                FontWeight(.semibold)
-                                ForegroundColor(primaryTextColor)
-                            }
-                            .markdownMargin(top: 2, bottom: 8)
-                    }
-                    .markdownBlockStyle(\.paragraph) { configuration in
-                        configuration.label
-                            .lineSpacing(5)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .markdownMargin(top: 0, bottom: 12)
-                    }
-                    .markdownBlockStyle(\.listItem) { configuration in
-                        configuration.label
-                            .markdownMargin(top: 4, bottom: 4)
-                    }
-                    .markdownBlockStyle(\.codeBlock) { configuration in
-                        configuration.label
-                            .markdownTextStyle {
-                                FontSize(12.5)
-                                FontFamilyVariant(.monospaced)
-                                ForegroundColor(primaryTextColor)
-                            }
-                            .lineSpacing(4)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 12)
-                            .background(codeBackgroundColor, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                            .overlay {
-                                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .strokeBorder(borderColor, lineWidth: 0.5)
-                            }
-                            .markdownMargin(top: 4, bottom: 14)
-                    }
-                    .markdownBlockStyle(\.blockquote) { configuration in
-                        HStack(spacing: 12) {
-                            RoundedRectangle(cornerRadius: 2)
-                                .fill(subtleTextColor.opacity(0.45))
-                                .frame(width: 3)
-                            configuration.label
-                                .markdownTextStyle {
-                                    ForegroundColor(subtleTextColor)
-                                }
-                        }
-                        .fixedSize(horizontal: false, vertical: true)
-                        .markdownMargin(top: 2, bottom: 12)
-                    }
-                    .markdownBlockStyle(\.table) { configuration in
-                        configuration.label
-                            .markdownTableBorderStyle(.init(.allBorders, color: borderColor, width: 0.5))
-                            .markdownTableBackgroundStyle(.alternatingRows(
-                                Color.clear,
-                                isDark ? Color.white.opacity(0.03) : Color.black.opacity(0.025),
-                                header: codeBackgroundColor
-                            ))
-                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                            .overlay {
-                                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                    .strokeBorder(borderColor, lineWidth: 0.5)
-                            }
-                            .markdownMargin(top: 4, bottom: 14)
-                    }
-                    .markdownBlockStyle(\.tableCell) { configuration in
-                        configuration.label
-                            .markdownTextStyle {
-                                FontSize(13)
-                            }
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 7)
-                    }
-                    .markdownBlockStyle(\.thematicBreak) {
-                        Rectangle()
-                            .fill(borderColor)
-                            .frame(height: 1)
-                            .markdownMargin(top: 12, bottom: 12)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .padding(.horizontal, 28)
-            .padding(.vertical, 26)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background {
-                GeometryReader { cardProxy in
-                    let canvasWidth = cardProxy.size.width + outerH * 2
-                    let canvasHeight = cardProxy.size.height + outerV * 2
-                    Image(nsImage: backdrop.blurred)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: canvasWidth, height: canvasHeight)
-                        .clipped()
-                        .offset(x: -outerH, y: -outerV)
-                        .frame(width: cardProxy.size.width, height: cardProxy.size.height, alignment: .topLeading)
-                }
-                .overlay(glassTint)
-                .overlay(glassSheen)
-                .clipShape(shape)
-                .overlay {
-                    shape.strokeBorder(glassBorder, lineWidth: 1)
-                }
-                .shadow(color: .black.opacity(isDark ? 0.42 : 0.18), radius: 26, x: 0, y: 12)
-            }
-            .padding(.horizontal, outerH)
-            .padding(.vertical, outerV)
+                .padding(.horizontal, outerH)
+                .padding(.vertical, outerV)
         }
         .frame(width: Self.canvasWidth)
         .fixedSize(horizontal: false, vertical: true)
@@ -413,7 +424,7 @@ final class ChatShareWindowController: NSWindowController, NSWindowDelegate {
 
     private func makeWindow() -> NSWindow {
         let window = ChatShareWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 420, height: 472),
+            contentRect: NSRect(x: 0, y: 0, width: 448, height: 516),
             styleMask: [.borderless, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -442,10 +453,11 @@ private final class ChatShareWindow: NSWindow {
 }
 
 private struct ChatSharePreviewSheet: View {
-    private static let previewWidth: CGFloat = 312
-    private static let previewScale: CGFloat = previewWidth / ChatShareCardView.canvasWidth
-    private static let maxPreviewHeight: CGFloat = 286
-    private static let bottomFadeHeight: CGFloat = 88
+    private static let modalWidth: CGFloat = 448
+    private static let modalHeight: CGFloat = 516
+    private static let cardHorizontalInset: CGFloat = 24
+    private static let maxCardHeight: CGFloat = 310
+    private static let bottomFadeHeight: CGFloat = 78
 
     let text: String
     let windowProvider: () -> NSWindow?
@@ -465,95 +477,199 @@ private struct ChatSharePreviewSheet: View {
         _appearance = State(initialValue: initialAppearance)
     }
 
-    private var scaledCardHeight: CGFloat { cardHeight * Self.previewScale }
-    private var isOverflowing: Bool { scaledCardHeight > Self.maxPreviewHeight }
-    private var visiblePreviewHeight: CGFloat {
-        scaledCardHeight > 0 ? min(scaledCardHeight, Self.maxPreviewHeight) : Self.maxPreviewHeight
+    private var isDark: Bool { appearance == .dark }
+    private var backdrop: ShareCardBackdropCache.Pair { ShareCardBackdropCache.shared.backdrop(for: appearance) }
+    private var isOverflowing: Bool { cardHeight > Self.maxCardHeight }
+    private var visibleCardHeight: CGFloat {
+        cardHeight > 0 ? min(cardHeight, Self.maxCardHeight) : Self.maxCardHeight
+    }
+
+    private var chromeTextColor: Color {
+        isDark ? Color.white.opacity(0.94) : Color(white: 0.12)
+    }
+
+    private var chromeSubtleTextColor: Color {
+        isDark ? Color.white.opacity(0.84) : Color(white: 0.16)
+    }
+
+    private var glassTint: Color {
+        isDark
+            ? Color(red: 0.08, green: 0.10, blue: 0.14).opacity(0.62)
+            : Color.white.opacity(0.64)
+    }
+
+    private var glassSheen: LinearGradient {
+        if isDark {
+            LinearGradient(colors: [Color.white.opacity(0.11), Color.white.opacity(0.02)], startPoint: .top, endPoint: .bottom)
+        } else {
+            LinearGradient(colors: [Color.white.opacity(0.28), Color.white.opacity(0.05)], startPoint: .top, endPoint: .bottom)
+        }
+    }
+
+    private var glassBorder: LinearGradient {
+        if isDark {
+            LinearGradient(colors: [Color.white.opacity(0.26), Color.white.opacity(0.08)], startPoint: .topLeading, endPoint: .bottomTrailing)
+        } else {
+            LinearGradient(colors: [Color.white.opacity(0.84), Color.white.opacity(0.32)], startPoint: .topLeading, endPoint: .bottomTrailing)
+        }
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                Text(NSLocalizedString("分享回复", comment: ""))
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(ThemeColor.kText)
-                Spacer(minLength: 0)
-                Button(action: close) {
-                    Image(mingCute: "xmark", size: 13)
-                        .foregroundStyle(ThemeColor.kTextSubtle)
-                        .frame(width: 28, height: 28)
-                        .background(ThemeColor.kBackgroundNeutral, in: Circle())
-                }
-                .buttonStyle(ShareCloseButtonStyle())
-                .accessibilityLabel(NSLocalizedString("关闭", comment: ""))
-            }
-            .padding(.horizontal, 20)
-            .padding(.top, 18)
-            .padding(.bottom, 12)
-            .background(WindowDragArea())
+        let cardShape = UnevenRoundedRectangle(
+            topLeadingRadius: 24,
+            bottomLeadingRadius: isOverflowing ? 0 : 24,
+            bottomTrailingRadius: isOverflowing ? 0 : 24,
+            topTrailingRadius: 24,
+            style: .continuous
+        )
 
-            ChatShareCardView(text: text, appearance: appearance)
-                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { cardHeight = $0 }
-                .scaleEffect(Self.previewScale, anchor: .top)
-                .frame(width: Self.previewWidth, height: visiblePreviewHeight, alignment: .top)
-                .clipShape(
-                    UnevenRoundedRectangle(
-                        topLeadingRadius: 16,
-                        bottomLeadingRadius: isOverflowing ? 0 : 16,
-                        bottomTrailingRadius: isOverflowing ? 0 : 16,
-                        topTrailingRadius: 16,
-                        style: .continuous
-                    )
+        ZStack {
+            // Full-bleed scenic landscape as the modal's own backdrop.
+            Image(nsImage: backdrop.sharp)
+                .resizable()
+                .scaledToFill()
+                .frame(width: Self.modalWidth, height: Self.modalHeight)
+                .clipped()
+
+            // Subtle top & bottom scrim so floating chrome stays legible in both appearances.
+            VStack(spacing: 0) {
+                LinearGradient(
+                    colors: [
+                        (isDark ? Color.black : Color.white).opacity(isDark ? 0.34 : 0.24),
+                        .clear
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
                 )
-                .mask {
-                    VStack(spacing: 0) {
-                        Color.black
-                        if isOverflowing {
-                            LinearGradient(
-                                stops: [
-                                    .init(color: .black, location: 0.0),
-                                    .init(color: .black.opacity(0.65), location: 0.36),
-                                    .init(color: .black.opacity(0.20), location: 0.72),
-                                    .init(color: .clear, location: 1.0)
-                                ],
-                                startPoint: .top,
-                                endPoint: .bottom
+                .frame(height: 84)
+                Spacer(minLength: 0)
+                LinearGradient(
+                    colors: [
+                        .clear,
+                        (isDark ? Color.black : Color.white).opacity(isDark ? 0.44 : 0.36)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(height: 132)
+            }
+            .allowsHitTesting(false)
+
+            VStack(spacing: 0) {
+                HStack(spacing: 12) {
+                    Text(NSLocalizedString("分享回复", comment: ""))
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(chromeTextColor)
+                    Spacer(minLength: 0)
+                    Button(action: close) {
+                        Image(mingCute: "xmark", size: 12.5)
+                            .foregroundStyle(chromeTextColor.opacity(0.9))
+                            .frame(width: 28, height: 28)
+                            .background(
+                                (isDark ? Color.black.opacity(0.32) : Color.white.opacity(0.62)),
+                                in: Circle()
                             )
-                            .frame(height: Self.bottomFadeHeight)
+                            .overlay {
+                                Circle().strokeBorder(Color.white.opacity(isDark ? 0.16 : 0.65), lineWidth: 0.75)
+                            }
+                    }
+                    .buttonStyle(ShareCloseButtonStyle())
+                    .accessibilityLabel(NSLocalizedString("关闭", comment: ""))
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 18)
+                .padding(.bottom, 10)
+                .background(WindowDragArea())
+
+                Spacer(minLength: 0)
+
+                ChatShareCardContent(text: text, appearance: appearance)
+                    .padding(.horizontal, 22)
+                    .padding(.vertical, 20)
+                    .frame(width: Self.modalWidth - Self.cardHorizontalInset * 2, alignment: .leading)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { cardHeight = $0 }
+                    .frame(width: Self.modalWidth - Self.cardHorizontalInset * 2, height: visibleCardHeight, alignment: .top)
+                    .background {
+                        GeometryReader { cardProxy in
+                            let origin = cardProxy.frame(in: .named("share-modal-canvas")).origin
+                            Image(nsImage: backdrop.blurred)
+                                .resizable()
+                                .scaledToFill()
+                                .frame(width: Self.modalWidth, height: Self.modalHeight)
+                                .clipped()
+                                .offset(x: -origin.x, y: -origin.y)
+                                .frame(width: cardProxy.size.width, height: cardProxy.size.height, alignment: .topLeading)
+                        }
+                        .overlay(glassTint)
+                        .overlay(glassSheen)
+                    }
+                    .clipShape(cardShape)
+                    .overlay {
+                        cardShape.strokeBorder(glassBorder, lineWidth: 1)
+                    }
+                    .mask {
+                        VStack(spacing: 0) {
+                            Color.black
+                            if isOverflowing {
+                                LinearGradient(
+                                    stops: [
+                                        .init(color: .black, location: 0.0),
+                                        .init(color: .black.opacity(0.62), location: 0.38),
+                                        .init(color: .black.opacity(0.18), location: 0.74),
+                                        .init(color: .clear, location: 1.0)
+                                    ],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                                .frame(height: Self.bottomFadeHeight)
+                            }
                         }
                     }
-                }
-                .shadow(color: .black.opacity(isOverflowing ? 0 : 0.22), radius: 18, x: 0, y: 8)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                    .shadow(color: .black.opacity(isOverflowing ? 0 : (isDark ? 0.38 : 0.16)), radius: 22, x: 0, y: 10)
 
-            HStack(spacing: 26) {
-                ShareCircleActionButton(
-                    title: copied ? NSLocalizedString("已复制", comment: "") : NSLocalizedString("复制图片", comment: ""),
-                    mingCute: copied ? "checkmark" : "doc.on.clipboard",
-                    action: copyImage
-                )
-                ShareCircleActionButton(
-                    title: saved ? NSLocalizedString("已保存图片", comment: "") : NSLocalizedString("保存图片", comment: ""),
-                    mingCute: saved ? "checkmark" : "arrow.down.to.line",
-                    action: saveImage
-                )
-                ShareCircleActionButton(
-                    title: NSLocalizedString("系统分享", comment: ""),
-                    assetImage: "ChatShare",
-                    action: presentSystemShare
-                )
-                .background(ShareAnchorReader(box: shareAnchor).allowsHitTesting(false))
-                ShareCircleActionButton(
-                    title: appearance.title,
-                    assetImage: "ChatThemeToggle",
-                    action: {
-                        appearance = appearance == .dark ? .light : .dark
-                    }
-                )
+                Spacer(minLength: 0)
+
+                HStack(spacing: 28) {
+                    ShareCircleActionButton(
+                        title: copied ? NSLocalizedString("已复制", comment: "") : NSLocalizedString("复制图片", comment: ""),
+                        mingCute: copied ? "checkmark" : "doc.on.clipboard",
+                        isDark: isDark,
+                        action: copyImage
+                    )
+                    ShareCircleActionButton(
+                        title: saved ? NSLocalizedString("已保存图片", comment: "") : NSLocalizedString("保存图片", comment: ""),
+                        mingCute: saved ? "checkmark" : "arrow.down.to.line",
+                        isDark: isDark,
+                        action: saveImage
+                    )
+                    ShareCircleActionButton(
+                        title: NSLocalizedString("系统分享", comment: ""),
+                        assetImage: "ChatShare",
+                        isDark: isDark,
+                        action: presentSystemShare
+                    )
+                    .background(ShareAnchorReader(box: shareAnchor).allowsHitTesting(false))
+                    ShareCircleActionButton(
+                        title: appearance.title,
+                        assetImage: "ChatThemeToggle",
+                        isDark: isDark,
+                        action: {
+                            appearance = appearance == .dark ? .light : .dark
+                        }
+                    )
+                }
+                .padding(.top, 14)
+                .padding(.bottom, 22)
             }
-            .padding(.top, 16)
-            .padding(.bottom, 22)
         }
+        .frame(width: Self.modalWidth, height: Self.modalHeight)
+        .coordinateSpace(name: "share-modal-canvas")
+        .overlay {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .strokeBorder(Color.white.opacity(isDark ? 0.16 : 0.45), lineWidth: 0.75)
+                .allowsHitTesting(false)
+        }
+        .environment(\.colorScheme, appearance.colorScheme)
         .appDialog(
             NSLocalizedString("分享失败", comment: ""),
             isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } }),
@@ -616,7 +732,7 @@ private struct ShareCloseButtonStyle: ButtonStyle {
         configuration.label
             .overlay {
                 if hovering || configuration.isPressed {
-                    Circle().fill(ThemeColor.kInteractionHover)
+                    Circle().fill(Color.white.opacity(0.14))
                 }
             }
             .contentShape(Circle())
@@ -629,6 +745,7 @@ private struct ShareCircleActionButton: View {
     let title: String
     var mingCute: String? = nil
     var assetImage: String? = nil
+    let isDark: Bool
     let action: () -> Void
 
     @State private var hovering = false
@@ -646,17 +763,18 @@ private struct ShareCircleActionButton: View {
                             .frame(width: 19, height: 19)
                     }
                 }
-                .foregroundStyle(ThemeColor.kText)
-                .frame(width: 48, height: 48)
-                .background(ThemeColor.kBackgroundNeutral, in: Circle())
+                .foregroundStyle(isDark ? Color.white.opacity(0.95) : Color(white: 0.12))
+                .frame(width: 46, height: 46)
+                .background(
+                    (isDark ? Color.black.opacity(hovering ? 0.46 : 0.34) : Color.white.opacity(hovering ? 0.84 : 0.68)),
+                    in: Circle()
+                )
                 .overlay {
-                    if hovering {
-                        Circle().fill(ThemeColor.kInteractionHover)
-                    }
+                    Circle().strokeBorder(Color.white.opacity(isDark ? 0.18 : 0.78), lineWidth: 0.75)
                 }
                 Text(title)
-                    .font(.system(size: 12))
-                    .foregroundStyle(ThemeColor.kTextSubtle)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(isDark ? Color.white.opacity(0.90) : Color(white: 0.14))
                     .lineLimit(1)
             }
         }
@@ -668,7 +786,7 @@ private struct ShareCircleActionButton: View {
 private struct ShareCircleButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .scaleEffect(configuration.isPressed ? 0.95 : 1.0)
+            .scaleEffect(configuration.isPressed ? 0.94 : 1.0)
             .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
 }
