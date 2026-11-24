@@ -59,6 +59,97 @@ enum AgentReplyRegression {
         print("Composer Backspace passed: attachment, mixed tags, undo, redo and subsequent typing")
     }
 
+    static func inlineTagAlignmentRegression(app: AppModel, capturePath: String?) async throws {
+        let store = ConversationStore(app.store)
+        let cid = try store.create(title: "Inline tag alignment")
+        let imgFile = app.store.root.appending(path: "粘贴图片.png")
+        let thumbImg = NSImage(size: NSSize(width: 32, height: 32), flipped: false) { rect in
+            NSColor.darkGray.setFill()
+            rect.fill()
+            return true
+        }
+        if let tiff = thumbImg.tiffRepresentation,
+           let rep = NSBitmapImageRep(data: tiff),
+           let png = rep.representation(using: .png, properties: [:]) {
+            try png.write(to: imgFile)
+        }
+        let att = AttachmentRef(id: "img1", kind: .image, path: imgFile.path, mimeType: "image/png", byteSize: 1024, temporary: true)
+        let pasted = MessagePastedText(id: "p1", text: String(repeating: "文", count: 4784))
+        let segments: [MessageSegment] = [
+            .attachment(id: att.id),
+            .text("你好"),
+            .pastedText(id: pasted.id),
+            .text("卢卡斯放你那师范路口三分撒按时克利夫兰那算了反馈三联疗法你看")
+        ]
+        let presentation = MessagePresentation(quotes: [], pastedTexts: [pasted], segments: segments)
+        let prompt = MessagePresentation.promptText(segments: segments, quotes: [], attachments: [att], pastedTexts: [pasted])
+        try store.append(conversationID: cid, role: "user", text: prompt, attachments: [att], presentation: presentation)
+
+        let soloPresentation = MessagePresentation(quotes: [], pastedTexts: [pasted], segments: [.pastedText(id: pasted.id)])
+        try store.append(conversationID: cid, role: "user", text: "[粘贴文本 1]", attachments: [], presentation: soloPresentation)
+
+        let model = AgentModel(app: app)
+        model.open(cid)
+        let controller = AgentWindowController(model: model, presentation: WindowPresentation())
+        controller.show()
+        let window = NSApp.windows.first { $0.title == "Asky AI" }!
+        defer { window.orderOut(nil) }
+        try await Task.sleep(for: .milliseconds(700))
+
+        func textViews(_ node: NSView) -> [NSTextView] {
+            (node as? NSTextView).map { [$0] } ?? node.subviews.flatMap(textViews)
+        }
+        let bubbleViews = textViews(window.contentView!).filter { !$0.isEditable }
+        guard let multiView = bubbleViews.first(where: { $0.string.contains("卢卡斯") }),
+              let soloView = bubbleViews.first(where: { $0.textStorage?.length == 1 }),
+              let multiStorage = multiView.textStorage,
+              let multiLayout = multiView.layoutManager,
+              let multiContainer = multiView.textContainer,
+              let soloLayout = soloView.layoutManager,
+              let soloContainer = soloView.textContainer else {
+            preconditionFailure("Expected rendered UserInlineTagTextView instances")
+        }
+
+        multiLayout.ensureLayout(for: multiContainer)
+        soloLayout.ensureLayout(for: soloContainer)
+
+        let leadingTag = multiStorage.attribute(.attachment, at: 0, effectiveRange: nil) as! InlineTagAttachment
+        let leadingGlyph = multiLayout.glyphRange(forCharacterRange: NSRange(location: 0, length: 1), actualCharacterRange: nil)
+        let leadingRect = multiLayout.boundingRect(forGlyphRange: leadingGlyph, in: multiContainer)
+        precondition(leadingRect.minX <= 0.5, "Leading tag must start at x=0, got \(leadingRect.minX)")
+
+        let leadingImg = leadingTag.image(forBounds: leadingRect, textContainer: multiContainer, characterIndex: 0)!
+        let leadingTiff = leadingImg.tiffRepresentation!
+        let leadingRep = NSBitmapImageRep(data: leadingTiff)!
+        let leadingLeftAlpha = leadingRep.colorAt(x: 1, y: leadingRep.pixelsHigh / 2)?.alphaComponent ?? 0
+        precondition(leadingLeftAlpha > 0.05, "Leading tag pill must be drawn flush at left edge (alpha at x=1 was \(leadingLeftAlpha))")
+
+        let midIndex = (multiStorage.string as NSString).range(of: "\u{FFFC}", options: [], range: NSRange(location: 1, length: multiStorage.length - 1)).location
+        let midTag = multiStorage.attribute(.attachment, at: midIndex, effectiveRange: nil) as! InlineTagAttachment
+        let midGlyph = multiLayout.glyphRange(forCharacterRange: NSRange(location: midIndex, length: 1), actualCharacterRange: nil)
+        let midRect = multiLayout.boundingRect(forGlyphRange: midGlyph, in: multiContainer)
+        precondition(midRect.minX > 5, "Second tag should be mid-line, got x=\(midRect.minX)")
+        let midImg = midTag.image(forBounds: midRect, textContainer: multiContainer, characterIndex: midIndex)!
+        let midRep = NSBitmapImageRep(data: midImg.tiffRepresentation!)!
+        let midLeftAlpha = midRep.colorAt(x: 1, y: midRep.pixelsHigh / 2)?.alphaComponent ?? 1
+        precondition(midLeftAlpha < 0.01, "Mid-line tag must preserve leading margin (alpha at x=1 was \(midLeftAlpha))")
+
+        let soloGlyph = soloLayout.glyphRange(forCharacterRange: NSRange(location: 0, length: 1), actualCharacterRange: nil)
+        let soloRect = soloLayout.boundingRect(forGlyphRange: soloGlyph, in: soloContainer)
+        precondition(abs((midRect.width - soloRect.width) - InlineTagAttachment.horizontalMargin * 2) <= 1.0,
+                     "Solo bubble tag must omit both leading and trailing margins (mid=\(midRect.width), solo=\(soloRect.width))")
+
+        if let capturePath {
+            if let rep = window.contentView?.bitmapImageRepForCachingDisplay(in: window.contentView!.bounds) {
+                window.contentView?.cacheDisplay(in: window.contentView!.bounds, to: rep)
+                if let png = rep.representation(using: .png, properties: [:]) {
+                    try png.write(to: URL(filePath: capturePath))
+                }
+            }
+        }
+        print("Inline tag alignment passed: leadingRect=\(leadingRect), midRect=\(midRect), soloRect=\(soloRect)")
+    }
+
     static func bubbleWidthPreview(app: AppModel) async throws {
         let sample = "给你这条消息贴了个 💬，表示要发短信这件事。"
         let store = ConversationStore(app.store)
@@ -2853,6 +2944,12 @@ enum AgentReplyRegression {
         let app = try AppModel(root: root)
         if CommandLine.arguments.contains("--composer-backspace") {
             try await composerBackspaceRegression(app: app)
+            return
+        }
+        if CommandLine.arguments.contains("--inline-tag-alignment") {
+            let captureIdx = CommandLine.arguments.firstIndex(of: "--capture").map { $0 + 1 }
+            let capturePath = captureIdx.flatMap { $0 < CommandLine.arguments.count ? CommandLine.arguments[$0] : nil }
+            try await inlineTagAlignmentRegression(app: app, capturePath: capturePath)
             return
         }
         if CommandLine.arguments.contains("--bubble-width-preview") {

@@ -231,7 +231,8 @@ private final class ComposerTextView: NSTextView {
     }
 
     private func isPointInCloseButton(_ pt: NSPoint, tag: InlineTagAttachment, rect: NSRect) -> Bool {
-        let closeRect = NSRect(x: rect.minX, y: rect.minY, width: tag.closeHitWidth, height: rect.height)
+        let atLineStart = rect.minX - textContainerOrigin.x <= 0.5
+        let closeRect = NSRect(x: rect.minX, y: rect.minY, width: tag.closeHitWidth(atLineStart: atLineStart), height: rect.height)
         return closeRect.insetBy(dx: -2, dy: -2).contains(pt)
     }
 

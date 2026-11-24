@@ -136,15 +136,25 @@ final class InlineTagAttachment: NSTextAttachment {
     static let maxPillWidth: CGFloat = 192
     static let cornerRadius: CGFloat = 6
 
+    private struct MarginKey: Hashable {
+        let leading: Int
+        let trailing: Int
+    }
+
+    private var pillWidth: CGFloat = 0
+    private var pillYOffset: CGFloat = 0
+    private var imageCache: [MarginKey: NSImage] = [:]
+
     private var hasThumbnail: Bool {
         if case .image(_, let data) = kind, data != nil { return true }
         return false
     }
 
-    var closeHitWidth: CGFloat {
+    func closeHitWidth(atLineStart: Bool) -> CGFloat {
         let iconWidth = hasThumbnail ? Self.thumbSize : Self.iconSize
         let leadingPad = hasThumbnail ? Self.thumbLeadingPadding : Self.iconLeadingPadding
-        return Self.horizontalMargin + leadingPad + iconWidth + Self.iconSpacing / 2
+        let leadingMargin: CGFloat = atLineStart ? 0 : Self.horizontalMargin
+        return leadingMargin + leadingPad + iconWidth + Self.iconSpacing / 2
     }
 
     init(kind: InlineTagKind, appearance: InlineTagAppearance) {
@@ -152,7 +162,7 @@ final class InlineTagAttachment: NSTextAttachment {
         self.kind = kind
         self.appearance = appearance
         super.init(data: nil, ofType: nil)
-        rebuildImage()
+        rebuildMetrics()
     }
 
     @available(*, unavailable)
@@ -165,18 +175,51 @@ final class InlineTagAttachment: NSTextAttachment {
         guard newKind != self.kind || appearance != self.appearance else { return }
         self.kind = newKind
         self.appearance = appearance
-        rebuildImage()
+        rebuildMetrics()
     }
 
     @discardableResult
     func setHoverState(_ newState: InlineTagHoverState) -> Bool {
         guard hoverState != newState else { return false }
         hoverState = newState
-        rebuildImage()
+        rebuildMetrics()
         return true
     }
 
-    private func rebuildImage() {
+    private nonisolated static func isAtParagraphEnd(in textContainer: NSTextContainer?, at charIndex: Int) -> Bool {
+        guard let storage = textContainer?.layoutManager?.textStorage else { return false }
+        let nextIndex = charIndex + 1
+        guard nextIndex < storage.length else { return true }
+        let nextChar = (storage.string as NSString).character(at: nextIndex)
+        return nextChar == 0x0A || nextChar == 0x0D
+    }
+
+    private func trailingMargin(atParagraphEnd: Bool) -> CGFloat {
+        (appearance.inBubble && atParagraphEnd) ? 0 : Self.horizontalMargin
+    }
+
+    nonisolated override func attachmentBounds(for textContainer: NSTextContainer?, proposedLineFragment lineFrag: NSRect,
+                                               glyphPosition position: CGPoint, characterIndex charIndex: Int) -> NSRect {
+        let atParagraphEnd = Self.isAtParagraphEnd(in: textContainer, at: charIndex)
+        nonisolated(unsafe) let attachment = self
+        return MainActor.assumeIsolated {
+            let leading: CGFloat = position.x <= lineFrag.minX + 0.5 ? 0 : Self.horizontalMargin
+            let trailing = attachment.trailingMargin(atParagraphEnd: atParagraphEnd)
+            return NSRect(x: 0, y: attachment.pillYOffset, width: attachment.pillWidth + leading + trailing, height: Self.pillHeight)
+        }
+    }
+
+    nonisolated override func image(forBounds imageBounds: NSRect, textContainer: NSTextContainer?, characterIndex charIndex: Int) -> NSImage? {
+        let atParagraphEnd = Self.isAtParagraphEnd(in: textContainer, at: charIndex)
+        nonisolated(unsafe) let attachment = self
+        return MainActor.assumeIsolated {
+            let trailing = attachment.trailingMargin(atParagraphEnd: atParagraphEnd)
+            let leading = max(0, round(imageBounds.width - attachment.pillWidth - trailing))
+            return attachment.renderedImage(leadingMargin: leading, trailingMargin: trailing)
+        }
+    }
+
+    private func rebuildMetrics() {
         let font = NSFont.systemFont(ofSize: 12.5, weight: .regular)
         let label = kind.label
         let iconWidth: CGFloat = hasThumbnail ? Self.thumbSize : Self.iconSize
@@ -184,8 +227,28 @@ final class InlineTagAttachment: NSTextAttachment {
         let maxTextWidth = Self.maxPillWidth - leadingPad - iconWidth - Self.iconSpacing - Self.horizontalPadding
         let measuredWidth = ceil((label as NSString).size(withAttributes: [.font: font]).width)
         let textWidth = min(maxTextWidth, max(12, measuredWidth))
-        let pillWidth = ceil(leadingPad + iconWidth + Self.iconSpacing + textWidth + Self.horizontalPadding)
-        let totalSize = NSSize(width: pillWidth + Self.horizontalMargin * 2, height: Self.pillHeight)
+        pillWidth = ceil(leadingPad + iconWidth + Self.iconSpacing + textWidth + Self.horizontalPadding)
+
+        let bodyFont = NSFont.systemFont(ofSize: 14)
+        let bodyHeight = bodyFont.ascender - bodyFont.descender
+        pillYOffset = floor(bodyFont.descender + (bodyHeight - Self.pillHeight) / 2)
+
+        imageCache.removeAll()
+        let fallback = renderedImage(leadingMargin: Self.horizontalMargin, trailingMargin: Self.horizontalMargin)
+        self.image = fallback
+        self.bounds = NSRect(x: 0, y: pillYOffset, width: fallback.size.width, height: fallback.size.height)
+    }
+
+    private func renderedImage(leadingMargin: CGFloat, trailingMargin: CGFloat) -> NSImage {
+        let key = MarginKey(leading: Int(round(leadingMargin)), trailing: Int(round(trailingMargin)))
+        if let cached = imageCache[key] { return cached }
+
+        let font = NSFont.systemFont(ofSize: 12.5, weight: .regular)
+        let label = kind.label
+        let iconWidth: CGFloat = hasThumbnail ? Self.thumbSize : Self.iconSize
+        let leadingPad: CGFloat = hasThumbnail ? Self.thumbLeadingPadding : Self.iconLeadingPadding
+        let textWidth = max(12, pillWidth - leadingPad - iconWidth - Self.iconSpacing - Self.horizontalPadding)
+        let totalSize = NSSize(width: pillWidth + leadingMargin + trailingMargin, height: Self.pillHeight)
 
         let isDark = appearance.colorScheme == .dark
         let isHovered = hoverState != .none
@@ -215,7 +278,7 @@ final class InlineTagAttachment: NSTextAttachment {
         let iconColor = NSColor(ThemeColor.kIcon.color(for: appearance.colorScheme))
 
         let image = NSImage(size: totalSize, flipped: false) { _ in
-            let pillRect = NSRect(x: Self.horizontalMargin, y: 0.5, width: pillWidth, height: Self.pillHeight - 1)
+            let pillRect = NSRect(x: leadingMargin, y: 0.5, width: self.pillWidth, height: Self.pillHeight - 1)
             let path = NSBezierPath(roundedRect: pillRect, xRadius: Self.cornerRadius, yRadius: Self.cornerRadius)
             fillColor.setFill()
             path.fill()
@@ -298,11 +361,8 @@ final class InlineTagAttachment: NSTextAttachment {
             (label as NSString).draw(in: textRect, withAttributes: attrs)
             return true
         }
-        self.image = image
-        let bodyFont = NSFont.systemFont(ofSize: 14)
-        let bodyHeight = bodyFont.ascender - bodyFont.descender
-        let yOffset = floor(bodyFont.descender + (bodyHeight - Self.pillHeight) / 2)
-        self.bounds = NSRect(x: 0, y: yOffset, width: totalSize.width, height: totalSize.height)
+        imageCache[key] = image
+        return image
     }
 
     private static func tintedImage(_ image: NSImage, color: NSColor) -> NSImage {
