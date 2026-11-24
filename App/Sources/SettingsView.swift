@@ -159,7 +159,6 @@ struct HotKeyRecorder: View {
 
     var body: some View {
         HotKeyRecorderControl(label: label, allowsPlainKey: allowsPlainKey, apply: apply)
-            .fixedSize()
     }
 }
 
@@ -167,83 +166,205 @@ private struct HotKeyRecorderControl: NSViewRepresentable {
     let label: String
     let allowsPlainKey: Bool
     let apply: (UInt32, UInt32, String) -> Bool
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    @Environment(\.colorSchemeContrast) private var contrast
-    func makeNSView(context: Context) -> Recorder { Recorder(label: label, allowsPlainKey: allowsPlainKey, apply: apply) }
-    func updateNSView(_ view: Recorder, context: Context) {
-        if #available(macOS 26, *), !SurfaceCompatibility.useLegacyMaterial,
-           !reduceTransparency, contrast != .increased {
-            view.bezelStyle = .glass
-            view.borderShape = .capsule
-        } else {
-            view.bezelStyle = .rounded
-            if #available(macOS 26, *) { view.borderShape = .automatic }
-        }
+
+    func makeNSView(context: Context) -> HotKeyRecorderField {
+        HotKeyRecorderField(label: label, allowsPlainKey: allowsPlainKey, apply: apply)
+    }
+
+    func updateNSView(_ view: HotKeyRecorderField, context: Context) {
         view.label = label
         view.apply = apply
         view.allowsPlainKey = allowsPlainKey
-        if !view.recording { view.title = label }
         view.setAccessibilityLabel(String(format: NSLocalizedString("快捷键 %@，点击录制", comment: ""), label))
+        view.needsDisplay = true
     }
-    final class Recorder: NSButton {
-        var label: String
-        var apply: (UInt32, UInt32, String) -> Bool
-        var allowsPlainKey: Bool
-        var recording = false
-        override var acceptsFirstResponder: Bool { true }
-        init(label: String, allowsPlainKey: Bool, apply: @escaping (UInt32, UInt32, String) -> Bool) {
-            self.label = label
-            self.allowsPlainKey = allowsPlainKey
-            self.apply = apply
-            super.init(frame: .zero)
-            bezelStyle = .rounded
-            target = self
-            action = #selector(begin)
-            title = label
-            toolTip = NSLocalizedString("录制快捷键", comment: "")
-            setAccessibilityLabel(String(format: NSLocalizedString("快捷键 %@，点击录制", comment: ""), label))
+}
+
+/// Fixed-slot modifier recorder (`⌃ ⌥ ⇧ ⌘  Key`): live modifier highlight, auto-exits on input or outside click.
+final class HotKeyRecorderField: NSView {
+    var label: String
+    var apply: (UInt32, UInt32, String) -> Bool
+    var allowsPlainKey: Bool
+    private(set) var recording = false
+    private var liveFlags: NSEvent.ModifierFlags = []
+    private var rejected = false
+
+    override var acceptsFirstResponder: Bool { true }
+    override var isFlipped: Bool { true }
+    override var intrinsicContentSize: NSSize { NSSize(width: 172, height: 30) }
+
+    init(label: String, allowsPlainKey: Bool, apply: @escaping (UInt32, UInt32, String) -> Bool) {
+        self.label = label
+        self.allowsPlainKey = allowsPlainKey
+        self.apply = apply
+        super.init(frame: .zero)
+        toolTip = NSLocalizedString("录制快捷键", comment: "")
+        setAccessibilityRole(.button)
+        setAccessibilityLabel(String(format: NSLocalizedString("快捷键 %@，点击录制", comment: ""), label))
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func mouseDown(with event: NSEvent) {
+        if recording {
+            window?.makeFirstResponder(nil)
+        } else {
+            window?.makeFirstResponder(self)
         }
-        required init?(coder: NSCoder) { fatalError() }
-        @objc func begin() { recording = true; title = NSLocalizedString("按下组合键，Esc 取消", comment: ""); window?.makeFirstResponder(self) }
-        override func resignFirstResponder() -> Bool {
-            recording = false
-            title = label
-            return super.resignFirstResponder()
+    }
+
+    override func becomeFirstResponder() -> Bool {
+        let accepted = super.becomeFirstResponder()
+        if accepted {
+            recording = true
+            rejected = false
+            liveFlags = NSEvent.modifierFlags.intersection([.control, .option, .shift, .command])
+            needsDisplay = true
         }
-        override func performKeyEquivalent(with event: NSEvent) -> Bool {
-            guard recording else { return super.performKeyEquivalent(with: event) }
-            keyDown(with: event)
-            return true
+        return accepted
+    }
+
+    override func resignFirstResponder() -> Bool {
+        recording = false
+        liveFlags = []
+        rejected = false
+        needsDisplay = true
+        return super.resignFirstResponder()
+    }
+
+    override func flagsChanged(with event: NSEvent) {
+        guard recording else { super.flagsChanged(with: event); return }
+        liveFlags = event.modifierFlags.intersection([.control, .option, .shift, .command])
+        rejected = false
+        needsDisplay = true
+    }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        guard recording else { return super.performKeyEquivalent(with: event) }
+        keyDown(with: event)
+        return true
+    }
+
+    override func keyDown(with event: NSEvent) {
+        guard recording else { return }
+        if event.keyCode == 53 {
+            window?.makeFirstResponder(nil)
+            return
         }
-        override func keyDown(with event: NSEvent) {
-            guard recording else { return }
-            if event.keyCode == 53 { window?.makeFirstResponder(nil); return }
-            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-            guard allowsPlainKey || !flags.intersection([.command, .option, .control]).isEmpty else {
-                title = NSLocalizedString("请包含 ⌘、⌥ 或 ⌃", comment: ""); return
-            }
-            var modifiers: UInt32 = 0
-            var label = ""
-            for (flag, carbon, symbol) in [(NSEvent.ModifierFlags.control, controlKey, "⌃"), (.option, optionKey, "⌥"), (.shift, shiftKey, "⇧"), (.command, cmdKey, "⌘")] {
-                if flags.contains(flag) { modifiers |= UInt32(carbon); label += symbol }
-            }
-            label += (label.isEmpty ? "" : " ") + Self.keyName(event)
-            if apply(event.keyCode == 76 ? 36 : UInt32(event.keyCode), modifiers, label) {
-                window?.makeFirstResponder(nil)
-            } else {
-                title = NSLocalizedString("已被占用，换一个组合键", comment: "")
-            }
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard allowsPlainKey || !flags.intersection([.command, .option, .control]).isEmpty else {
+            rejected = true
+            needsDisplay = true
+            NSSound.beep()
+            return
         }
-        // charactersIgnoringModifiers is mangled by ⌥ (e.g. ⌥V → √), so use the layout-independent key name where possible.
-        static func keyName(_ event: NSEvent) -> String {
-            let special: [Int: String] = [kVK_Space: "Space", kVK_Return: "Return", kVK_ANSI_KeypadEnter: "Return", kVK_Tab: "Tab", kVK_Delete: "Delete",
-                                          kVK_LeftArrow: "←", kVK_RightArrow: "→", kVK_UpArrow: "↑", kVK_DownArrow: "↓",
-                                          kVK_F1: "F1", kVK_F2: "F2", kVK_F3: "F3", kVK_F4: "F4", kVK_F5: "F5", kVK_F6: "F6",
-                                          kVK_F7: "F7", kVK_F8: "F8", kVK_F9: "F9", kVK_F10: "F10", kVK_F11: "F11", kVK_F12: "F12"]
-            if let name = special[Int(event.keyCode)] { return name }
-            let chars = event.characters(byApplyingModifiers: []) ?? event.charactersIgnoringModifiers ?? ""
-            return chars.isEmpty ? "Key \(event.keyCode)" : chars.uppercased()
+        var modifiers: UInt32 = 0
+        var built = ""
+        for (flag, carbon, symbol) in [(NSEvent.ModifierFlags.control, controlKey, "⌃"),
+                                       (.option, optionKey, "⌥"),
+                                       (.shift, shiftKey, "⇧"),
+                                       (.command, cmdKey, "⌘")] {
+            if flags.contains(flag) { modifiers |= UInt32(carbon); built += symbol }
         }
+        built += (built.isEmpty ? "" : " ") + Self.keyName(event)
+        if apply(event.keyCode == 76 ? 36 : UInt32(event.keyCode), modifiers, built) {
+            label = built
+            window?.makeFirstResponder(nil)
+        } else {
+            rejected = true
+            needsDisplay = true
+            NSSound.beep()
+        }
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let isDark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        let inset: CGFloat = 2.5
+        let pillRect = bounds.insetBy(dx: inset, dy: inset)
+        let cornerRadius: CGFloat = 8
+
+        // Outer soft focus ring when recording
+        if recording {
+            let haloRect = pillRect.insetBy(dx: -1.5, dy: -1.5)
+            let haloColor = (rejected ? NSColor.systemRed : NSColor.controlAccentColor).withAlphaComponent(0.32)
+            haloColor.setStroke()
+            let haloPath = NSBezierPath(roundedRect: haloRect, xRadius: cornerRadius + 1.5, yRadius: cornerRadius + 1.5)
+            haloPath.lineWidth = 3
+            haloPath.stroke()
+        }
+
+        // Pill fill
+        let fill = isDark
+            ? NSColor.white.withAlphaComponent(recording ? 0.11 : 0.07)
+            : NSColor.white.withAlphaComponent(recording ? 1.0 : 0.94)
+        fill.setFill()
+        let path = NSBezierPath(roundedRect: pillRect, xRadius: cornerRadius, yRadius: cornerRadius)
+        path.fill()
+
+        // Pill border
+        let borderColor: NSColor = recording
+            ? (rejected ? .systemRed : .controlAccentColor)
+            : (isDark ? NSColor.white.withAlphaComponent(0.15) : NSColor.black.withAlphaComponent(0.13))
+        borderColor.setStroke()
+        path.lineWidth = recording ? 1.5 : 1
+        path.stroke()
+
+        // Parse active modifiers & key from stored label (or live flags while recording)
+        let parsed = Self.parse(label)
+        let activeFlags: NSEvent.ModifierFlags = recording ? liveFlags : parsed.flags
+        let keyText: String = recording ? "" : parsed.key
+
+        let accent = NSColor.controlAccentColor
+        let muted = isDark
+            ? NSColor.white.withAlphaComponent(0.26)
+            : NSColor.black.withAlphaComponent(0.26)
+        let font = NSFont.systemFont(ofSize: 13.5, weight: .medium)
+
+        var x = pillRect.minX + 10
+        let slots: [(NSEvent.ModifierFlags, String)] = [(.control, "⌃"), (.option, "⌥"), (.shift, "⇧"), (.command, "⌘")]
+        for (flag, symbol) in slots {
+            let color = activeFlags.contains(flag) ? accent : muted
+            let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
+            let size = (symbol as NSString).size(withAttributes: attrs)
+            let slotWidth: CGFloat = 16
+            let drawPoint = NSPoint(x: x + (slotWidth - size.width) / 2, y: pillRect.midY - size.height / 2)
+            (symbol as NSString).draw(at: drawPoint, withAttributes: attrs)
+            x += slotWidth + 1
+        }
+
+        if !keyText.isEmpty {
+            x += 6
+            let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: accent]
+            let size = (keyText as NSString).size(withAttributes: attrs)
+            let drawPoint = NSPoint(x: x, y: pillRect.midY - size.height / 2)
+            (keyText as NSString).draw(at: drawPoint, withAttributes: attrs)
+        }
+    }
+
+    private static func parse(_ label: String) -> (flags: NSEvent.ModifierFlags, key: String) {
+        var flags: NSEvent.ModifierFlags = []
+        if label.contains("⌃") { flags.insert(.control) }
+        if label.contains("⌥") { flags.insert(.option) }
+        if label.contains("⇧") { flags.insert(.shift) }
+        if label.contains("⌘") { flags.insert(.command) }
+        let stripped = label
+            .replacingOccurrences(of: "⌃", with: "")
+            .replacingOccurrences(of: "⌥", with: "")
+            .replacingOccurrences(of: "⇧", with: "")
+            .replacingOccurrences(of: "⌘", with: "")
+            .trimmingCharacters(in: .whitespaces)
+        return (flags, stripped)
+    }
+
+    // charactersIgnoringModifiers is mangled by ⌥ (e.g. ⌥V → √), so use the layout-independent key name where possible.
+    static func keyName(_ event: NSEvent) -> String {
+        let special: [Int: String] = [kVK_Space: "Space", kVK_Return: "Return", kVK_ANSI_KeypadEnter: "Return", kVK_Tab: "Tab", kVK_Delete: "Delete",
+                                      kVK_LeftArrow: "←", kVK_RightArrow: "→", kVK_UpArrow: "↑", kVK_DownArrow: "↓",
+                                      kVK_F1: "F1", kVK_F2: "F2", kVK_F3: "F3", kVK_F4: "F4", kVK_F5: "F5", kVK_F6: "F6",
+                                      kVK_F7: "F7", kVK_F8: "F8", kVK_F9: "F9", kVK_F10: "F10", kVK_F11: "F11", kVK_F12: "F12"]
+        if let name = special[Int(event.keyCode)] { return name }
+        let chars = event.characters(byApplyingModifiers: []) ?? event.charactersIgnoringModifiers ?? ""
+        return chars.isEmpty ? "Key \(event.keyCode)" : chars.uppercased()
     }
 }
 

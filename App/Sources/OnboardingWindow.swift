@@ -348,7 +348,8 @@ private struct SilkSweepReveal: ViewModifier {
 private enum OnboardingStep: Int, CaseIterable, Identifiable {
     case welcome = 0
     case permissions
-    case ready
+    case shortcuts
+    case ai
 
     var id: Int { rawValue }
 }
@@ -401,8 +402,10 @@ struct OnboardingView: View {
                         welcomeStep.transition(stepTransition)
                     case .permissions:
                         permissionsStep.transition(stepTransition)
-                    case .ready:
-                        readyStep.transition(stepTransition)
+                    case .shortcuts:
+                        shortcutsStep.transition(stepTransition)
+                    case .ai:
+                        aiStep.transition(stepTransition)
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -432,7 +435,7 @@ struct OnboardingView: View {
                 loginStatus = ToolService.launchAtLoginStatus
                 Task { await refreshPermissions() }
             }
-            if next == .ready {
+            if next == .ai {
                 loadModelDraft()
             }
         }
@@ -496,19 +499,20 @@ struct OnboardingView: View {
 
     private var welcomeStep: some View {
         VStack(spacing: 0) {
-            Spacer()
+            Spacer().frame(height: 52)
 
-            Image("AskyLogo")
+            Image(nsImage: NSApp.applicationIconImage)
                 .resizable()
+                .interpolation(.high)
                 .scaledToFit()
-                .frame(width: 72, height: 72)
-                .shadow(color: Color.black.opacity(scheme == .dark ? 0.30 : 0.06), radius: 16, y: 6)
+                .frame(width: 84, height: 84)
+                .shadow(color: Color.black.opacity(scheme == .dark ? 0.30 : 0.08), radius: 16, y: 6)
                 .scaleEffect(showLogo ? 1 : 0.88)
                 .opacity(showLogo ? 1 : 0)
                 .blur(radius: showLogo ? 0 : 8)
                 .accessibilityHidden(true)
 
-            Spacer().frame(height: 24)
+            Spacer().frame(height: 22)
 
             Text(NSLocalizedString("你好，欢迎使用 Asky", comment: ""))
                 .font(.system(size: 23, weight: .medium))
@@ -542,29 +546,23 @@ struct OnboardingView: View {
             .opacity(showActions ? 1 : 0)
             .offset(y: showActions ? 0 : 10)
 
-            Spacer().frame(height: 36)
+            Spacer().frame(height: 44)
         }
     }
 
     // MARK: - Step 2: Permissions
 
     private var permissionsStep: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            VStack(alignment: .leading, spacing: 10) {
-                Text(NSLocalizedString("开启常用权限", comment: ""))
-                    .font(.system(size: 19, weight: .medium))
-                    .foregroundStyle(OnboardingInk.primary(scheme))
-                Text(NSLocalizedString("按需开启，随时可在设置中调整", comment: ""))
-                    .font(.system(size: 13))
-                    .foregroundStyle(OnboardingInk.secondary(scheme))
-            }
-            .padding(.top, 10)
+        VStack(alignment: .leading, spacing: 20) {
+            Text(NSLocalizedString("开启常用权限", comment: ""))
+                .font(.system(size: 19, weight: .medium))
+                .foregroundStyle(OnboardingInk.primary(scheme))
+                .padding(.top, 14)
 
             OnboardingCleanCard {
                 VStack(spacing: 0) {
                     permissionRow(
-                        symbol: "accessibility",
-                        tint: ToolIconPalette.blue,
+                        iconAsset: "Onboarding-accessibility",
                         title: NSLocalizedString("辅助功能", comment: ""),
                         description: NSLocalizedString("自动粘贴与窗口切换", comment: "")
                     ) {
@@ -581,8 +579,7 @@ struct OnboardingView: View {
                     rowDivider
 
                     permissionRow(
-                        symbol: "bookmark",
-                        tint: ToolIconPalette.orange,
+                        iconAsset: "Onboarding-bookmarks",
                         title: NSLocalizedString("Chrome 书签", comment: ""),
                         description: NSLocalizedString("快速搜索本地书签", comment: "")
                     ) {
@@ -605,8 +602,7 @@ struct OnboardingView: View {
                     rowDivider
 
                     permissionRow(
-                        symbol: "power",
-                        tint: ToolIconPalette.teal,
+                        iconAsset: "Onboarding-launch",
                         title: NSLocalizedString("登录时启动", comment: ""),
                         description: NSLocalizedString("开机自动在菜单栏就绪", comment: "")
                     ) {
@@ -628,22 +624,17 @@ struct OnboardingView: View {
     }
 
     private func permissionRow<Trailing: View>(
-        symbol: String,
-        tint: Color,
+        iconAsset: String,
         title: String,
         description: String,
         @ViewBuilder trailing: () -> Trailing
     ) -> some View {
         HStack(spacing: 14) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .fill(tint.opacity(scheme == .dark ? 0.18 : 0.10))
-                Image(systemName: symbol)
-                    .font(.system(size: 14.5, weight: .medium))
-                    .foregroundStyle(tint)
-            }
-            .frame(width: 32, height: 32)
-            .accessibilityHidden(true)
+            Image(iconAsset)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 32, height: 32)
+                .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
@@ -670,43 +661,35 @@ struct OnboardingView: View {
         .foregroundStyle(OnboardingInk.positive(scheme))
     }
 
-    // MARK: - Step 3: Shortcuts & Optional AI
+    // MARK: - Step 3: Shortcuts
 
-    private var readyStep: some View {
-        ScrollView(.vertical, showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 20) {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(NSLocalizedString("随时呼出 Asky", comment: ""))
-                        .font(.system(size: 19, weight: .medium))
-                        .foregroundStyle(OnboardingInk.primary(scheme))
-                    Text(NSLocalizedString("随时按快捷键呼出", comment: ""))
-                        .font(.system(size: 13))
-                        .foregroundStyle(OnboardingInk.secondary(scheme))
+    private var shortcutsStep: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text(NSLocalizedString("设置快捷键", comment: ""))
+                .font(.system(size: 19, weight: .medium))
+                .foregroundStyle(OnboardingInk.primary(scheme))
+                .padding(.top, 14)
+
+            OnboardingCleanCard {
+                VStack(spacing: 0) {
+                    shortcutRow(title: NSLocalizedString("唤起启动器", comment: ""),
+                                label: app.preferences.hotKeyLabel,
+                                status: app.hotKeyStatus,
+                                apply: setLauncherHotKey)
+                    rowDivider
+                    shortcutRow(title: NSLocalizedString("打开剪贴板历史", comment: ""),
+                                label: app.preferences.clipboardHotKeyLabel,
+                                status: app.clipboardHotKeyStatus,
+                                apply: setClipboardHotKey)
+                    rowDivider
+                    shortcutRow(title: NSLocalizedString("打开 AI 对话", comment: ""),
+                                label: app.preferences.agentHotKeyLabel,
+                                status: app.agentHotKeyStatus,
+                                apply: setAgentHotKey)
                 }
-                .padding(.top, 10)
-
-                OnboardingCleanCard {
-                    VStack(spacing: 0) {
-                        shortcutRow(title: NSLocalizedString("唤起启动器", comment: ""),
-                                    label: app.preferences.hotKeyLabel,
-                                    status: app.hotKeyStatus,
-                                    apply: setLauncherHotKey)
-                        rowDivider
-                        shortcutRow(title: NSLocalizedString("打开剪贴板历史", comment: ""),
-                                    label: app.preferences.clipboardHotKeyLabel,
-                                    status: app.clipboardHotKeyStatus,
-                                    apply: setClipboardHotKey)
-                        rowDivider
-                        shortcutRow(title: NSLocalizedString("打开 AI 对话", comment: ""),
-                                    label: app.preferences.agentHotKeyLabel,
-                                    status: app.agentHotKeyStatus,
-                                    apply: setAgentHotKey)
-                    }
-                }
-
-                aiOptionalCard
             }
-            .padding(.bottom, 8)
+
+            Spacer(minLength: 0)
         }
     }
 
@@ -719,7 +702,7 @@ struct OnboardingView: View {
                     .foregroundStyle(OnboardingInk.primary(scheme))
                 Spacer(minLength: 12)
                 HotKeyRecorder(label: label, allowsPlainKey: false, apply: apply)
-                    .frame(width: 140, height: 28)
+                    .frame(width: 172, height: 32)
             }
             if !status.isEmpty, status != NSLocalizedString("已注册", comment: "") {
                 Text(status)
@@ -728,46 +711,48 @@ struct OnboardingView: View {
             }
         }
         .padding(.horizontal, 18)
-        .padding(.vertical, 11)
+        .padding(.vertical, 12)
     }
 
-    private var aiOptionalCard: some View {
-        OnboardingCleanCard {
-            VStack(alignment: .leading, spacing: 0) {
-                HStack(spacing: 12) {
-                    LauncherFunctionIcon(kind: .ai)
-                        .frame(width: 28, height: 28)
-                        .accessibilityHidden(true)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(NSLocalizedString("AI 助手", comment: ""))
-                            .font(.system(size: 13.5, weight: .medium))
-                            .foregroundStyle(OnboardingInk.primary(scheme))
-                        if app.isModelConfigured && !showAIForm, let cfg = app.modelConfiguration {
+    // MARK: - Step 4: Optional AI Setup
+
+    private var aiStep: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text(NSLocalizedString("配置 AI 助手", comment: ""))
+                .font(.system(size: 19, weight: .medium))
+                .foregroundStyle(OnboardingInk.primary(scheme))
+                .padding(.top, 14)
+
+            if app.isModelConfigured && !showAIForm, let cfg = app.modelConfiguration {
+                OnboardingCleanCard {
+                    HStack(spacing: 14) {
+                        LauncherFunctionIcon(kind: .ai)
+                            .frame(width: 32, height: 32)
+                            .accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(NSLocalizedString("AI 模型已就绪", comment: ""))
+                                .font(.system(size: 13.5, weight: .medium))
+                                .foregroundStyle(OnboardingInk.primary(scheme))
                             Text(cfg.modelName)
                                 .font(.system(size: 12, design: .monospaced))
                                 .foregroundStyle(OnboardingInk.positive(scheme))
-                        } else {
-                            Text(NSLocalizedString("不配置模型也能畅用搜索、剪贴板与预览", comment: ""))
-                                .font(.system(size: 12))
-                                .foregroundStyle(OnboardingInk.secondary(scheme))
-                                .lineLimit(1)
                         }
+                        Spacer(minLength: 12)
+                        Button(NSLocalizedString("修改配置", comment: "")) {
+                            loadModelDraft()
+                            showAIForm = true
+                        }
+                        .buttonStyle(OnboardingInlinePillButtonStyle())
                     }
-                    Spacer(minLength: 8)
-                    Button(NSLocalizedString(showAIForm ? "收起" : (app.isModelConfigured ? "修改配置" : "现在配置"), comment: "")) {
-                        let toggle = { showAIForm.toggle() }
-                        if reduceMotion { toggle() } else { withAnimation(.spring(response: 0.4, dampingFraction: 0.92), toggle) }
-                    }
-                    .buttonStyle(OnboardingInlinePillButtonStyle())
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 16)
                 }
-                .padding(.horizontal, 18)
-                .padding(.vertical, 14)
-
-                if showAIForm {
-                    rowDivider
-                    VStack(spacing: 10) {
+            } else {
+                OnboardingCleanCard {
+                    VStack(spacing: 0) {
                         HStack {
                             Text(NSLocalizedString("供应商", comment: ""))
+                                .foregroundStyle(OnboardingInk.primary(scheme))
                             Spacer()
                             SettingsChoice(selection: Binding(get: { draft.provider }, set: { value in
                                 draft.select(value)
@@ -778,19 +763,38 @@ struct OnboardingView: View {
                                 ("custom", NSLocalizedString("完全自定义（OpenAI 兼容）", comment: ""))
                             ])
                         }
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 11)
+                        rowDivider
+
                         if let preset = ModelProviderPreset.find(draft.provider) {
                             HStack {
                                 Text(NSLocalizedString("模型", comment: ""))
+                                    .foregroundStyle(OnboardingInk.primary(scheme))
                                 Spacer()
                                 SettingsChoice(selection: $draft.model, options: preset.models.map { ($0, $0) })
                             }
+                            .padding(.horizontal, 18)
+                            .padding(.vertical, 11)
+                            rowDivider
                         } else {
                             SettingsTextField(NSLocalizedString("API 地址", comment: ""), text: $draft.baseURL,
                                               prompt: Text("https://api.example.com/v1"))
+                                .padding(.horizontal, 18)
+                                .padding(.vertical, 10)
+                            rowDivider
                             SettingsTextField(NSLocalizedString("模型名", comment: ""), text: $draft.model)
+                                .padding(.horizontal, 18)
+                                .padding(.vertical, 10)
+                            rowDivider
                         }
+
                         SettingsSecureField(NSLocalizedString("API Key", comment: ""), text: $apiKey,
                                             prompt: Text(NSLocalizedString(canReuseKey ? "已保存，留空不变" : "输入 API Key", comment: "")))
+                            .padding(.horizontal, 18)
+                            .padding(.vertical, 10)
+                        rowDivider
+
                         HStack {
                             if let preset = ModelProviderPreset.find(draft.provider) {
                                 Button {
@@ -806,6 +810,13 @@ struct OnboardingView: View {
                                 .buttonStyle(.plain)
                             }
                             Spacer()
+                            if showAIForm && app.isModelConfigured {
+                                Button(NSLocalizedString("取消", comment: "")) {
+                                    showAIForm = false
+                                    modelMessage = nil
+                                }
+                                .buttonStyle(OnboardingInlinePillButtonStyle())
+                            }
                             SettingsButton(NSLocalizedString("保存并检查", comment: ""),
                                            isLoading: savingModel || checkingModel,
                                            isComplete: modelSaved,
@@ -814,22 +825,24 @@ struct OnboardingView: View {
                             }
                             .disabled(savingModel || checkingModel || modelSaved)
                         }
-                        if let modelMessage {
-                            Text(modelMessage)
-                                .font(.system(size: 12))
-                                .foregroundStyle(ThemeColor.kTextNegative)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 11)
                     }
-                    .padding(18)
                     .disabled(savingModel || checkingModel)
-                    .transition(.opacity)
+                }
+
+                if let modelMessage {
+                    Text(modelMessage)
+                        .font(.system(size: 12))
+                        .foregroundStyle(ThemeColor.kTextNegative)
                 }
             }
+
+            Spacer(minLength: 0)
         }
     }
 
-    // MARK: - Footer (Steps 2 & 3)
+    // MARK: - Footer (Steps 2–4)
 
     private var footerBar: some View {
         ZStack {
@@ -860,17 +873,19 @@ struct OnboardingView: View {
 
                 Spacer()
 
-                if step == .permissions {
-                    Button(NSLocalizedString("继续", comment: "")) {
-                        navigate(to: .ready)
-                    }
-                    .buttonStyle(OnboardingPillButtonStyle(prominent: true, minWidth: 104, height: 38))
-                } else {
+                if step == .ai {
                     Button(NSLocalizedString("开始使用", comment: "")) {
                         app.preferences.hasCompletedOnboarding = true
                         onFinish()
                     }
                     .buttonStyle(OnboardingPillButtonStyle(prominent: true, minWidth: 112, height: 38))
+                } else {
+                    Button(NSLocalizedString("继续", comment: "")) {
+                        if let next = OnboardingStep(rawValue: step.rawValue + 1) {
+                            navigate(to: next)
+                        }
+                    }
+                    .buttonStyle(OnboardingPillButtonStyle(prominent: true, minWidth: 104, height: 38))
                 }
             }
         }

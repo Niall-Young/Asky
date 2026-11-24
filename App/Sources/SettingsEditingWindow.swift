@@ -10,11 +10,15 @@ final class SettingsEditingWindow: NSWindow {
             dialog.moveFocus(backwards: event.modifierFlags.contains(.shift))
             return
         }
-        if event.type == .leftMouseDown,
-           let editor = firstResponder as? NSTextView {
-            let input: NSView? = editor.isFieldEditor ? editor.delegate as? NSView : editor
-            if let input,
-               !input.bounds.contains(input.convert(event.locationInWindow, from: nil)) {
+        if event.type == .leftMouseDown {
+            if let editor = firstResponder as? NSTextView {
+                let input: NSView? = editor.isFieldEditor ? editor.delegate as? NSView : editor
+                if let input,
+                   !input.bounds.contains(input.convert(event.locationInWindow, from: nil)) {
+                    makeFirstResponder(nil)
+                }
+            } else if let recorder = firstResponder as? HotKeyRecorderField,
+                      !recorder.bounds.contains(recorder.convert(event.locationInWindow, from: nil)) {
                 makeFirstResponder(nil)
             }
         }
