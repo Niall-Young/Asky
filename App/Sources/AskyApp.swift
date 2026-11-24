@@ -365,13 +365,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem = item
     }
 
-    /// Rebuilt on every open so check marks always mirror the current settings.
+    /// Rebuilt on every open so check marks and shortcuts always mirror the current settings.
     func menuNeedsUpdate(_ menu: NSMenu) {
         guard menu === statusItem?.menu else { return }
         menu.removeAllItems()
-        add(menu, "打开启动器", #selector(openLauncher))
-        add(menu, "剪贴板历史", #selector(openClipboard))
-        add(menu, "AI 对话", #selector(openAgent))
+        add(menu, "打开启动器", #selector(openLauncher), shortcut: model.preferences.launcherHotKey)
+        add(menu, "剪贴板历史", #selector(openClipboard), shortcut: model.preferences.clipboardHotKey)
+        add(menu, "AI 对话", #selector(openAgent), shortcut: model.preferences.agentHotKey)
         menu.addItem(.separator())
         add(menu, "记录剪贴板历史", #selector(toggleClipboardRecording), on: model.settings.clipboardEnabled)
         add(menu, "允许 AI 搜索公开网页", #selector(toggleWebSearch), on: model.settings.webSearchEnabled != false)
@@ -403,12 +403,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @discardableResult
-    private func add(_ menu: NSMenu, _ title: String, _ action: Selector, key: String = "", on: Bool? = nil) -> NSMenuItem {
+    private func add(_ menu: NSMenu, _ title: String, _ action: Selector, key: String = "",
+                     modifiers: NSEvent.ModifierFlags? = nil, on: Bool? = nil) -> NSMenuItem {
         let item = menu.addItem(withTitle: NSLocalizedString(title, comment: ""), action: action, keyEquivalent: key)
+        if let modifiers { item.keyEquivalentModifierMask = modifiers }
         item.target = self
         if let on { item.state = on ? .on : .off }
         hideAutomaticImage(item)
         return item
+    }
+
+    @discardableResult
+    private func add(_ menu: NSMenu, _ title: String, _ action: Selector, shortcut: LauncherActionShortcut) -> NSMenuItem {
+        let key = shortcut.menuKeyEquivalent
+        return add(menu, title, action, key: key, modifiers: key.isEmpty ? [] : shortcut.modifierFlags)
     }
 
     private func submenu(_ menu: NSMenu, _ title: String) -> NSMenu {

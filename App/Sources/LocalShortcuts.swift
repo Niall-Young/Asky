@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 import SwiftUI
 
 /// Stored by stable action ID; missing IDs retain their defaults on older installations.
@@ -144,9 +145,9 @@ extension SettingsPreferences {
 extension LauncherActionShortcut {
     func hasSameKeys(as other: Self) -> Bool { code == other.code && modifiers == other.modifiers }
 
-    var eventModifiers: EventModifiers {
-        var flags: EventModifiers = []
-        for (carbon, flag) in [(256, EventModifiers.command), (512, .shift), (2048, .option), (4096, .control)] {
+    var eventModifiers: SwiftUI.EventModifiers {
+        var flags: SwiftUI.EventModifiers = []
+        for (carbon, flag) in [(256, SwiftUI.EventModifiers.command), (512, .shift), (2048, .option), (4096, .control)] {
             if modifiers & UInt32(carbon) != 0 { flags.insert(flag) }
         }
         return flags
@@ -161,5 +162,39 @@ extension LauncherActionShortcut {
             return KeyEquivalent(Character(scalar))
         }
         return KeyEquivalent(label.last.map { Character(String($0).lowercased()) } ?? " ")
+    }
+
+    var menuKeyEquivalent: String {
+        let special: [UInt32: String] = [
+            UInt32(kVK_Return): "\r",
+            UInt32(kVK_ANSI_KeypadEnter): "\r",
+            UInt32(kVK_Tab): "\t",
+            UInt32(kVK_Space): " ",
+            UInt32(kVK_Delete): "\u{08}",
+            UInt32(kVK_ForwardDelete): String(UnicodeScalar(NSDeleteFunctionKey)!),
+            UInt32(kVK_Escape): "\u{1b}",
+            UInt32(kVK_LeftArrow): String(UnicodeScalar(NSLeftArrowFunctionKey)!),
+            UInt32(kVK_RightArrow): String(UnicodeScalar(NSRightArrowFunctionKey)!),
+            UInt32(kVK_DownArrow): String(UnicodeScalar(NSDownArrowFunctionKey)!),
+            UInt32(kVK_UpArrow): String(UnicodeScalar(NSUpArrowFunctionKey)!),
+        ]
+        if let value = special[code] { return value }
+        let functionCodes: [UInt32] = [
+            UInt32(kVK_F1), UInt32(kVK_F2), UInt32(kVK_F3), UInt32(kVK_F4),
+            UInt32(kVK_F5), UInt32(kVK_F6), UInt32(kVK_F7), UInt32(kVK_F8),
+            UInt32(kVK_F9), UInt32(kVK_F10), UInt32(kVK_F11), UInt32(kVK_F12),
+        ]
+        if let index = functionCodes.firstIndex(of: code),
+           let scalar = UnicodeScalar(NSF1FunctionKey + index) {
+            return String(scalar)
+        }
+        let stripped = label
+            .replacingOccurrences(of: "⌃", with: "")
+            .replacingOccurrences(of: "⌥", with: "")
+            .replacingOccurrences(of: "⇧", with: "")
+            .replacingOccurrences(of: "⌘", with: "")
+            .trimmingCharacters(in: .whitespaces)
+        guard stripped.count == 1 else { return "" }
+        return stripped.lowercased()
     }
 }

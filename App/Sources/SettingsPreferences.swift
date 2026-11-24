@@ -42,6 +42,18 @@ struct SettingsPreferences: Codable, Equatable, Sendable {
 
     static let defaultAgentHotKey = (code: UInt32(kVK_ANSI_Slash), modifiers: UInt32(controlKey | shiftKey), label: "⌃⇧ /")
 
+    var launcherHotKey: LauncherActionShortcut {
+        .init(code: hotKeyCode, modifiers: hotKeyModifiers, label: hotKeyLabel)
+    }
+
+    var clipboardHotKey: LauncherActionShortcut {
+        .init(code: clipboardHotKeyCode, modifiers: clipboardHotKeyModifiers, label: clipboardHotKeyLabel)
+    }
+
+    var agentHotKey: LauncherActionShortcut {
+        .init(code: agentHotKeyCode, modifiers: agentHotKeyModifiers, label: agentHotKeyLabel)
+    }
+
     init() {}
 
     // Saved preferences from older builds lack newer fields; fill defaults instead of discarding everything.
@@ -99,13 +111,17 @@ struct LauncherActionShortcut: Codable, Equatable, Sendable {
     static let revealInFinder = Self(code: UInt32(kVK_Return), modifiers: UInt32(cmdKey), label: "⌘ ↵")
     static let copyPath = Self(code: UInt32(kVK_ANSI_C), modifiers: UInt32(optionKey | cmdKey), label: "⌥⌘ C")
 
-    func matches(_ event: NSEvent) -> Bool {
+    var modifierFlags: NSEvent.ModifierFlags {
         var flags: NSEvent.ModifierFlags = []
         for (carbon, flag) in [(cmdKey, NSEvent.ModifierFlags.command), (optionKey, .option), (controlKey, .control), (shiftKey, .shift)] {
             if modifiers & UInt32(carbon) != 0 { flags.insert(flag) }
         }
-        return event.type == .keyDown && (UInt32(event.keyCode) == code || (code == 36 && event.keyCode == 76))
-            && event.modifierFlags.intersection([.command, .option, .control, .shift]) == flags
+        return flags
+    }
+
+    func matches(_ event: NSEvent) -> Bool {
+        event.type == .keyDown && (UInt32(event.keyCode) == code || (code == 36 && event.keyCode == 76))
+            && event.modifierFlags.intersection([.command, .option, .control, .shift]) == modifierFlags
     }
 }
 

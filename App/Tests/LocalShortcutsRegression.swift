@@ -22,6 +22,18 @@ enum LocalShortcutsRegression {
                 for action in LocalShortcutAction.allCases {
                     precondition(legacy.shortcut(action) == action.defaultShortcut)
                 }
+                // Status bar menu items derive native NSMenuItem key equivalents from global shortcuts.
+                precondition(legacy.launcherHotKey.menuKeyEquivalent == " ")
+                precondition(legacy.launcherHotKey.modifierFlags == [.option])
+                precondition(legacy.clipboardHotKey.menuKeyEquivalent == "c")
+                precondition(legacy.clipboardHotKey.modifierFlags == [.control, .shift])
+                precondition(legacy.agentHotKey.menuKeyEquivalent == "/")
+                precondition(legacy.agentHotKey.modifierFlags == [.control, .shift])
+                let f5Shortcut = LauncherActionShortcut(code: 96, modifiers: 256, label: "⌘ F5")
+                precondition(f5Shortcut.menuKeyEquivalent == String(UnicodeScalar(NSF5FunctionKey)!))
+                precondition(f5Shortcut.modifierFlags == [.command])
+                let unmappedShortcut = LauncherActionShortcut(code: 999, modifiers: 2048, label: "⌥ Key 999")
+                precondition(unmappedShortcut.menuKeyEquivalent.isEmpty)
                 let oldDefaults = Data(#"{"revealInFinderHotKey":{"code":3,"modifiers":256,"label":"⌘ F"},"localShortcuts":{"askAI":{"code":36,"modifiers":256,"label":"⌘ ↵"}}}"#.utf8)
                 let migrated = try JSONDecoder().decode(SettingsPreferences.self, from: oldDefaults)
                 precondition(migrated.shortcut(.reveal) == .revealInFinder)
