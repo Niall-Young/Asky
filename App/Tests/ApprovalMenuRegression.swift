@@ -19,14 +19,17 @@ extension AgentReplyRegression {
                 mouseButton: .left)?.post(tap: .cghidEventTap)
         }
         func moveInWindow(_ point: NSPoint) { move(window.convertPoint(toScreen: point)) }
-        func click(_ point: NSPoint) async throws {
+        func postMouse(_ type: CGEventType, at point: NSPoint) {
             let screen = window.convertPoint(toScreen: point)
-            move(screen)
-            try await Task.sleep(for: .milliseconds(100))
             let quartz = CGPoint(x: screen.x, y: NSScreen.screens[0].frame.maxY - screen.y)
+            CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: quartz,
+                    mouseButton: .left)?.post(tap: .cghidEventTap)
+        }
+        func click(_ point: NSPoint) async throws {
+            moveInWindow(point)
+            try await Task.sleep(for: .milliseconds(100))
             for type in [CGEventType.leftMouseDown, .leftMouseUp] {
-                CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: quartz,
-                        mouseButton: .left)?.post(tap: .cghidEventTap)
+                postMouse(type, at: point)
                 try await Task.sleep(for: .milliseconds(80))
             }
             try await Task.sleep(for: .milliseconds(300))
@@ -62,21 +65,52 @@ extension AgentReplyRegression {
             } }
             return total / 81
         }
+        func meanDiff(_ a: NSBitmapImageRep, _ b: NSBitmapImageRep, rect: NSRect) -> Double {
+            let scale = CGFloat(a.pixelsWide) / surface.bounds.width
+            let x0 = Int(rect.minX * scale), x1 = Int(rect.maxX * scale)
+            let y0 = Int((surface.bounds.height - rect.maxY) * scale)
+            let y1 = Int((surface.bounds.height - rect.minY) * scale)
+            var total = 0.0
+            var count = 0
+            for x in x0..<x1 {
+                for y in y0..<y1 {
+                    let ca = a.colorAt(x: x, y: y)!.usingColorSpace(.deviceRGB)!
+                    let cb = b.colorAt(x: x, y: y)!.usingColorSpace(.deviceRGB)!
+                    total += abs(ca.redComponent - cb.redComponent)
+                        + abs(ca.greenComponent - cb.greenComponent)
+                        + abs(ca.blueComponent - cb.blueComponent)
+                    count += 3
+                }
+            }
+            return total / Double(max(count, 1))
+        }
         for (name, appearance) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
             window.appearance = NSAppearance(named: appearance)
             try await Task.sleep(for: .milliseconds(600))
             let trigger = NSPoint(x: 460, y: 34)
-            try await click(trigger)
+            moveInWindow(trigger)
+            try await Task.sleep(for: .milliseconds(150))
+            let triggerIdle = try snapshot("\(name)-trigger-idle")
+            postMouse(.leftMouseDown, at: trigger)
+            try await Task.sleep(for: .milliseconds(180))
+            let triggerPressed = try snapshot("\(name)-trigger-pressed")
+            let triggerDiff = meanDiff(triggerIdle, triggerPressed, rect: NSRect(x: 410, y: 18, width: 100, height: 32))
+            FileHandle.standardError.write(Data("trigger press diff \(name)=\(triggerDiff)\n".utf8))
+            precondition(triggerDiff < 0.008, "Approval trigger must not scale or shift on press")
+            postMouse(.leftMouseUp, at: trigger)
+            try await Task.sleep(for: .milliseconds(300))
             moveInWindow(NSPoint(x: 20, y: 200))
             try await Task.sleep(for: .milliseconds(300))
             let idle = try snapshot("\(name)-idle")
             let rows = [NSPoint(x: 490, y: 118), NSPoint(x: 490, y: 80)]
+            var hoverDeltas: [Double] = []
             for (index, row) in rows.enumerated() {
                 moveInWindow(row)
                 try await Task.sleep(for: .milliseconds(300))
                 FileHandle.standardError.write(Data("hover \(name) \(index) target=\(row) actual=\(window.mouseLocationOutsideOfEventStream) key=\(window.isKeyWindow) permission=\(CGPreflightPostEventAccess())\n".utf8))
                 let hovered = try snapshot("\(name)-row-\(index)")
                 let delta = light(hovered, point: row) - light(idle, point: row)
+                hoverDeltas.append(delta)
                 FileHandle.standardError.write(Data("illumination delta=\(delta)\n".utf8))
                 precondition(delta > 0.005, "Both menu rows must visibly brighten on hover, including above the composer")
                 moveInWindow(NSPoint(x: 20, y: 200))
@@ -84,13 +118,23 @@ extension AgentReplyRegression {
                 let exited = try snapshot("\(name)-exit-\(index)")
                 precondition(abs(light(idle, point: row) - light(exited, point: row)) < 0.006, "Hover must clear after leaving each row")
             }
-            // Isolated temporary settings allow checking both choices without changing the user's mode.
-            try await click(rows[1])
+            // Capture pressed state on the lower row before releasing to confirm light press highlight.
+            moveInWindow(rows[1])
+            try await Task.sleep(for: .milliseconds(150))
+            postMouse(.leftMouseDown, at: rows[1])
+            try await Task.sleep(for: .milliseconds(180))
+            let pressed = try snapshot("\(name)-press-1")
+            let pressDelta = light(pressed, point: rows[1]) - light(idle, point: rows[1])
+            FileHandle.standardError.write(Data("press delta \(name)=\(pressDelta) (hover=\(hoverDeltas[1]))\n".utf8))
+            precondition(pressDelta > hoverDeltas[1] + 0.01 && pressDelta < 0.115,
+                         "Pressed row highlight should stay gently brighter than hover without becoming heavy")
+            postMouse(.leftMouseUp, at: rows[1])
+            try await Task.sleep(for: .milliseconds(300))
             precondition(model.approvalMode == .fullAccess)
             try await click(trigger)
             try await click(rows[0])
             precondition(model.approvalMode == .autoReview, "The upper row must receive clicks above the composer's bounds")
         }
-        print("Approval menu passed: both rows hover/exit in light and dark, both choices clickable, isolated settings")
+        print("Approval menu passed: trigger does not scale, both rows hover/exit and gently brighten on press in light and dark, isolated settings")
     }
 }

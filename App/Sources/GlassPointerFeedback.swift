@@ -8,6 +8,7 @@ private struct GlassPointerFeedback<S: Shape>: ViewModifier {
     let shape: S
     var illumination: Bool
     var scales: Bool = true
+    var pressedOpacity: Double = 0.16
     @State private var hovered = false
     @State private var size = CGSize.zero
     @Environment(\.isEnabled) private var enabled
@@ -19,7 +20,7 @@ private struct GlassPointerFeedback<S: Shape>: ViewModifier {
         content
             .overlay {
                 if illumination {
-                    shape.fill(.white.opacity(enabled ? (active ? 0.16 : hovered ? 0.055 : 0) : 0))
+                    shape.fill(.white.opacity(enabled ? (active ? pressedOpacity : hovered ? 0.055 : 0) : 0))
                         .blendMode(.plusLighter)
                         .allowsHitTesting(false)
                         .accessibilityHidden(true)
@@ -47,8 +48,8 @@ extension View {
         }
     }
 
-    func glassPointerFeedback<S: Shape>(pressed: Bool, in shape: S, illumination: Bool = true, scales: Bool = true) -> some View {
-        modifier(GlassPointerFeedback(pressed: pressed, shape: shape, illumination: illumination, scales: scales))
+    func glassPointerFeedback<S: Shape>(pressed: Bool, in shape: S, illumination: Bool = true, scales: Bool = true, pressedOpacity: Double = 0.16) -> some View {
+        modifier(GlassPointerFeedback(pressed: pressed, shape: shape, illumination: illumination, scales: scales, pressedOpacity: pressedOpacity))
     }
 }
 
@@ -56,12 +57,13 @@ extension View {
 /// selection actions: hover and press only brighten the row; it never grows.
 struct GlassRowButtonStyle: ButtonStyle {
     var cornerRadius: CGFloat = 8
+    var pressedOpacity: Double = 0.085
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .frame(maxWidth: .infinity)
             .contentShape(.rect(cornerRadius: cornerRadius))
-            .glassPointerFeedback(pressed: configuration.isPressed, in: RoundedRectangle(cornerRadius: cornerRadius), scales: false)
+            .glassPointerFeedback(pressed: configuration.isPressed, in: RoundedRectangle(cornerRadius: cornerRadius), scales: false, pressedOpacity: pressedOpacity)
     }
 }
 

@@ -2006,7 +2006,6 @@ private struct Composer: View {
 private struct ApprovalModePicker: View {
     @Bindable var model: AgentModel
     @Binding var showing: Bool
-    @State private var pressed = false
 
     static let iconSize: CGFloat = 16
 
@@ -2022,10 +2021,10 @@ private struct ApprovalModePicker: View {
             .padding(.horizontal, 10).frame(height: 28)
             .contentShape(.rect(cornerRadius: 14))
         }
-        .buttonStyle(GlassPressObserverStyle(pressed: $pressed))
+        .buttonStyle(.plain)
+        .actionArrowCursor()
         .accessibilityLabel(NSLocalizedString("审批模式", comment: ""))
         .accessibilityValue(Self.title(mode))
-        .glassPointerFeedback(pressed: pressed, in: RoundedRectangle(cornerRadius: 14), illumination: false)
         .anchorPreference(key: ApprovalMenuAnchorKey.self, value: .bounds) { $0 }
         .accessibilityIdentifier("approval-mode-trigger")
     }
