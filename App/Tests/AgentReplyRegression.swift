@@ -3224,6 +3224,10 @@ enum AgentReplyRegression {
             try await bubbleWidthPreview(app: app)
             return
         }
+        if CommandLine.arguments.contains("--bubble-chain") {
+            try await bubbleChainRegression(app: app)
+            return
+        }
         if CommandLine.arguments.contains("--table-fade-preview") {
             try await tableFadePreview(app: app)
             return
@@ -3669,6 +3673,124 @@ enum AgentReplyRegression {
             }
         }
         print("Share card and user reply regression passed")
+    }
+
+    static func bubbleChainRegression(app: AppModel) async throws {
+        // 1. Unit-verify corner radii and spacing rules across solo, 2-bubble, 3-bubble, typing, reaction, and card cases.
+        let soloLeading = ChatBubbleGrouping.solo.cornerRadii(for: .leading)
+        precondition(soloLeading == RectangleCornerRadii(topLeading: 16, bottomLeading: 16, bottomTrailing: 16, topTrailing: 16),
+                     "Solo leading bubble must use full 16pt corners")
+        let soloTrailing = ChatBubbleGrouping.solo.cornerRadii(for: .trailing)
+        precondition(soloTrailing == RectangleCornerRadii(topLeading: 16, bottomLeading: 16, bottomTrailing: 16, topTrailing: 16),
+                     "Solo trailing bubble must use full 16pt corners")
+
+        let leadingTop = ChatBubbleGrouping(connectsAbove: false, connectsBelow: true).cornerRadii(for: .leading)
+        precondition(leadingTop == RectangleCornerRadii(topLeading: 16, bottomLeading: 4, bottomTrailing: 16, topTrailing: 16))
+        let leadingMid = ChatBubbleGrouping(connectsAbove: true, connectsBelow: true).cornerRadii(for: .leading)
+        precondition(leadingMid == RectangleCornerRadii(topLeading: 4, bottomLeading: 4, bottomTrailing: 16, topTrailing: 16))
+        let leadingBot = ChatBubbleGrouping(connectsAbove: true, connectsBelow: false).cornerRadii(for: .leading)
+        precondition(leadingBot == RectangleCornerRadii(topLeading: 4, bottomLeading: 16, bottomTrailing: 16, topTrailing: 16))
+
+        let trailingTop = ChatBubbleGrouping(connectsAbove: false, connectsBelow: true).cornerRadii(for: .trailing)
+        precondition(trailingTop == RectangleCornerRadii(topLeading: 16, bottomLeading: 16, bottomTrailing: 4, topTrailing: 16))
+        let trailingMid = ChatBubbleGrouping(connectsAbove: true, connectsBelow: true).cornerRadii(for: .trailing)
+        precondition(trailingMid == RectangleCornerRadii(topLeading: 16, bottomLeading: 16, bottomTrailing: 4, topTrailing: 4))
+        let trailingBot = ChatBubbleGrouping(connectsAbove: true, connectsBelow: false).cornerRadii(for: .trailing)
+        precondition(trailingBot == RectangleCornerRadii(topLeading: 16, bottomLeading: 16, bottomTrailing: 16, topTrailing: 4))
+
+        let groups: [ChatResponseGroup] = [
+            // Solo user
+            ChatResponseGroup(id: "u0", items: [ChatItem(id: "u0", kind: .user, text: "单条用户消息")]),
+            // 2-bubble assistant (toolNarration + assistant)
+            ChatResponseGroup(id: "r1", items: [
+                ChatItem(id: "n1", kind: .toolNarration, text: "我先查一下这条说法。", responseID: "r1"),
+                ChatItem(id: "a1", kind: .assistant, text: "第二条回复", responseID: "r1")
+            ]),
+            // 3 consecutive user bubbles
+            ChatResponseGroup(id: "u1", items: [ChatItem(id: "u1", kind: .user, text: "用户 1")]),
+            ChatResponseGroup(id: "u2", items: [ChatItem(id: "u2", kind: .user, text: "用户 2")]),
+            ChatResponseGroup(id: "u3", items: [ChatItem(id: "u3", kind: .user, text: "用户 3", agentReaction: "👍")]),
+            // User after reaction must NOT link with u3
+            ChatResponseGroup(id: "u4", items: [ChatItem(id: "u4", kind: .user, text: "表情回应后的新用户消息")]),
+            // Running group: toolNarration + typing indicator
+            ChatResponseGroup(id: "r2", items: [
+                ChatItem(id: "n2", kind: .toolNarration, text: "正在查询", responseID: "r2")
+            ], isRunning: true)
+        ]
+
+        let resolved = ChatTranscriptBubbleLayout.resolve(groups)
+        precondition(resolved[0].topSpacing == 0 && resolved[0].itemGroupings == [.solo])
+        precondition(resolved[1].topSpacing == 20)
+        precondition(resolved[1].itemGroupings == [
+            ChatBubbleGrouping(connectsAbove: false, connectsBelow: true),
+            ChatBubbleGrouping(connectsAbove: true, connectsBelow: false)
+        ])
+        precondition(resolved[1].itemTopSpacings == [0, 4])
+        precondition(resolved[2].topSpacing == 20 && resolved[2].itemGroupings == [ChatBubbleGrouping(connectsAbove: false, connectsBelow: true)])
+        precondition(resolved[3].topSpacing == 4 && resolved[3].itemGroupings == [ChatBubbleGrouping(connectsAbove: true, connectsBelow: true)])
+        precondition(resolved[4].topSpacing == 4 && resolved[4].itemGroupings == [ChatBubbleGrouping(connectsAbove: true, connectsBelow: false)])
+        precondition(resolved[5].topSpacing == 20 && resolved[5].itemGroupings == [.solo], "User bubble after reaction must start a fresh solo group")
+        precondition(resolved[6].topSpacing == 20)
+        precondition(resolved[6].itemGroupings == [ChatBubbleGrouping(connectsAbove: false, connectsBelow: true)])
+        precondition(resolved[6].typingGrouping == ChatBubbleGrouping(connectsAbove: true, connectsBelow: false))
+        precondition(resolved[6].typingTopSpacing == 4)
+
+        // 2. Render in the real AgentWindow in dark & light appearances to verify rendered geometry and visual appearance.
+        let store = ConversationStore(app.store)
+        let cid = try store.create(title: "Bubble chain preview")
+        try store.append(conversationID: cid, role: "user", text: "听说谷歌内部跑通了 RSI？")
+        try store.append(conversationID: cid, role: "tool_narration", text: "我先查一下这条说法。",
+            presentation: MessagePresentation(responseID: "chain-r1"))
+        try store.append(conversationID: cid, role: "assistant",
+            text: "你听到的那个说法是个被传变形的消息。原始信号是 9 月中旬一个 API 返回截图里出现了「RSI Model LiveRL LE」这种模型名，加上一位研究员发帖写了藏头字母 RSI。",
+            presentation: MessagePresentation(responseID: "chain-r1"))
+        try store.append(conversationID: cid, role: "user", text: "那这个模型名字是真的吗？")
+        try store.append(conversationID: cid, role: "user", text: "顺便帮我看一下它和 DeepMind 的关系")
+        try store.append(conversationID: cid, role: "user", text: "谢谢！")
+        try store.append(conversationID: cid, role: "assistant", text: "好的，这是一个单条全圆角回复。",
+            presentation: MessagePresentation(responseID: "chain-r2"))
+
+        let model = AgentModel(app: app)
+        model.open(cid)
+        let controller = AgentWindowController(model: model, presentation: WindowPresentation())
+        controller.show()
+        let window = NSApplication.shared.windows.last { $0.title == "Asky AI" && $0.isVisible }!
+        defer { window.orderOut(nil) }
+
+        func textViews(_ node: NSView) -> [NSTextView] {
+            (node as? NSTextView).map { [$0] } ?? node.subviews.flatMap(textViews)
+        }
+
+        for (name, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {
+            window.appearance = NSAppearance(named: appearance)
+            try await Task.sleep(for: .milliseconds(600))
+            window.contentView?.layoutSubtreeIfNeeded()
+            let surface = window.contentView!
+            if name == "dark" {
+                let views = textViews(surface)
+                let narration = views.first { $0.string.contains("我先查一下这条说法") }!
+                let reply = views.first { $0.string.contains("被传变形的消息") }!
+                let u1 = views.first { $0.string.contains("那这个模型名字是真的吗") }!
+                let u2 = views.first { $0.string.contains("顺便帮我看一下") }!
+                let nRect = narration.convert(narration.bounds, to: surface)
+                let rRect = reply.convert(reply.bounds, to: surface)
+                let u1Rect = u1.convert(u1.bounds, to: surface)
+                let u2Rect = u2.convert(u2.bounds, to: surface)
+                // In AppKit non-flipped surface coordinates, upper bubble has larger minY.
+                // Outer bubble gap = text vertical distance - 2 * verticalInset.
+                let assistantBubbleGap = (nRect.minY - rRect.maxY) - 28
+                let userBubbleGap = (u1Rect.minY - u2Rect.maxY) - 24
+                print(String(format: "Rendered linked gaps: assistant=%.1f pt, user=%.1f pt", assistantBubbleGap, userBubbleGap))
+                precondition(abs(assistantBubbleGap - 4) <= 2.5,
+                             "Linked assistant bubbles must sit ~4pt apart, got \(assistantBubbleGap)")
+                precondition(abs(userBubbleGap - 4) <= 2.5,
+                             "Linked user bubbles must sit ~4pt apart, got \(userBubbleGap)")
+            }
+            let bitmap = surface.bitmapImageRepForCachingDisplay(in: surface.bounds)!
+            surface.cacheDisplay(in: surface.bounds, to: bitmap)
+            try bitmap.representation(using: .png, properties: [:])!.write(to: URL(filePath: "build/bubble-chain-\(name).png"))
+        }
+        print("Bubble chain regression passed: unit corner/spacing matrix and real light/dark window geometry")
     }
 
     private static func runPreview(_ controller: AgentWindowController, application: NSApplication) {

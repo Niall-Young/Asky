@@ -96,6 +96,176 @@ private enum AgentLayout {
     static let messageHorizontalInset: CGFloat = 18
     static let messageVerticalInset: CGFloat = 14
     static let userMessageVerticalInset: CGFloat = 12
+    static let bubbleCornerRadius: CGFloat = 16
+    static let linkedBubbleCornerRadius: CGFloat = 4
+    static let linkedBubbleSpacing: CGFloat = 4
+    static let groupInternalSpacing: CGFloat = 12
+    static let turnSpacing: CGFloat = 20
+}
+
+enum ChatBubbleSide: Equatable {
+    case leading
+    case trailing
+}
+
+struct ChatBubbleGrouping: Equatable {
+    var connectsAbove = false
+    var connectsBelow = false
+
+    static let solo = ChatBubbleGrouping()
+
+    func cornerRadii(
+        for side: ChatBubbleSide,
+        outerRadius: CGFloat = AgentLayout.bubbleCornerRadius,
+        linkedRadius: CGFloat = AgentLayout.linkedBubbleCornerRadius
+    ) -> RectangleCornerRadii {
+        switch side {
+        case .leading:
+            RectangleCornerRadii(
+                topLeading: connectsAbove ? linkedRadius : outerRadius,
+                bottomLeading: connectsBelow ? linkedRadius : outerRadius,
+                bottomTrailing: outerRadius,
+                topTrailing: outerRadius
+            )
+        case .trailing:
+            RectangleCornerRadii(
+                topLeading: outerRadius,
+                bottomLeading: outerRadius,
+                bottomTrailing: connectsBelow ? linkedRadius : outerRadius,
+                topTrailing: connectsAbove ? linkedRadius : outerRadius
+            )
+        }
+    }
+
+    func shape(for side: ChatBubbleSide) -> UnevenRoundedRectangle {
+        UnevenRoundedRectangle(cornerRadii: cornerRadii(for: side), style: .circular)
+    }
+}
+
+struct ChatGroupBubbleLayout: Equatable {
+    var topSpacing: CGFloat
+    var itemGroupings: [ChatBubbleGrouping]
+    var itemTopSpacings: [CGFloat]
+    var typingGrouping: ChatBubbleGrouping
+    var typingTopSpacing: CGFloat
+}
+
+enum ChatTranscriptBubbleLayout {
+    private struct Entry {
+        let groupIndex: Int
+        let itemIndex: Int?
+        let side: ChatBubbleSide?
+        let canConnectAbove: Bool
+        let canConnectBelow: Bool
+        let isUser: Bool
+    }
+
+    static func resolve(_ groups: [ChatResponseGroup]) -> [ChatGroupBubbleLayout] {
+        var layouts = groups.map { group in
+            let count = group.content.count
+            return ChatGroupBubbleLayout(
+                topSpacing: 0,
+                itemGroupings: Array(repeating: .solo, count: count),
+                itemTopSpacings: Array(repeating: 0, count: count),
+                typingGrouping: .solo,
+                typingTopSpacing: 0
+            )
+        }
+
+        var entries: [Entry] = []
+        for (groupIndex, group) in groups.enumerated() {
+            for (itemIndex, item) in group.content.enumerated() {
+                let entry: Entry
+                switch item.kind {
+                case .user:
+                    let hasLegacyAboveCards = (item.segments ?? []).isEmpty
+                        && (!item.attachments.isEmpty || !item.quotes.isEmpty)
+                    entry = Entry(
+                        groupIndex: groupIndex,
+                        itemIndex: itemIndex,
+                        side: .trailing,
+                        canConnectAbove: !hasLegacyAboveCards,
+                        canConnectBelow: item.agentReaction == nil,
+                        isUser: true
+                    )
+                case .assistant, .toolNarration:
+                    entry = Entry(
+                        groupIndex: groupIndex,
+                        itemIndex: itemIndex,
+                        side: .leading,
+                        canConnectAbove: true,
+                        canConnectBelow: !item.needsPermissionSettings,
+                        isUser: false
+                    )
+                case .tool, .notice, .error:
+                    entry = Entry(
+                        groupIndex: groupIndex,
+                        itemIndex: itemIndex,
+                        side: nil,
+                        canConnectAbove: false,
+                        canConnectBelow: false,
+                        isUser: false
+                    )
+                }
+                entries.append(entry)
+            }
+            if group.showsThinkingIndicator {
+                entries.append(Entry(
+                    groupIndex: groupIndex,
+                    itemIndex: nil,
+                    side: .leading,
+                    canConnectAbove: true,
+                    canConnectBelow: true,
+                    isUser: false
+                ))
+            }
+        }
+
+        for index in 1..<entries.count {
+            let prev = entries[index - 1]
+            let curr = entries[index]
+            let linked = prev.side != nil
+                && prev.side == curr.side
+                && prev.canConnectBelow
+                && curr.canConnectAbove
+
+            if linked {
+                if let prevItem = prev.itemIndex {
+                    layouts[prev.groupIndex].itemGroupings[prevItem].connectsBelow = true
+                } else {
+                    layouts[prev.groupIndex].typingGrouping.connectsBelow = true
+                }
+                if let currItem = curr.itemIndex {
+                    layouts[curr.groupIndex].itemGroupings[currItem].connectsAbove = true
+                } else {
+                    layouts[curr.groupIndex].typingGrouping.connectsAbove = true
+                }
+            }
+
+            let spacing: CGFloat
+            if linked {
+                spacing = AgentLayout.linkedBubbleSpacing
+            } else if prev.groupIndex == curr.groupIndex {
+                spacing = AgentLayout.groupInternalSpacing
+            } else if prev.isUser || curr.isUser {
+                spacing = AgentLayout.turnSpacing
+            } else {
+                spacing = AgentLayout.groupInternalSpacing
+            }
+
+            if prev.groupIndex == curr.groupIndex {
+                if let currItem = curr.itemIndex {
+                    layouts[curr.groupIndex].itemTopSpacings[currItem] = spacing
+                } else {
+                    layouts[curr.groupIndex].typingTopSpacing = spacing
+                }
+            } else {
+                layouts[curr.groupIndex].topSpacing = spacing
+            }
+        }
+
+        return layouts
+    }
 }
 
 struct AgentView: View {
@@ -399,13 +569,15 @@ private struct Transcript: View {
                     }
                     let latestIndex = allGroups.count - 1
                     let navigationTarget = model.replyNavigation?.messageID
+                    let groupLayouts = ChatTranscriptBubbleLayout.resolve(allGroups)
                     ForEach(Array(allGroups.enumerated()), id: \.element.id) { index, group in
+                        let layout = groupLayouts[index]
                         TranscriptGroupWindow(pinned: index >= latestIndex - 1
                             || (navigationTarget != nil && group.items.contains { $0.id == navigationTarget })) {
-                            ResponseGroupView(group: group, model: model, isLatest: index == latestIndex)
+                            ResponseGroupView(group: group, layout: layout, model: model, isLatest: index == latestIndex)
                         }
                             .background { TranscriptGroupPosition(id: group.id) }
-                            .padding(.top, index == 0 ? 0 : (group.items.first?.kind == .user ? 20 : 12))
+                            .padding(.top, layout.topSpacing)
                     }
                     if model.hasNewer {
                         TranscriptPagingButton(title: NSLocalizedString("加载更新的消息", comment: "")) {
@@ -1122,6 +1294,7 @@ enum ChatCompletionTime {
 
 private struct ResponseGroupView: View {
     let group: ChatResponseGroup
+    let layout: ChatGroupBubbleLayout
     let model: AgentModel
     /// Only the newest turn can morph from the typing bubble. Older replies skip
     /// matched geometry, whose global anchors would otherwise update on every scroll frame.
@@ -1130,13 +1303,18 @@ private struct ResponseGroupView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            ForEach(group.content) { item in
-                message(item)
+        let content = group.content
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(content.enumerated()), id: \.element.id) { index, item in
+                let grouping = index < layout.itemGroupings.count ? layout.itemGroupings[index] : .solo
+                let topSpacing = index < layout.itemTopSpacings.count ? layout.itemTopSpacings[index] : 0
+                message(item, grouping: grouping)
+                    .padding(.top, topSpacing)
                     .transition(reduceMotion ? .opacity : .opacity.combined(with: .offset(y: 5)))
             }
             if group.showsThinkingIndicator {
-                ChatTypingBubble(bubbleMotion: bubbleMotion)
+                ChatTypingBubble(bubbleMotion: bubbleMotion, grouping: layout.typingGrouping)
+                    .padding(.top, layout.typingTopSpacing)
                     .transition(.opacity)
             }
         }
@@ -1144,10 +1322,11 @@ private struct ResponseGroupView: View {
                    value: group.isRunning)
     }
 
-    private func message(_ item: ChatItem) -> some View {
+    private func message(_ item: ChatItem, grouping: ChatBubbleGrouping) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             ChatBubble(item: item, model: model, bubbleMotion: isLatest ? bubbleMotion : nil,
-                morphsFromTyping: !group.isRunning && group.content.last(where: { $0.kind == .assistant })?.id == item.id)
+                morphsFromTyping: !group.isRunning && group.content.last(where: { $0.kind == .assistant })?.id == item.id,
+                grouping: grouping)
             if item.needsPermissionSettings {
                 Button(NSLocalizedString("管理权限…", comment: "")) { model.openSettings(permissions: true) }
                     .buttonStyle(.link)
@@ -1159,6 +1338,7 @@ private struct ResponseGroupView: View {
 /// Only this placeholder is visible until the complete answer is committed.
 private struct ChatTypingBubble: View {
     let bubbleMotion: Namespace.ID
+    var grouping: ChatBubbleGrouping = .solo
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -1176,7 +1356,7 @@ private struct ChatTypingBubble: View {
             }
             .padding(.horizontal, 16).padding(.vertical, 16)
             .background {
-                RoundedRectangle(cornerRadius: 16).fill(ThemeColor.kBackgroundNeutral)
+                grouping.shape(for: .leading).fill(ThemeColor.kBackgroundNeutral)
                     .matchedGeometryEffect(id: "reply-surface", in: bubbleMotion, properties: reduceMotion ? [] : .frame, anchor: .topLeading)
             }
         }
@@ -1385,6 +1565,7 @@ private struct ChatBubble: View {
     let model: AgentModel
     let bubbleMotion: Namespace.ID?
     var morphsFromTyping = true
+    var grouping: ChatBubbleGrouping = .solo
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hoverState = UserMessageHoverState()
     @State private var replyUnavailable = false
@@ -1398,6 +1579,7 @@ private struct ChatBubble: View {
         switch item.kind {
         case .user:
             let hasInlineSegments = !(item.segments ?? []).isEmpty
+            let bubbleShape = grouping.shape(for: .trailing)
             VStack(alignment: .trailing, spacing: 8) {
                 if !hasInlineSegments, (!item.attachments.isEmpty || !item.quotes.isEmpty) {
                     if imageAttachments.count > 1 {
@@ -1423,9 +1605,9 @@ private struct ChatBubble: View {
                         }
                         .padding(.horizontal, AgentLayout.messageHorizontalInset).padding(.vertical, AgentLayout.userMessageVerticalInset)
                         .background {
-                            RoundedRectangle(cornerRadius: 16).fill(ThemeColor.kBackgroundNeutral)
+                            bubbleShape.fill(ThemeColor.kBackgroundNeutral)
                                 .overlay {
-                                    RoundedRectangle(cornerRadius: 16).fill(model.avatarColor.userBubbleTint(for: scheme))
+                                    bubbleShape.fill(model.avatarColor.userBubbleTint(for: scheme))
                                 }
                         }
                         .overlay(alignment: .bottomLeading) {
@@ -1467,6 +1649,7 @@ private struct ChatBubble: View {
             }
         case .assistant:
             let contextActions = item.id == "streaming" ? nil : assistantContextActions
+            let bubbleShape = grouping.shape(for: .leading)
             HStack(alignment: .center, spacing: 8) {
                 ChatReplyView(text: item.text, isStreaming: item.id == "streaming",
                     values: Binding(get: { model.formAnswers(item.id) },
@@ -1482,7 +1665,7 @@ private struct ChatBubble: View {
                     }
                     .padding(.horizontal, AgentLayout.messageHorizontalInset).padding(.vertical, AgentLayout.messageVerticalInset)
                     .background {
-                        RoundedRectangle(cornerRadius: 16).fill(ThemeColor.kBackgroundNeutral)
+                        bubbleShape.fill(ThemeColor.kBackgroundNeutral)
                             .replySurfaceMotion(morphsFromTyping ? bubbleMotion : nil, reduceMotion: reduceMotion)
                     }
                     .contextMenu {
@@ -1511,6 +1694,7 @@ private struct ChatBubble: View {
             .onHover { hoverState.bubbleHovered = $0 }
         case .toolNarration:
             let contextActions = assistantContextActions
+            let bubbleShape = grouping.shape(for: .leading)
             HStack(alignment: .center, spacing: 8) {
                 ChatMarkdownView(text: item.text).equatable()
                     .environment(\.chatSelectionColor, model.avatarColor.tint)
@@ -1521,7 +1705,7 @@ private struct ChatBubble: View {
                     .padding(.horizontal, AgentLayout.messageHorizontalInset)
                     .padding(.vertical, AgentLayout.messageVerticalInset)
                     .background {
-                        RoundedRectangle(cornerRadius: 16).fill(ThemeColor.kBackgroundNeutral)
+                        bubbleShape.fill(ThemeColor.kBackgroundNeutral)
                     }
                     .contextMenu {
                         assistantContextMenuItems(contextActions)
