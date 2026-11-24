@@ -601,7 +601,7 @@ private struct ChatSharePreviewSheet: View {
 
                 Spacer(minLength: 0)
 
-                HStack(spacing: 28) {
+                HStack(spacing: 4) {
                     ShareCircleActionButton(
                         title: copied ? NSLocalizedString("已复制", comment: "") : NSLocalizedString("复制图片", comment: ""),
                         mingCute: copied ? "checkmark" : "doc.on.clipboard",
@@ -706,6 +706,8 @@ private struct ShareGlassCircleButtonStyle: ButtonStyle {
 }
 
 private struct ShareCircleActionButton: View {
+    static let slotWidth: CGFloat = 76
+
     let title: String
     var mingCute: String? = nil
     var assetImage: String? = nil
@@ -733,7 +735,9 @@ private struct ShareCircleActionButton: View {
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(isDark ? Color.white.opacity(0.90) : Color(white: 0.14))
                 .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
         }
+        .frame(width: Self.slotWidth)
     }
 }
 
