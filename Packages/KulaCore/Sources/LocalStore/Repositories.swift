@@ -274,13 +274,15 @@ public struct MessagePresentation: Sendable, Hashable, Codable {
     public var segments: [MessageSegment]?
     /// The assistant's single emoji reaction, attached to the user message.
     public var agentReaction: String?
+    /// Native capability result card derived from a completed tool execution.
+    public var resultCard: ToolResultCard?
 
     public init(responseID: String? = nil, toolName: String? = nil, toolStatus: ExecutionStatus? = nil,
                 toolError: String? = nil, needsPermissionSettings: Bool = false,
                 workSeconds: Int? = nil, completedAt: Date? = nil,
                 submittedFormValues: [String: [String]]? = nil, quotes: [MessageQuote]? = nil,
                 pastedTexts: [MessagePastedText]? = nil, segments: [MessageSegment]? = nil,
-                agentReaction: String? = nil) {
+                agentReaction: String? = nil, resultCard: ToolResultCard? = nil) {
         self.responseID = responseID
         self.toolName = toolName
         self.toolStatus = toolStatus
@@ -293,6 +295,7 @@ public struct MessagePresentation: Sendable, Hashable, Codable {
         self.pastedTexts = pastedTexts
         self.segments = segments
         self.agentReaction = agentReaction
+        self.resultCard = resultCard
     }
 
     /// Serialize inline segments into prompt text with positional anchors matching attachments and context.

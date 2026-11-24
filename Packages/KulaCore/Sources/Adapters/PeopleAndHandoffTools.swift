@@ -145,7 +145,8 @@ public struct MessagesDraftTool: ToolAdapter {
             guard let url = Self.draftURL(handle: r.handle, body: body) else { return false }
             return NSWorkspace.shared.open(url)
         }
-        return AdapterOutput(output: ["recipient": .string(r.display), "opened": .bool(opened), "copiedToClipboard": true,
+        return AdapterOutput(output: ["recipient": .string(r.display), "handle": .string(r.handle),
+                                      "body": .string(body), "opened": .bool(opened), "copiedToClipboard": true,
                                       "sent": false,
                                       "note": .string(opened ? CoreLocalization.text("已打开草稿；若正文未预填，可直接粘贴") : CoreLocalization.text("未能打开 Messages，正文已复制"))],
                              targets: [TargetRef(kind: "messagesDraft", identifier: r.handle)])

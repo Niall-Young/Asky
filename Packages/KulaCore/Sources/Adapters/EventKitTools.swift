@@ -362,12 +362,25 @@ public struct RemindersCreateTool: ToolAdapter {
         do { try ek.store.save(r, commit: true) } catch {
             throw ToolError(.adapterFailure, CoreLocalization.format("保存提醒失败：%@", String(describing: error.localizedDescription)))
         }
-        return AdapterOutput(output: ["id": .string(r.calendarItemIdentifier), "title": .string(r.title ?? "")],
+        var out: [String: JSONValue] = [
+            "id": .string(r.calendarItemIdentifier),
+            "title": .string(r.title ?? ""),
+            "list": .string(r.calendar?.title ?? ""),
+        ]
+        if let d = r.dueDateComponents?.date { out["due"] = .string(Args.iso(d)) }
+        return AdapterOutput(output: .object(out),
                              targets: [TargetRef(kind: "reminder", identifier: r.calendarItemIdentifier)])
     }
 
     public func readback(_ a: JSONValue, output: AdapterOutput?) async -> JSONValue? {
         guard let id = output?.targets.first?.identifier, let item = ek.store.calendarItem(withIdentifier: id) as? EKReminder else { return nil }
-        return ["id": .string(id), "title": .string(item.title ?? ""), "completed": .bool(item.isCompleted)]
+        var out: [String: JSONValue] = [
+            "id": .string(id),
+            "title": .string(item.title ?? ""),
+            "completed": .bool(item.isCompleted),
+            "list": .string(item.calendar?.title ?? ""),
+        ]
+        if let d = item.dueDateComponents?.date { out["due"] = .string(Args.iso(d)) }
+        return .object(out)
     }
 }

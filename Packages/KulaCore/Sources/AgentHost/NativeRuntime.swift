@@ -241,7 +241,9 @@ private actor NativeAgentEngine {
                 }
                 messages.append(response.message)
                 file = try await storage.save(sessionID: request.sessionID, messages: messages)
-                let narration = NativeReplyImages.removing(Set(NativeReplyImages.images(in: response.text).map(\.url)), from: response.text)
+                let narration = AgentMessageSplit.strippingMarkers(
+                    NativeReplyImages.removing(Set(NativeReplyImages.images(in: response.text).map(\.url)), from: response.text)
+                )
                 if !narration.isEmpty { events.yield(try checkedFrame(["type": "textDelta", "taskID": .string(id), "text": .string(narration)])) }
                 // imagesOnly explicitly means factual research is complete. One terminal image
                 // batch prevents optional illustrations from restarting the research loop.
