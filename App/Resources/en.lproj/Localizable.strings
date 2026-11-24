@@ -967,7 +967,6 @@
 "下一张图片" = "Next image";
 
 /* Composer inline tags */
-"图片" = "Image";
 "粘贴文本 · %d 字" = "Pasted · %d chars";
 "图片附件" = "Image attachment";
 "文件附件" = "File attachment";
@@ -975,7 +974,6 @@
 "划词引用" = "Quoted excerpt";
 "%d 字" = "%d chars";
 "展开到输入框" = "Expand into input";
-"移除" = "Remove";
 
 /* Onboarding */
 "欢迎引导" = "Welcome Guide";
@@ -1021,7 +1019,7 @@
 "开启常用权限" = "Enable Essential Permissions";
 "只申请必要能力，日历和备忘录会在首次使用时再询问" = "Only essential access now. Calendar and Notes ask on first use.";
 "必备" = "Essential";
-"开机自动在菜单栏就绪，随时用快捷键呼出" = "Start automatically in the menu bar so your shortcut is always ready";
+"开机自动在菜单栏就绪" = "Be ready in the menu bar when you log in";
 "已开启" = "Enabled";
 "一切就绪" = "You’re All Set";
 "随时按快捷键呼出 Asky，AI 助手可在需要时再配置" = "Summon Asky anytime with a shortcut. You can set up AI whenever you’re ready.";
