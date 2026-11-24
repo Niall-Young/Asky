@@ -5,6 +5,7 @@ import AppKit
 final class WindowPresentation: NSObject {
     private weak var pendingWindow: NSWindow?
     private var pendingAlpha: CGFloat?
+    private var pendingReveal: ((NSWindow, CGFloat) -> Void)?
 
     override init() {
         super.init()
@@ -18,7 +19,7 @@ final class WindowPresentation: NSObject {
         }
     }
 
-    func show(_ window: NSWindow, level: NSWindow.Level = .normal) {
+    func show(_ window: NSWindow, level: NSWindow.Level = .normal, reveal: ((NSWindow, CGFloat) -> Void)? = nil) {
         if pendingWindow !== window { cancelPending() }
         let wasVisible = window.isVisible
         window.level = level
@@ -29,6 +30,7 @@ final class WindowPresentation: NSObject {
         // glass surface transparent until it has the active key appearance.
         if !window.isVisible && pendingAlpha == nil {
             pendingAlpha = window.alphaValue
+            pendingReveal = reveal
             window.alphaValue = 0
             window.orderFrontRegardless()
         }
@@ -50,8 +52,10 @@ final class WindowPresentation: NSObject {
     @objc private func didBecomeActive() {
         let window = pendingWindow
         let alpha = pendingAlpha
+        let reveal = pendingReveal
         pendingWindow = nil
         pendingAlpha = nil
+        pendingReveal = nil
         guard let window else { return }
         WindowDiagnostics.shared.record("wp-did-become-active", window: window, extra: [
             ("hadAlpha", alpha != nil ? "1" : "0"),
@@ -65,7 +69,11 @@ final class WindowPresentation: NSObject {
             window.contentView?.superview?.layoutSubtreeIfNeeded()
             window.contentView?.layoutSubtreeIfNeeded()
             window.displayIfNeeded()
-            window.alphaValue = alpha
+            if let reveal {
+                reveal(window, alpha)
+            } else {
+                window.alphaValue = alpha
+            }
         }
         window.makeKeyAndOrderFront(nil)
     }
@@ -75,6 +83,7 @@ final class WindowPresentation: NSObject {
         let alpha = pendingAlpha
         pendingWindow = nil
         pendingAlpha = nil
+        pendingReveal = nil
         if let window {
             WindowDiagnostics.shared.record("wp-cancel-pending", window: window, extra: [
                 ("hadAlpha", alpha != nil ? "1" : "0"),

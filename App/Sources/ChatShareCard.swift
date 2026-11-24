@@ -2,6 +2,8 @@ import AppKit
 import CoreImage
 import CoreImage.CIFilterBuiltins
 import MarkdownUI
+import Observation
+import QuartzCore
 import SwiftUI
 import Theme
 import ToolService
@@ -405,6 +407,123 @@ enum ChatShareCardRenderer {
     }
 }
 
+@MainActor @Observable
+private final class ChatShareEntranceState {
+    var isPresented: Bool
+
+    init(isPresented: Bool = false) {
+        self.isPresented = isPresented
+    }
+}
+
+/// Display-link driven window entrance: combines a fast ease-out alpha reveal
+/// with a gentle upward spring while keeping the Spotlight window size fixed.
+@MainActor
+private final class ShareWindowEntranceAnimator: NSObject {
+    private static let riseDistance: CGFloat = 16
+    private static let fadeDuration: Double = 0.16
+    private static let reduceMotionFadeDuration: Double = 0.15
+    private static let springResponse: Double = 0.30
+    private static let springDamping: Double = 0.88
+
+    private weak var window: NSWindow?
+    private var link: CADisplayLink?
+    private var startTime: CFTimeInterval?
+    private var targetOrigin: NSPoint = .zero
+    private var targetAlpha: CGFloat = 1
+    private var startOffsetY: CGFloat = 0
+    private var reduceMotion = false
+    private var allowPositionUpdates = true
+    private(set) var isUpdatingFrame = false
+
+    func start(window: NSWindow, targetOrigin: NSPoint, targetAlpha: CGFloat, reduceMotion: Bool) {
+        stop()
+        self.window = window
+        self.targetOrigin = targetOrigin
+        self.targetAlpha = targetAlpha
+        self.reduceMotion = reduceMotion
+        self.allowPositionUpdates = !reduceMotion
+        self.startOffsetY = reduceMotion ? 0 : -Self.riseDistance
+
+        window.alphaValue = 0
+        if allowPositionUpdates {
+            setOrigin(NSPoint(x: targetOrigin.x, y: targetOrigin.y + startOffsetY), on: window)
+        } else {
+            setOrigin(targetOrigin, on: window)
+        }
+
+        let link = window.displayLink(target: self, selector: #selector(step(_:)))
+        link.add(to: .main, forMode: .common)
+        self.link = link
+    }
+
+    func cancelPositionMotion() {
+        allowPositionUpdates = false
+    }
+
+    func stop() {
+        link?.invalidate()
+        link = nil
+        startTime = nil
+        window = nil
+        allowPositionUpdates = true
+    }
+
+    private func setOrigin(_ origin: NSPoint, on window: NSWindow) {
+        isUpdatingFrame = true
+        window.setFrameOrigin(origin)
+        isUpdatingFrame = false
+    }
+
+    @objc private func step(_ link: CADisplayLink) {
+        guard let window, window.isVisible else {
+            stop()
+            return
+        }
+        let start = startTime ?? link.timestamp
+        startTime = start
+        let t = max(0, link.targetTimestamp - start)
+
+        if reduceMotion {
+            let u = min(1.0, t / Self.reduceMotionFadeDuration)
+            let eased = 1.0 - pow(1.0 - u, 2)
+            window.alphaValue = targetAlpha * CGFloat(eased)
+            if u >= 1.0 {
+                window.alphaValue = targetAlpha
+                stop()
+            }
+            return
+        }
+
+        let fadeProgress = min(1.0, t / Self.fadeDuration)
+        let alphaEased = 1.0 - pow(1.0 - fadeProgress, 3)
+        window.alphaValue = targetAlpha * CGFloat(alphaEased)
+
+        let omega = 2.0 * Double.pi / Self.springResponse
+        let decay = Self.springDamping * omega
+        let wd = omega * (1.0 - Self.springDamping * Self.springDamping).squareRoot()
+        let springProgress = 1.0 - exp(-decay * t) * (cos(wd * t) + (decay / wd) * sin(wd * t))
+        let remaining = abs(1.0 - springProgress) * abs(Double(startOffsetY))
+        let settled = t > 1.2 || (fadeProgress >= 1.0 && t > Self.springResponse && remaining < 0.01)
+
+        if allowPositionUpdates {
+            if settled {
+                setOrigin(targetOrigin, on: window)
+            } else {
+                let scale = max(1.0, Double(window.backingScaleFactor))
+                let rawY = Double(targetOrigin.y) + Double(startOffsetY) * (1.0 - springProgress)
+                let alignedY = (rawY * scale).rounded() / scale
+                setOrigin(NSPoint(x: targetOrigin.x, y: CGFloat(alignedY)), on: window)
+            }
+        }
+
+        if settled {
+            window.alphaValue = targetAlpha
+            stop()
+        }
+    }
+}
+
 @MainActor
 final class ChatShareWindowController: NSWindowController, NSWindowDelegate {
     static let shared = ChatShareWindowController()
@@ -412,6 +531,8 @@ final class ChatShareWindowController: NSWindowController, NSWindowDelegate {
     private static let cornerRadius: CGFloat = 24
     private let presentation = WindowPresentation()
     private let outsideClickDismissal = OutsideClickDismissal()
+    private let entranceAnimator = ShareWindowEntranceAnimator()
+    private var entranceState: ChatShareEntranceState?
     private var autoDismissSuspensionCount = 0
     private var shareCoordinator: SystemShareCoordinator?
 
@@ -426,13 +547,25 @@ final class ChatShareWindowController: NSWindowController, NSWindowDelegate {
         shareCoordinator?.cancel()
         shareCoordinator = nil
         autoDismissSuspensionCount = 0
+        entranceAnimator.stop()
 
         let level = NSApp.keyWindow?.level ?? .normal
         let window = self.window ?? makeWindow()
+        let wasVisible = window.isVisible
+        if !wasVisible {
+            window.alphaValue = 1
+            window.center()
+        }
+        let targetOrigin = window.frame.origin
+        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        let entrance = ChatShareEntranceState(isPresented: wasVisible || reduceMotion)
+        entranceState = entrance
+
         window.title = NSLocalizedString("分享回复", comment: "")
         let content = ChatSharePreviewSheet(
             text: text,
             initialAppearance: ShareCardAppearance(colorScheme: colorScheme),
+            entrance: entrance,
             windowProvider: { [weak window] in window },
             suspendAutoDismiss: { [weak self] in
                 self?.suspendAutoDismiss() ?? {}
@@ -454,11 +587,48 @@ final class ChatShareWindowController: NSWindowController, NSWindowDelegate {
         if let surface = window.contentView {
             WindowSurface.updateCorners(of: surface, radius: Self.cornerRadius, circular: true)
         }
-        presentation.show(window, level: level)
+        if !wasVisible {
+            presentation.show(window, level: level) { [weak self] revealedWindow, targetAlpha in
+                self?.beginEntrance(
+                    window: revealedWindow,
+                    targetOrigin: targetOrigin,
+                    targetAlpha: targetAlpha,
+                    entrance: entrance
+                )
+            }
+        } else {
+            window.alphaValue = 1
+            presentation.show(window, level: level)
+        }
         updateOutsideClickDismissal()
     }
 
+    private func beginEntrance(
+        window: NSWindow,
+        targetOrigin: NSPoint,
+        targetAlpha: CGFloat,
+        entrance: ChatShareEntranceState
+    ) {
+        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        entranceAnimator.start(
+            window: window,
+            targetOrigin: targetOrigin,
+            targetAlpha: targetAlpha,
+            reduceMotion: reduceMotion
+        )
+        guard !reduceMotion else {
+            entrance.isPresented = true
+            return
+        }
+        DispatchQueue.main.async { [weak self, weak entrance] in
+            guard let self, let entrance, self.entranceState === entrance else { return }
+            entrance.isPresented = true
+        }
+    }
+
     func dismiss() {
+        entranceAnimator.stop()
+        entranceState = nil
         outsideClickDismissal.hide()
         shareCoordinator?.cancel()
         shareCoordinator = nil
@@ -466,6 +636,7 @@ final class ChatShareWindowController: NSWindowController, NSWindowDelegate {
         guard let window else { return }
         let shouldClose = window.isVisible || window.contentView != nil
         window.orderOut(nil)
+        window.alphaValue = 1
         if shouldClose {
             window.close()
         }
@@ -485,16 +656,25 @@ final class ChatShareWindowController: NSWindowController, NSWindowDelegate {
         }
     }
 
+    func windowWillMove(_ notification: Notification) {
+        if !entranceAnimator.isUpdatingFrame {
+            entranceAnimator.cancelPositionMotion()
+        }
+    }
+
     func windowDidResignKey(_ notification: Notification) {
         guard let window, window.isVisible, !isAutoDismissSuspended else { return }
         dismiss()
     }
 
     func windowWillClose(_ notification: Notification) {
+        entranceAnimator.stop()
+        entranceState = nil
         outsideClickDismissal.hide()
         shareCoordinator?.cancel()
         shareCoordinator = nil
         autoDismissSuspensionCount = 0
+        window?.alphaValue = 1
         window?.contentView = nil
     }
 
@@ -652,11 +832,13 @@ private struct ChatSharePreviewSheet: View {
     private static let bottomFadeHeight: CGFloat = 78
 
     let text: String
+    let entrance: ChatShareEntranceState
     let windowProvider: () -> NSWindow?
     let suspendAutoDismiss: () -> () -> Void
     let presentSystemShareAction: (URL, NSView) -> Void
     let close: () -> Void
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var appearance: ShareCardAppearance
     @State private var cardHeight: CGFloat = 0
     @State private var copied = false
@@ -668,12 +850,14 @@ private struct ChatSharePreviewSheet: View {
     init(
         text: String,
         initialAppearance: ShareCardAppearance,
+        entrance: ChatShareEntranceState,
         windowProvider: @escaping () -> NSWindow?,
         suspendAutoDismiss: @escaping () -> () -> Void,
         presentSystemShare: @escaping (URL, NSView) -> Void,
         close: @escaping () -> Void
     ) {
         self.text = text
+        self.entrance = entrance
         self.windowProvider = windowProvider
         self.suspendAutoDismiss = suspendAutoDismiss
         self.presentSystemShareAction = presentSystemShare
@@ -682,6 +866,7 @@ private struct ChatSharePreviewSheet: View {
     }
 
     private var isDark: Bool { appearance == .dark }
+    private var revealed: Bool { entrance.isPresented || reduceMotion }
     private var backdrop: ShareCardBackdropCache.Pair { ShareCardBackdropCache.shared.backdrop(for: appearance) }
     private var isOverflowing: Bool { cardHeight > Self.maxCardHeight }
     private var visibleCardHeight: CGFloat {
@@ -701,7 +886,9 @@ private struct ChatSharePreviewSheet: View {
                 .resizable()
                 .scaledToFill()
                 .frame(width: Self.modalWidth, height: Self.modalHeight)
+                .scaleEffect(revealed ? 1.0 : 1.055)
                 .clipped()
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.34), value: revealed)
 
             // Subtle top & bottom scrim so floating title and labels stay legible in both appearances.
             VStack(spacing: 0) {
@@ -750,6 +937,9 @@ private struct ChatSharePreviewSheet: View {
                 .padding(.horizontal, 20)
                 .padding(.top, 18)
                 .padding(.bottom, 10)
+                .opacity(revealed ? 1 : 0)
+                .offset(y: revealed ? 0 : 6)
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.22), value: revealed)
 
                 Spacer(minLength: 0)
 
@@ -779,6 +969,13 @@ private struct ChatSharePreviewSheet: View {
                             }
                         }
                     }
+                    .scaleEffect(revealed ? 1 : 0.94, anchor: .center)
+                    .offset(y: revealed ? 0 : 12)
+                    .opacity(revealed ? 1 : 0)
+                    .animation(
+                        reduceMotion ? nil : .spring(response: 0.34, dampingFraction: 0.84).delay(0.02),
+                        value: revealed
+                    )
 
                 Spacer(minLength: 0)
 
@@ -789,12 +986,16 @@ private struct ChatSharePreviewSheet: View {
                         isDark: isDark,
                         action: copyImage
                     )
+                    .shareActionEntrance(revealed: revealed, index: 0, reduceMotion: reduceMotion)
+
                     ShareCircleActionButton(
                         title: saved ? NSLocalizedString("已保存图片", comment: "") : NSLocalizedString("保存图片", comment: ""),
                         mingCute: saved ? "checkmark" : "arrow.down.to.line",
                         isDark: isDark,
                         action: saveImage
                     )
+                    .shareActionEntrance(revealed: revealed, index: 1, reduceMotion: reduceMotion)
+
                     ShareCircleActionButton(
                         title: NSLocalizedString("系统分享", comment: ""),
                         assetImage: "ChatShare",
@@ -802,14 +1003,19 @@ private struct ChatSharePreviewSheet: View {
                         action: presentSystemShare
                     )
                     .background(ShareAnchorReader(box: shareAnchor).allowsHitTesting(false))
+                    .shareActionEntrance(revealed: revealed, index: 2, reduceMotion: reduceMotion)
+
                     ShareCircleActionButton(
                         title: appearance.title,
                         assetImage: "ChatThemeToggle",
                         isDark: isDark,
                         action: {
-                            appearance = appearance == .dark ? .light : .dark
+                            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.22)) {
+                                appearance = appearance == .dark ? .light : .dark
+                            }
                         }
                     )
+                    .shareActionEntrance(revealed: revealed, index: 3, reduceMotion: reduceMotion)
                 }
                 .padding(.top, 14)
                 .padding(.bottom, 22)
@@ -895,6 +1101,19 @@ private struct ChatSharePreviewSheet: View {
                 showError(error.localizedDescription)
             }
         }
+    }
+}
+
+private extension View {
+    func shareActionEntrance(revealed: Bool, index: Int, reduceMotion: Bool) -> some View {
+        self
+            .scaleEffect(revealed ? 1 : 0.88)
+            .offset(y: revealed ? 0 : 10)
+            .opacity(revealed ? 1 : 0)
+            .animation(
+                reduceMotion ? nil : .spring(response: 0.32, dampingFraction: 0.80).delay(0.03 + Double(index) * 0.03),
+                value: revealed
+            )
     }
 }
 

@@ -3766,15 +3766,26 @@ enum AgentReplyRegression {
             print("Share card \(appearance.rawValue): \(rep.pixelsWide)x\(rep.pixelsHigh) (\(png.count) bytes)")
         }
 
-        // 3. Open the actual share preview window for both short and long replies to inspect layout and bottom fade.
+        // 3. Open the actual share preview window for both short and long replies to inspect layout, entrance settle, and bottom fade.
         let longReply = sampleReply + "\n\n" + (1...6).map { index in
             "### 第 \(index) 项补充说明\n\n这是用于验证长图预览在固定高度截断后，底部是否通过平滑渐变自然融合到窗口背景中的长段落示例文本。"
         }.joined(separator: "\n\n")
+        var settledOrigin: NSPoint?
         for (name, content, scheme) in [("window", sampleReply, ColorScheme.dark), ("long", longReply, .light)] {
             ChatShareWindowController.shared.show(text: content, colorScheme: scheme)
             try await Task.sleep(for: .milliseconds(500))
             if let shareWindow = ChatShareWindowController.shared.window,
                let surface = shareWindow.contentView {
+                precondition(abs(shareWindow.alphaValue - 1) < 0.01,
+                             "Expected share window entrance to settle at alpha 1, got \(shareWindow.alphaValue)")
+                precondition(shareWindow.frame.size == NSSize(width: 448, height: 516),
+                             "Expected share window size 448x516, got \(shareWindow.frame.size)")
+                if let expectedOrigin = settledOrigin {
+                    precondition(abs(shareWindow.frame.origin.y - expectedOrigin.y) < 0.5,
+                                 "Expected reopened share window origin to remain stable, got \(shareWindow.frame.origin) vs \(expectedOrigin)")
+                } else {
+                    settledOrigin = shareWindow.frame.origin
+                }
                 surface.layoutSubtreeIfNeeded()
                 if let rep = surface.bitmapImageRepForCachingDisplay(in: surface.bounds) {
                     surface.cacheDisplay(in: surface.bounds, to: rep)
@@ -3784,6 +3795,20 @@ enum AgentReplyRegression {
                 }
                 shareWindow.close()
             }
+        }
+
+        // Interrupt entrance mid-flight, reopen, and ensure no Y drift or stuck alpha.
+        ChatShareWindowController.shared.show(text: sampleReply, colorScheme: .dark)
+        try await Task.sleep(for: .milliseconds(30))
+        ChatShareWindowController.shared.dismiss()
+        ChatShareWindowController.shared.show(text: sampleReply, colorScheme: .dark)
+        try await Task.sleep(for: .milliseconds(500))
+        if let shareWindow = ChatShareWindowController.shared.window, let expectedOrigin = settledOrigin {
+            precondition(abs(shareWindow.alphaValue - 1) < 0.01,
+                         "Expected reopened share window after interrupted entrance to settle at alpha 1, got \(shareWindow.alphaValue)")
+            precondition(abs(shareWindow.frame.origin.y - expectedOrigin.y) < 0.5,
+                         "Expected no vertical drift after mid-entrance dismiss, got \(shareWindow.frame.origin) vs \(expectedOrigin)")
+            shareWindow.close()
         }
 
         // 4. Verify share window stays open on internal clicks and auto-dismisses on outside clicks or focus loss,
