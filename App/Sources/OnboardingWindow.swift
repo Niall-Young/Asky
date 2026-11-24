@@ -651,7 +651,8 @@ struct OnboardingView: View {
             OnboardingCleanCard {
                 VStack(spacing: 0) {
                     permissionRow(
-                        iconAsset: "Onboarding-accessibility",
+                        symbol: "accessibility",
+                        tint: ToolIconPalette.blue,
                         title: NSLocalizedString("辅助功能", comment: ""),
                         description: NSLocalizedString("自动粘贴与窗口切换", comment: "")
                     ) {
@@ -668,7 +669,8 @@ struct OnboardingView: View {
                     rowDivider
 
                     permissionRow(
-                        iconAsset: "Onboarding-bookmarks",
+                        symbol: "bookmark",
+                        tint: ToolIconPalette.orange,
                         title: NSLocalizedString("Chrome 书签", comment: ""),
                         description: NSLocalizedString("快速搜索本地书签", comment: "")
                     ) {
@@ -691,7 +693,8 @@ struct OnboardingView: View {
                     rowDivider
 
                     permissionRow(
-                        iconAsset: "Onboarding-launch",
+                        symbol: "power",
+                        tint: ToolIconPalette.green,
                         title: NSLocalizedString("登录时启动", comment: ""),
                         description: NSLocalizedString("开机自动在菜单栏就绪", comment: "")
                     ) {
@@ -713,17 +716,26 @@ struct OnboardingView: View {
     }
 
     private func permissionRow<Trailing: View>(
-        iconAsset: String,
+        symbol: String,
+        tint: Color,
         title: String,
         description: String,
         @ViewBuilder trailing: () -> Trailing
     ) -> some View {
         HStack(spacing: 14) {
-            Image(iconAsset)
-                .resizable()
-                .scaledToFit()
-                .frame(width: 32, height: 32)
-                .accessibilityHidden(true)
+            ZStack {
+                LauncherIconClip(radius: 8)
+                    .fill(tint)
+                Image(mingCute: symbol, size: 18)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 18, height: 18)
+                    .foregroundStyle(.white)
+            }
+            .frame(width: 32, height: 32)
+            .fixedSize()
+            .drawingGroup()
+            .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
