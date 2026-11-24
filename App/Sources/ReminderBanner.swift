@@ -33,7 +33,7 @@ final class ReminderBannerCenter {
     static let shared = ReminderBannerCenter()
 
     static let width: CGFloat = 360
-    static let gap: CGFloat = 8
+    static let gap: CGFloat = 10
     /// How much each folded card shows under the one in front of it.
     static let peek: CGFloat = 8
     static let maxPeeking = 2
@@ -88,7 +88,7 @@ final class ReminderBannerCenter {
         stack.cards[index].frozenY = stack.y(of: id)
         stack.cards[index].leaving = true
         stack.cards[index].settled = false
-        withAnimation(Self.reduceMotion ? .easeOut(duration: 0.15) : .easeIn(duration: 0.25)) { stack.cards[index].presented = false }
+        withAnimation(Self.reduceMotion ? .easeOut(duration: 0.15) : .easeOut(duration: 0.22)) { stack.cards[index].presented = false }
         // The rest close the gap (or the next folded card comes forward) while this one slides out.
         withAnimation(Self.reflow) { stack.layoutVersion += 1 }
         DispatchQueue.main.asyncAfter(deadline: .now() + (Self.reduceMotion ? 0.15 : 0.3)) { [weak self] in
@@ -316,6 +316,7 @@ final class ReminderBannerStack {
 private struct ReminderBannerStackView: View {
     let stack: ReminderBannerStack
     let center: ReminderBannerCenter
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         let _ = stack.layoutVersion
@@ -386,11 +387,12 @@ private struct ReminderBannerStackView: View {
         let behind = !stack.expanded && (rank ?? 0) > 0
         let depth = CGFloat(min(rank ?? 0, ReminderBannerCenter.maxPeeking))
         let height = behind ? stack.active.first?.height ?? card.height : card.height
+        let shadowOpacity = colorScheme == .dark ? (behind ? 0.24 : 0.40) : (behind ? 0.08 : 0.16)
         return RoundedRectangle(cornerRadius: 20, style: .continuous)
             .fill(.black)
             .frame(width: ReminderBannerCenter.width, height: height)
-            .shadow(color: .black.opacity(behind ? 0.12 : 0.28),
-                    radius: castsShadow ? (behind ? 6 : 14) : 0,
+            .shadow(color: .black.opacity(shadowOpacity),
+                    radius: castsShadow ? (behind ? 6 : 16) : 0,
                     x: 0, y: castsShadow ? (behind ? 2 : 6) : 0)
             .opacity(castsShadow && !card.settled ? 0 : 1)
             .scaleEffect(behind ? 1 - depth * 0.05 : 1, anchor: .bottom)
@@ -436,6 +438,7 @@ private struct ReminderBannerCard: View {
     let onDismiss: () -> Void
     let onHeight: (CGFloat) -> Void
     @State private var hovering = false
+    @Environment(\.colorScheme) private var colorScheme
     private let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
 
     private var sourceLabel: String {
@@ -444,65 +447,112 @@ private struct ReminderBannerCard: View {
         return item.source.hasPrefix(prefix) ? String(item.source.dropFirst(prefix.count)) : item.source
     }
 
+    private var symbolTint: Color {
+        item.symbol == "car.fill" ? ToolIconPalette.teal : ToolIconPalette.blue
+    }
+
     /// Keep punctuation inside sentences, but omit Chinese full stops at the end of card copy.
     private func displayText(_ text: String) -> String {
         text.replacingOccurrences(of: #"。+(?=\s*$)"#, with: "", options: .regularExpression)
     }
 
+    private var bodyLines: [String] {
+        displayText(item.body)
+            .split(separator: "\n", omittingEmptySubsequences: true)
+            .map(String.init)
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 6) {
                 Image(nsImage: NSApp.applicationIconImage)
                     .resizable()
-                    .frame(width: 18, height: 18)
+                    .frame(width: 16, height: 16)
+                    .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
                     .accessibilityHidden(true)
                 if !sourceLabel.isEmpty {
                     Text(displayText(sourceLabel))
-                        .textStyle(.secondary)
+                        .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(ThemeColor.kTextSubtle)
                 }
                 Spacer(minLength: 8)
-                Text(displayText(item.timeLabel))
-                    .textStyle(.secondary)
-                    .foregroundStyle(ThemeColor.kTextSubtle)
-                    .opacity(hovering ? 0 : 1)
+                ZStack(alignment: .trailing) {
+                    Text(displayText(item.timeLabel))
+                        .font(.system(size: 12, weight: .regular))
+                        .monospacedDigit()
+                        .foregroundStyle(ThemeColor.kTextSubtlest)
+                        .opacity(hovering && contentVisible ? 0 : 1)
+                    if hovering && contentVisible {
+                        Button(action: onDismiss) {
+                            Image(mingCute: "xmark", size: 9.5)
+                        }
+                        .buttonStyle(BannerCloseButtonStyle())
+                        .accessibilityLabel(Text("关闭"))
+                        .transition(.opacity)
+                    }
+                }
+                .frame(height: 20)
             }
 
-            HStack(alignment: .top, spacing: 12) {
-                Image(mingCute: item.symbol, size: 16)
-                    .foregroundStyle(.white)
-                    .frame(width: 36, height: 36)
-                    .background(Color.accentColor.gradient, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .center, spacing: 8) {
+                    Image(mingCute: item.symbol, size: 12.5)
+                        .foregroundStyle(symbolTint)
+                        .frame(width: 22, height: 22)
+                        .background(symbolTint.opacity(colorScheme == .dark ? 0.22 : 0.12),
+                                    in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        .accessibilityHidden(true)
                     Text(displayText(item.title))
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(.system(size: 14.5, weight: .semibold))
                         .foregroundStyle(ThemeColor.kText)
-                    Text(displayText(item.body))
-                        .textStyle(.resultPrimary)
+                        .lineLimit(1)
+                }
+
+                let lines = bodyLines
+                if lines.count > 1 {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(lines[0])
+                            .font(.system(size: 12.5, weight: .medium))
+                            .foregroundStyle(ThemeColor.kText.color(for: colorScheme).opacity(0.76))
+                            .lineLimit(1)
+                        Text(lines.dropFirst().joined(separator: "\n"))
+                            .font(.system(size: 13, weight: .regular))
+                            .lineSpacing(2.5)
+                            .foregroundStyle(ThemeColor.kTextSubtle)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .lineLimit(3)
+                    }
+                } else if let only = lines.first {
+                    Text(only)
+                        .font(.system(size: 13, weight: .regular))
+                        .lineSpacing(2.5)
                         .foregroundStyle(ThemeColor.kTextSubtle)
                         .fixedSize(horizontal: false, vertical: true)
                         .lineLimit(4)
                 }
-                Spacer(minLength: 0)
             }
+            .padding(.top, 8)
 
             if !item.actions.isEmpty {
-                HStack(spacing: 8) {
-                    Spacer()
+                HStack(spacing: 6) {
+                    Spacer(minLength: 0)
                     ForEach(Array(item.actions.enumerated()), id: \.offset) { _, action in
                         Button {
                             action.handler()
                             if action.dismissesCard { onDismiss() }
                         } label: {
-                            Text(displayText(action.title)).frame(minWidth: 56)
+                            Text(displayText(action.title))
+                                .frame(minWidth: 48)
                         }
                         .buttonStyle(BannerButtonStyle(prominent: action.prominent))
                     }
                 }
+                .padding(.top, 12)
             }
         }
-        .padding(16)
+        .padding(.top, 13)
+        .padding(.bottom, 14)
+        .padding(.horizontal, 16)
         .frame(width: ReminderBannerCenter.width, alignment: .leading)
         .fixedSize(horizontal: false, vertical: true)
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { onHeight($0) }
@@ -510,39 +560,77 @@ private struct ReminderBannerCard: View {
         .frame(height: foldedHeight, alignment: .top)
         .clipped()
         .nativeGlassBackground(in: shape)
-        .overlay(alignment: .topTrailing) {
-            if hovering && contentVisible {
-                Button(action: onDismiss) {
-                    Image(mingCute: "xmark", size: 10)
-                        .frame(width: 20, height: 20)
-                        .contentShape(Circle())
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(ThemeColor.kTextSubtle)
-                .background(ThemeColor.kBackgroundNeutral, in: Circle())
-                .padding(10)
-                .accessibilityLabel(Text("关闭"))
-                .transition(.opacity)
+        .onHover { inside in
+            withAnimation(ReminderBannerCenter.reduceMotion ? nil : .easeOut(duration: 0.14)) {
+                hovering = inside
             }
         }
-        .onHover { inside in withAnimation(.easeOut(duration: 0.15)) { hovering = inside } }
         .accessibilityElement(children: .contain)
+    }
+}
+
+private struct BannerCloseButtonStyle: ButtonStyle {
+    @State private var hovered = false
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func makeBody(configuration: Configuration) -> some View {
+        let fill: Color = colorScheme == .dark
+            ? .white.opacity(hovered ? 0.16 : 0.08)
+            : .black.opacity(hovered ? 0.10 : 0.055)
+        configuration.label
+            .foregroundStyle(hovered ? ThemeColor.kText : ThemeColor.kTextSubtle)
+            .frame(width: 20, height: 20)
+            .background(fill, in: Circle())
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.92 : 1)
+            .opacity(configuration.isPressed ? 0.8 : 1)
+            .contentShape(Circle())
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: hovered)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.10), value: configuration.isPressed)
+            .onHover { hovered = $0 }
+            .actionArrowCursor()
     }
 }
 
 /// System bordered buttons dim in non-key windows; the banner never becomes key, so it draws its own.
 private struct BannerButtonStyle: ButtonStyle {
     var prominent: Bool
+    @State private var hovered = false
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func makeBody(configuration: Configuration) -> some View {
+        let foreground: Color = prominent
+            ? (colorScheme == .dark ? Color(white: 0.08) : .white)
+            : ThemeColor.kText.color(for: colorScheme)
+        let fill: Color = if prominent {
+            colorScheme == .dark
+                ? Color.white.opacity(hovered ? 0.98 : 0.90)
+                : Color(white: hovered ? 0.18 : 0.10).opacity(0.92)
+        } else {
+            colorScheme == .dark
+                ? Color.white.opacity(hovered ? 0.14 : 0.08)
+                : Color.black.opacity(hovered ? 0.09 : 0.055)
+        }
+        let border: Color = prominent
+            ? .clear
+            : (colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.06))
+
         configuration.label
-            .font(.system(size: 13, weight: .medium))
-            .foregroundStyle(prominent ? AnyShapeStyle(.white) : AnyShapeStyle(ThemeColor.kText))
+            .font(.system(size: 12.5, weight: .medium))
+            .foregroundStyle(foreground)
             .padding(.horizontal, 12)
-            .frame(height: 28)
-            .background(prominent ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(ThemeColor.kBackgroundNeutral),
-                        in: Capsule())
-            .opacity(configuration.isPressed ? 0.7 : 1)
+            .frame(height: 27)
+            .background(fill, in: Capsule())
+            .overlay {
+                Capsule().strokeBorder(border, lineWidth: 0.5)
+            }
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.97 : 1)
+            .opacity(configuration.isPressed ? 0.85 : 1)
             .contentShape(Capsule())
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: hovered)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.10), value: configuration.isPressed)
+            .onHover { hovered = $0 }
+            .actionArrowCursor()
     }
 }
