@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 import SwiftUI
 import LocalStore
 
@@ -27,8 +28,11 @@ enum LocalShortcutsRegression {
                 precondition(legacy.launcherHotKey.modifierFlags == [.option])
                 precondition(legacy.clipboardHotKey.menuKeyEquivalent == "c")
                 precondition(legacy.clipboardHotKey.modifierFlags == [.control, .shift])
-                precondition(legacy.agentHotKey.menuKeyEquivalent == "/")
-                precondition(legacy.agentHotKey.modifierFlags == [.control, .shift])
+                precondition(legacy.agentHotKeyCode == UInt32(kVK_Space))
+                precondition(legacy.agentHotKeyModifiers == UInt32(controlKey | cmdKey))
+                precondition(legacy.agentHotKeyLabel == "⌃⌘ Space")
+                precondition(legacy.agentHotKey.menuKeyEquivalent == " ")
+                precondition(legacy.agentHotKey.modifierFlags == [.control, .command])
                 let f5Shortcut = LauncherActionShortcut(code: 96, modifiers: 256, label: "⌘ F5")
                 precondition(f5Shortcut.menuKeyEquivalent == String(UnicodeScalar(NSF5FunctionKey)!))
                 precondition(f5Shortcut.modifierFlags == [.command])

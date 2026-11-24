@@ -39,7 +39,7 @@ struct SettingsPreferences: Codable, Equatable, Sendable {
     static let key = "app.preferences.v1"
     static let defaultClipboardHotKey = (code: UInt32(kVK_ANSI_C), modifiers: UInt32(controlKey | shiftKey), label: "⌃⇧ C")
 
-    static let defaultAgentHotKey = (code: UInt32(kVK_ANSI_Slash), modifiers: UInt32(controlKey | shiftKey), label: "⌃⇧ /")
+    static let defaultAgentHotKey = (code: UInt32(kVK_Space), modifiers: UInt32(controlKey | cmdKey), label: "⌃⌘ Space")
 
     var launcherHotKey: LauncherActionShortcut {
         .init(code: hotKeyCode, modifiers: hotKeyModifiers, label: hotKeyLabel)
