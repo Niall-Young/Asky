@@ -292,6 +292,95 @@ private struct OnboardingInlinePillButtonStyle: ButtonStyle {
     }
 }
 
+// MARK: - Granted Status Badge
+
+private struct OnboardingGrantedBadge: View {
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    private var fillGradient: LinearGradient {
+        if scheme == .dark {
+            return LinearGradient(
+                colors: [
+                    Color(.sRGB, red: 0.24, green: 0.80, blue: 0.48, opacity: 0.14),
+                    Color(.sRGB, red: 0.18, green: 0.72, blue: 0.42, opacity: 0.20),
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        }
+        return LinearGradient(
+            colors: [
+                Color(.sRGB, red: 0.16, green: 0.72, blue: 0.42, opacity: 0.08),
+                Color(.sRGB, red: 0.14, green: 0.66, blue: 0.38, opacity: 0.14),
+            ],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+    }
+
+    private var borderColor: Color {
+        let boosted = contrast == .increased
+        if scheme == .dark {
+            return Color(.sRGB, red: 0.36, green: 0.86, blue: 0.56, opacity: boosted ? 0.42 : 0.22)
+        }
+        return Color(.sRGB, red: 0.14, green: 0.64, blue: 0.36, opacity: boosted ? 0.38 : 0.18)
+    }
+
+    private var emblemGradient: LinearGradient {
+        if scheme == .dark {
+            return LinearGradient(
+                colors: [
+                    Color(.sRGB, red: 0.30, green: 0.84, blue: 0.54, opacity: 1),
+                    Color(.sRGB, red: 0.18, green: 0.70, blue: 0.42, opacity: 1),
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        }
+        return LinearGradient(
+            colors: [
+                Color(.sRGB, red: 0.24, green: 0.78, blue: 0.46, opacity: 1),
+                Color(.sRGB, red: 0.14, green: 0.64, blue: 0.36, opacity: 1),
+            ],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ZStack {
+                Circle()
+                    .fill(emblemGradient)
+                    .frame(width: 16, height: 16)
+                    .shadow(
+                        color: Color(.sRGB, red: 0.14, green: 0.64, blue: 0.36, opacity: scheme == .dark ? 0.28 : 0.24),
+                        radius: 2,
+                        y: 1
+                    )
+                Image(mingCute: "checkmark", size: 10)
+                    .foregroundStyle(Color.white)
+            }
+            .accessibilityHidden(true)
+
+            Text(NSLocalizedString("已开启", comment: ""))
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(OnboardingInk.positive(scheme))
+        }
+        .padding(.leading, 6)
+        .padding(.trailing, 11)
+        .frame(height: 28)
+        .background(fillGradient, in: Capsule())
+        .overlay {
+            Capsule()
+                .strokeBorder(borderColor, lineWidth: 1)
+                .allowsHitTesting(false)
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
 // MARK: - Clean Surface Card
 
 private struct OnboardingCleanCard<Content: View>: View {
@@ -375,7 +464,6 @@ struct OnboardingView: View {
     @State private var loginStatus = ToolService.launchAtLoginStatus
 
     // Optional AI setup
-    @State private var showAIForm = false
     @State private var draft = ModelConfigurationDraft(provider: "custom", baseURL: nil, model: nil)
     @State private var apiKey = ""
     @State private var modelMessage: String?
@@ -653,12 +741,7 @@ struct OnboardingView: View {
     }
 
     private var grantedLabel: some View {
-        HStack(spacing: 4) {
-            Image(mingCute: "checkmark", size: 12)
-            Text(NSLocalizedString("已开启", comment: ""))
-        }
-        .font(.system(size: 12.5, weight: .medium))
-        .foregroundStyle(OnboardingInk.positive(scheme))
+        OnboardingGrantedBadge()
     }
 
     // MARK: - Step 3: Shortcuts
@@ -723,119 +806,86 @@ struct OnboardingView: View {
                 .foregroundStyle(OnboardingInk.primary(scheme))
                 .padding(.top, 14)
 
-            if app.isModelConfigured && !showAIForm, let cfg = app.modelConfiguration {
-                OnboardingCleanCard {
-                    HStack(spacing: 14) {
-                        LauncherFunctionIcon(kind: .ai)
-                            .frame(width: 32, height: 32)
-                            .accessibilityHidden(true)
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(NSLocalizedString("AI 模型已就绪", comment: ""))
-                                .font(.system(size: 13.5, weight: .medium))
-                                .foregroundStyle(OnboardingInk.primary(scheme))
-                            Text(cfg.modelName)
-                                .font(.system(size: 12, design: .monospaced))
-                                .foregroundStyle(OnboardingInk.positive(scheme))
-                        }
-                        Spacer(minLength: 12)
-                        Button(NSLocalizedString("修改配置", comment: "")) {
-                            loadModelDraft()
-                            showAIForm = true
-                        }
-                        .buttonStyle(OnboardingInlinePillButtonStyle())
+            OnboardingCleanCard {
+                VStack(spacing: 0) {
+                    HStack {
+                        Text(NSLocalizedString("供应商", comment: ""))
+                            .foregroundStyle(OnboardingInk.primary(scheme))
+                        Spacer()
+                        SettingsChoice(selection: Binding(get: { draft.provider }, set: { value in
+                            draft.select(value)
+                            apiKey = ""
+                            modelMessage = nil
+                            modelSaved = false
+                        }), options: ModelProviderPreset.all.map { ($0.id, NSLocalizedString($0.name, comment: "")) } + [
+                            ("custom", NSLocalizedString("完全自定义（OpenAI 兼容）", comment: ""))
+                        ])
                     }
                     .padding(.horizontal, 18)
-                    .padding(.vertical, 16)
-                }
-            } else {
-                OnboardingCleanCard {
-                    VStack(spacing: 0) {
+                    .padding(.vertical, 11)
+                    rowDivider
+
+                    if let preset = ModelProviderPreset.find(draft.provider) {
                         HStack {
-                            Text(NSLocalizedString("供应商", comment: ""))
+                            Text(NSLocalizedString("模型", comment: ""))
                                 .foregroundStyle(OnboardingInk.primary(scheme))
                             Spacer()
-                            SettingsChoice(selection: Binding(get: { draft.provider }, set: { value in
-                                draft.select(value)
-                                apiKey = ""
-                                modelMessage = nil
-                                modelSaved = false
-                            }), options: ModelProviderPreset.all.map { ($0.id, NSLocalizedString($0.name, comment: "")) } + [
-                                ("custom", NSLocalizedString("完全自定义（OpenAI 兼容）", comment: ""))
-                            ])
+                            SettingsChoice(selection: $draft.model, options: preset.models.map { ($0, $0) })
                         }
                         .padding(.horizontal, 18)
                         .padding(.vertical, 11)
                         rowDivider
-
-                        if let preset = ModelProviderPreset.find(draft.provider) {
-                            HStack {
-                                Text(NSLocalizedString("模型", comment: ""))
-                                    .foregroundStyle(OnboardingInk.primary(scheme))
-                                Spacer()
-                                SettingsChoice(selection: $draft.model, options: preset.models.map { ($0, $0) })
-                            }
-                            .padding(.horizontal, 18)
-                            .padding(.vertical, 11)
-                            rowDivider
-                        } else {
-                            SettingsTextField(NSLocalizedString("API 地址", comment: ""), text: $draft.baseURL,
-                                              prompt: Text("https://api.example.com/v1"))
-                                .padding(.horizontal, 18)
-                                .padding(.vertical, 10)
-                            rowDivider
-                            SettingsTextField(NSLocalizedString("模型名", comment: ""), text: $draft.model)
-                                .padding(.horizontal, 18)
-                                .padding(.vertical, 10)
-                            rowDivider
-                        }
-
-                        SettingsSecureField(NSLocalizedString("API Key", comment: ""), text: $apiKey,
-                                            prompt: Text(NSLocalizedString(canReuseKey ? "已保存，留空不变" : "输入 API Key", comment: "")))
+                    } else {
+                        SettingsTextField(NSLocalizedString("API 地址", comment: ""), text: $draft.baseURL,
+                                          prompt: Text("https://api.example.com/v1"))
                             .padding(.horizontal, 18)
                             .padding(.vertical, 10)
                         rowDivider
-
-                        HStack {
-                            if let preset = ModelProviderPreset.find(draft.provider) {
-                                Button {
-                                    _ = ToolService.openLauncherURL(preset.keyURL)
-                                } label: {
-                                    HStack(spacing: 4) {
-                                        Text(NSLocalizedString("获取 API Key", comment: ""))
-                                        Image(mingCute: "arrow.up.right", size: 12)
-                                    }
-                                    .font(.system(size: 12))
-                                    .foregroundStyle(OnboardingInk.secondary(scheme))
-                                }
-                                .buttonStyle(.plain)
-                            }
-                            Spacer()
-                            if showAIForm && app.isModelConfigured {
-                                Button(NSLocalizedString("取消", comment: "")) {
-                                    showAIForm = false
-                                    modelMessage = nil
-                                }
-                                .buttonStyle(OnboardingInlinePillButtonStyle())
-                            }
-                            SettingsButton(NSLocalizedString("保存并检查", comment: ""),
-                                           isLoading: savingModel || checkingModel,
-                                           isComplete: modelSaved,
-                                           loadingTitle: NSLocalizedString(savingModel ? "保存中…" : "检查中…", comment: "")) {
-                                Task { await saveAndCheckModel() }
-                            }
-                            .disabled(savingModel || checkingModel || modelSaved)
-                        }
-                        .padding(.horizontal, 18)
-                        .padding(.vertical, 11)
+                        SettingsTextField(NSLocalizedString("模型名", comment: ""), text: $draft.model)
+                            .padding(.horizontal, 18)
+                            .padding(.vertical, 10)
+                        rowDivider
                     }
-                    .disabled(savingModel || checkingModel)
-                }
 
-                if let modelMessage {
-                    Text(modelMessage)
-                        .font(.system(size: 12))
-                        .foregroundStyle(ThemeColor.kTextNegative)
+                    SettingsSecureField(NSLocalizedString("API Key", comment: ""), text: $apiKey,
+                                        prompt: Text(NSLocalizedString(canReuseKey ? "已保存，留空不变" : "输入 API Key", comment: "")))
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 10)
+                    rowDivider
+
+                    HStack {
+                        if let preset = ModelProviderPreset.find(draft.provider) {
+                            Button {
+                                _ = ToolService.openLauncherURL(preset.keyURL)
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Text(NSLocalizedString("获取 API Key", comment: ""))
+                                    Image(mingCute: "arrow.up.right", size: 12)
+                                }
+                                .font(.system(size: 12))
+                                .foregroundStyle(OnboardingInk.secondary(scheme))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        Spacer()
+                        SettingsButton(NSLocalizedString("保存并检查", comment: ""),
+                                       isLoading: savingModel || checkingModel,
+                                       isComplete: modelSaved,
+                                       loadingTitle: NSLocalizedString(savingModel ? "保存中…" : "检查中…", comment: "")) {
+                            Task { await saveAndCheckModel() }
+                        }
+                        .disabled(savingModel || checkingModel || modelSaved)
+                    }
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 11)
                 }
+                .disabled(savingModel || checkingModel)
+            }
+
+            if let modelMessage {
+                Text(modelMessage)
+                    .font(.system(size: 12))
+                    .foregroundStyle(ThemeColor.kTextNegative)
             }
 
             Spacer(minLength: 0)
@@ -1002,15 +1052,8 @@ struct OnboardingView: View {
             if report.failures.isEmpty {
                 modelSaved = true
                 Task {
-                    try? await Task.sleep(for: .milliseconds(1200))
+                    try? await Task.sleep(for: .milliseconds(1500))
                     modelSaved = false
-                    if reduceMotion {
-                        showAIForm = false
-                    } else {
-                        withAnimation(.spring(response: 0.4, dampingFraction: 0.92)) {
-                            showAIForm = false
-                        }
-                    }
                 }
             } else {
                 modelMessage = report.failures.joined(separator: "\n")
