@@ -133,7 +133,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         do { try model.initializeLaunchAtLogin() }
         catch { NSLog("Unable to initialize launch at login: %@", error.localizedDescription) }
         model.onOpenSettings = { [weak self] in self?.openSettings() }
-        model.onOpenOnboarding = { [weak self] in self?.openOnboarding() }
         dockVisibility.showDockIcon = model.preferences.showDockIcon
         model.onDockIconVisibilityChange = { [weak self] visible in
             self?.dockVisibility.showDockIcon = visible
@@ -466,7 +465,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if let settingsWindow { windowPresentation.show(settingsWindow) }
     }
 
-    @objc private func openOnboarding() {
+    private func openOnboarding() {
         if onboardingWindow == nil {
             let w = OnboardingWindow.make(app: model, onFinish: { [weak self] in
                 self?.onboardingWindow?.close()

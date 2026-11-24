@@ -58,7 +58,7 @@ brew install --cask niall-young/asky/asky
 
 也可从 [Releases](https://github.com/Niall-Young/Asky/releases) 下载 DMG，将 `Asky.app` 拖入“应用程序”。应用内自动更新默认开启，可在“设置 › 关于 Asky › 软件更新”中管理；更新前会核对 ZIP 的 SHA-256 校验文件和开发者团队签名。
 
-首次启动会自动打开欢迎引导窗口，帮助完成基础配置（后续可随时在“设置 › 关于 Asky › 欢迎引导”重新打开）：
+首次启动会自动打开欢迎引导窗口，帮助完成基础配置：
 
 1. 了解快速搜索、剪贴板历史与 AI 助手的核心入口；Asky 常驻菜单栏。
 2. 按提示授予辅助功能权限；自动粘贴和窗口搜索需要该权限。
@@ -163,7 +163,7 @@ brew install --cask niall-young/asky/asky
 
 Or download the DMG from [Releases](https://github.com/Niall-Young/Asky/releases) and drag `Asky.app` into Applications. In-app automatic updates are enabled by default and can be managed in Settings › About Asky › Software Update; before installing, Asky verifies the ZIP against its SHA-256 checksum file and checks the developer team signature.
 
-First launch automatically opens a welcome guide to walk you through initial setup (reopen it anytime from Settings › About Asky › Welcome Guide):
+First launch automatically opens a welcome guide to walk you through initial setup:
 
 1. Review Quick Search, Clipboard History, and AI Assistant; Asky stays in the menu bar.
 2. Grant Accessibility access when prompted; automatic pasting and window search require it.
