@@ -48,10 +48,30 @@ private final class ComposerLineLayoutDelegate: NSObject, NSLayoutManagerDelegat
     }
 }
 
+private final class ComposerScrollView: NSScrollView {
+    override func setFrameOrigin(_ newOrigin: NSPoint) {
+        let changed = frame.origin != newOrigin
+        super.setFrameOrigin(newOrigin)
+        if changed { invalidateIMEIfComposing() }
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        let changed = frame.size != newSize
+        super.setFrameSize(newSize)
+        if changed { invalidateIMEIfComposing() }
+    }
+
+    private func invalidateIMEIfComposing() {
+        guard let editor = documentView as? ComposerTextView, editor.hasMarkedText() else { return }
+        editor.inputContext?.invalidateCharacterCoordinates()
+    }
+}
+
 private final class ComposerTextView: NSTextView {
     var pasteAttachment: () -> Bool = { false }
     var pasteLongText: (String) -> InlineTagKind? = { _ in nil }
     var onRevealReply: ((String) -> Void)?
+    var onMarkedTextChanged: ((Bool) -> Void)?
     var shortcuts = SettingsPreferences()
     var submit: () -> Void = {}
     var focusChanged: (Bool) -> Void = { _ in }
@@ -316,9 +336,112 @@ private final class ComposerTextView: NSTextView {
     func resetDraft() {
         clearHoveredTag()
         popoverPresenter.close()
+        if hasMarkedText() {
+            unmarkText()
+        }
         textStorage?.setAttributedString(NSAttributedString())
         updateTypingAttributes()
         needsDisplay = true
+    }
+
+    override func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
+        super.setMarkedText(string, selectedRange: selectedRange, replacementRange: replacementRange)
+        onMarkedTextChanged?(hasMarkedText())
+    }
+
+    override func unmarkText() {
+        super.unmarkText()
+        onMarkedTextChanged?(hasMarkedText())
+        if (textStorage?.length ?? 0) == 0 {
+            needsDisplay = true
+        }
+    }
+
+    override func firstRect(forCharacterRange aRange: NSRange, actualRange: NSRangePointer?) -> NSRect {
+        let rect = super.firstRect(forCharacterRange: aRange, actualRange: actualRange)
+        if rect.height > 0 { return rect }
+        return fallbackFirstRect(forCharacterRange: aRange, actualRange: actualRange) ?? rect
+    }
+
+    private func fallbackFirstRect(forCharacterRange aRange: NSRange, actualRange: NSRangePointer?) -> NSRect? {
+        guard aRange.location != NSNotFound,
+              let storage = textStorage,
+              let layout = layoutManager,
+              let container = textContainer,
+              let window else { return nil }
+        layout.ensureLayout(for: container)
+        let length = storage.length
+        let loc = min(aRange.location, length)
+        let len = min(aRange.length, max(0, length - loc))
+
+        var localRect: NSRect
+        if len > 0 {
+            let glyphRange = layout.glyphRange(forCharacterRange: NSRange(location: loc, length: len), actualCharacterRange: nil)
+            if glyphRange.length > 0 {
+                var lineGlyphRange = NSRange()
+                _ = layout.lineFragmentRect(forGlyphAt: glyphRange.location, effectiveRange: &lineGlyphRange)
+                let firstLineGlyphs = NSIntersectionRange(glyphRange, lineGlyphRange)
+                let targetGlyphs = firstLineGlyphs.length > 0
+                    ? firstLineGlyphs
+                    : NSRange(location: glyphRange.location, length: 1)
+                localRect = layout.boundingRect(forGlyphRange: targetGlyphs, in: container)
+                if let actualRange {
+                    actualRange.pointee = layout.characterRange(forGlyphRange: targetGlyphs, actualGlyphRange: nil)
+                }
+            } else {
+                localRect = caretContainerRect(at: loc, length: length, layout: layout, container: container)
+                if let actualRange { actualRange.pointee = NSRange(location: loc, length: 0) }
+            }
+        } else {
+            localRect = caretContainerRect(at: loc, length: length, layout: layout, container: container)
+            if let actualRange { actualRange.pointee = NSRange(location: loc, length: 0) }
+        }
+
+        if localRect.height <= 0 {
+            localRect.size.height = Self.lineHeight
+        }
+        localRect.origin.x += textContainerOrigin.x
+        localRect.origin.y += textContainerOrigin.y
+        let windowRect = convert(localRect, to: nil)
+        return window.convertToScreen(windowRect)
+    }
+
+    private func caretContainerRect(
+        at loc: Int,
+        length: Int,
+        layout: NSLayoutManager,
+        container: NSTextContainer
+    ) -> NSRect {
+        if length == 0 {
+            return NSRect(x: 0, y: 0, width: 0, height: Self.lineHeight)
+        }
+        if loc == length, layout.extraLineFragmentRect.height > 0 {
+            return NSRect(
+                x: layout.extraLineFragmentUsedRect.minX,
+                y: layout.extraLineFragmentRect.minY,
+                width: 0,
+                height: layout.extraLineFragmentRect.height
+            )
+        }
+        if loc < length {
+            let glyphIndex = layout.glyphIndexForCharacter(at: loc)
+            let lineRect = layout.lineFragmentRect(forGlyphAt: glyphIndex, effectiveRange: nil)
+            let glyphLoc = layout.location(forGlyphAt: glyphIndex)
+            return NSRect(
+                x: lineRect.minX + glyphLoc.x,
+                y: lineRect.minY,
+                width: 0,
+                height: max(lineRect.height, Self.lineHeight)
+            )
+        }
+        let glyphIndex = layout.glyphIndexForCharacter(at: length - 1)
+        let glyphRect = layout.boundingRect(forGlyphRange: NSRange(location: glyphIndex, length: 1), in: container)
+        return NSRect(
+            x: glyphRect.maxX,
+            y: glyphRect.minY,
+            width: 0,
+            height: max(glyphRect.height, Self.lineHeight)
+        )
     }
 
     override func mouseMoved(with event: NSEvent) {
@@ -546,6 +669,7 @@ struct ComposerTextEditor: NSViewRepresentable {
     var pendingInsertions: [ComposerTagInsertion]
     var consumeInsertions: ([UUID]) -> Void
     var onSegmentsChanged: ([MessageSegment]) -> Void
+    var onMarkedTextChanged: (Bool) -> Void = { _ in }
     var pasteAttachment: () -> Bool
     var pasteLongText: (String) -> InlineTagKind?
     var onRevealReply: (String) -> Void
@@ -558,7 +682,7 @@ struct ComposerTextEditor: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     func makeNSView(context: Context) -> NSScrollView {
-        let scroll = NSScrollView()
+        let scroll = ComposerScrollView()
         let storage = NSTextStorage()
         let layout = NSLayoutManager()
         let container = NSTextContainer(size: NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude))
@@ -588,6 +712,9 @@ struct ComposerTextEditor: NSViewRepresentable {
         editor.delegate = context.coordinator
         editor.focusChanged = { [weak coordinator = context.coordinator] focused in
             DispatchQueue.main.async { coordinator?.parent.isFocused = focused }
+        }
+        editor.onMarkedTextChanged = { [weak coordinator = context.coordinator] composing in
+            coordinator?.handleMarkedTextChanged(composing)
         }
         editor.setAccessibilityLabel(NSLocalizedString("消息输入", comment: ""))
         scroll.drawsBackground = false
@@ -657,6 +784,12 @@ struct ComposerTextEditor: NSViewRepresentable {
             editor.window?.makeFirstResponder(editor)
         }
         context.coordinator.updateHeight()
+        if editor.hasMarkedText() {
+            DispatchQueue.main.async { [weak editor] in
+                guard let editor, editor.hasMarkedText() else { return }
+                editor.inputContext?.invalidateCharacterCoordinates()
+            }
+        }
     }
 
     @MainActor final class Coordinator: NSObject, NSTextViewDelegate {
@@ -665,12 +798,27 @@ struct ComposerTextEditor: NSViewRepresentable {
         var lastResetRevision = 0
         var lastColorScheme: ColorScheme?
         var lastSelectionColor: Color?
+        var lastMarkedText = false
         var appliedInsertionIDs: Set<UUID> = []
 
         init(_ parent: ComposerTextEditor) { self.parent = parent }
 
+        func handleMarkedTextChanged(_ composing: Bool) {
+            syncMarkedTextState(composing)
+            updateHeight()
+        }
+
+        private func syncMarkedTextState(_ composing: Bool) {
+            guard lastMarkedText != composing else { return }
+            lastMarkedText = composing
+            DispatchQueue.main.async { [weak self] in
+                self?.parent.onMarkedTextChanged(composing)
+            }
+        }
+
         func textDidChange(_ notification: Notification) {
             guard let editor else { return }
+            syncMarkedTextState(editor.hasMarkedText())
             let segments = editor.extractSegments()
             parent.onSegmentsChanged(segments)
             updateHeight()
@@ -697,9 +845,14 @@ struct ComposerTextEditor: NSViewRepresentable {
                         scroll.reflectScrolledClipView(scroll.contentView)
                         if let editor {
                             editor.scrollRangeToVisible(editor.selectedRange())
+                            if editor.hasMarkedText() {
+                                editor.inputContext?.invalidateCharacterCoordinates()
+                            }
                         }
                         scroll.flashScrollers()
                     }
+                } else if editor.hasMarkedText() {
+                    editor.scrollRangeToVisible(editor.selectedRange())
                 }
             } else {
                 editor.pinScrollToTop()

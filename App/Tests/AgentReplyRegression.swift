@@ -95,6 +95,115 @@ enum AgentReplyRegression {
         print("Composer tag height regression passed: empty=\(emptyScrollHeight), tagOnly=\(tagOnlyHeight), plain=\(plainTextHeight), text+tag=\(textWithTagHeight), baseline=\(plainBaseline)->\(textWithTagBaseline), twoLine=\(twoLinePlainHeight)->\(twoLineTagHeight)")
     }
 
+    static func composerIMELineWrapRegression(app: AppModel) async throws {
+        let model = AgentModel(app: app)
+        let controller = AgentWindowController(model: model, presentation: WindowPresentation())
+        controller.show()
+        let window = NSApp.windows.first { $0.title == "Asky AI" }!
+        defer { window.orderOut(nil) }
+        try await Task.sleep(for: .milliseconds(400))
+
+        guard let editor = window.firstResponder as? NSTextView,
+              let scroll = editor.enclosingScrollView,
+              let layout = editor.layoutManager,
+              let container = editor.textContainer else {
+            preconditionFailure("Expected focused ComposerTextView with scroll view")
+        }
+
+        func waitLayout() async throws {
+            try await Task.sleep(for: .milliseconds(150))
+            layout.ensureLayout(for: container)
+        }
+
+        func assertRectInsideWindow(_ rect: NSRect, label: String) {
+            precondition(rect != .zero && rect.height > 0,
+                         "\(label): IME rect must not be zero: \(rect)")
+            precondition(rect.minX >= window.frame.minX && rect.maxX <= window.frame.maxX,
+                         "\(label): IME rect X must stay inside window \(window.frame), got \(rect)")
+            precondition(rect.minY >= window.frame.minY && rect.maxY <= window.frame.maxY,
+                         "\(label): IME rect Y must stay inside window \(window.frame), got \(rect)")
+        }
+
+        try await waitLayout()
+        let singleLineHeight = scroll.frame.height
+
+        // 1. Fill line 1 right up to the wrapping boundary, then compose IME text that wraps onto line 2.
+        var line1 = ""
+        for ch in "不过听说 google 在今年 8 月份做了一次人员大换血，换掉了很多没啥用的人，然后" {
+            let candidate = line1 + String(ch)
+            editor.selectAll(nil)
+            editor.insertText(candidate, replacementRange: editor.selectedRange())
+            layout.ensureLayout(for: container)
+            let natural = ceil(layout.usedRect(for: container).height + editor.textContainerInset.height * 2)
+            if natural > singleLineHeight + 1 {
+                editor.selectAll(nil)
+                editor.insertText(line1, replacementRange: editor.selectedRange())
+                break
+            }
+            line1 = candidate
+        }
+        try await waitLayout()
+        precondition(abs(scroll.frame.height - singleLineHeight) < 0.5,
+                     "Line 1 text should still be single-line: \(scroll.frame.height) vs \(singleLineHeight)")
+
+        editor.setMarkedText("jihe", selectedRange: NSRange(location: 4, length: 0),
+                             replacementRange: NSRange(location: NSNotFound, length: 0))
+        let markedRange = editor.markedRange()
+        precondition(markedRange.location != NSNotFound && markedRange.length == 4,
+                     "Expected active marked range, got \(markedRange)")
+
+        // Synchronously (before SwiftUI grows the scroll view), firstRect must NOT return NSZeroRect.
+        let immediateRect = editor.firstRect(forCharacterRange: markedRange, actualRange: nil)
+        assertRectInsideWindow(immediateRect, label: "immediate-wrap-marked-text")
+
+        // After layout, composer must have grown to 2 lines even while still composing (before commit).
+        try await waitLayout()
+        let wrappedHeight = scroll.frame.height
+        precondition(wrappedHeight > singleLineHeight + 10,
+                     "Composer must grow while IME marked text wraps to line 2: single=\(singleLineHeight), wrapped=\(wrappedHeight)")
+        let settledRect = editor.firstRect(forCharacterRange: markedRange, actualRange: nil)
+        assertRectInsideWindow(settledRect, label: "settled-wrap-marked-text")
+        let scrollScreenRect = window.convertToScreen(scroll.convert(scroll.bounds, to: nil))
+        precondition(settledRect.minY >= scrollScreenRect.minY - 2 && settledRect.maxY <= scrollScreenRect.maxY + 2,
+                     "Settled IME rect \(settledRect) must sit inside scroll view \(scrollScreenRect)")
+
+        // 2. Cancelling composition must shrink composer back to 1 line.
+        editor.setMarkedText("", selectedRange: NSRange(location: 0, length: 0),
+                             replacementRange: NSRange(location: NSNotFound, length: 0))
+        editor.unmarkText()
+        try await waitLayout()
+        precondition(abs(scroll.frame.height - singleLineHeight) < 0.5,
+                     "Cancelling wrapped marked text must restore single-line height: \(scroll.frame.height) vs \(singleLineHeight)")
+
+        // 3. Explicit newline + IME marked text on the new empty line must also stay inside window.
+        editor.insertNewlineIgnoringFieldEditor(nil)
+        editor.setMarkedText("ceshi", selectedRange: NSRange(location: 5, length: 0),
+                             replacementRange: NSRange(location: NSNotFound, length: 0))
+        let newlineImmediateRect = editor.firstRect(forCharacterRange: editor.markedRange(), actualRange: nil)
+        assertRectInsideWindow(newlineImmediateRect, label: "explicit-newline-marked-text")
+        try await waitLayout()
+        precondition(scroll.frame.height > singleLineHeight + 10,
+                     "Composer must grow for explicit newline + marked text")
+        editor.unmarkText()
+
+        // 4. Empty composer + long marked text wrapping to 2 lines must grow before commit.
+        editor.selectAll(nil)
+        editor.insertText("", replacementRange: editor.selectedRange())
+        try await waitLayout()
+        precondition(model.isComposerEmpty, "Composer should be empty before empty-compose check")
+        let longMarked = String(repeating: "pinyin ", count: 15)
+        editor.setMarkedText(longMarked, selectedRange: NSRange(location: (longMarked as NSString).length, length: 0),
+                             replacementRange: NSRange(location: NSNotFound, length: 0))
+        let emptyImmediateRect = editor.firstRect(forCharacterRange: editor.markedRange(), actualRange: nil)
+        assertRectInsideWindow(emptyImmediateRect, label: "empty-composer-long-marked")
+        try await waitLayout()
+        precondition(scroll.frame.height > singleLineHeight + 10,
+                     "Empty composer must grow when marked text wraps before commit: \(scroll.frame.height) vs \(singleLineHeight)")
+        editor.unmarkText()
+
+        print("Composer IME line wrap regression passed: single=\(singleLineHeight), wrapped=\(wrappedHeight), immediateRect=\(immediateRect), settledRect=\(settledRect)")
+    }
+
     static func composerBackspaceRegression(app: AppModel) async throws {
         let model = AgentModel(app: app)
         let controller = AgentWindowController(model: model, presentation: WindowPresentation())
@@ -3033,6 +3142,10 @@ enum AgentReplyRegression {
             let captureIdx = CommandLine.arguments.firstIndex(of: "--capture-prefix").map { $0 + 1 }
             let capturePrefix = captureIdx.flatMap { $0 < CommandLine.arguments.count ? CommandLine.arguments[$0] : nil }
             try await composerTagHeightRegression(app: app, capturePrefix: capturePrefix)
+            return
+        }
+        if CommandLine.arguments.contains("--composer-ime-wrap") {
+            try await composerIMELineWrapRegression(app: app)
             return
         }
         if CommandLine.arguments.contains("--composer-backspace") {

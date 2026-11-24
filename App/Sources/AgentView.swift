@@ -1479,6 +1479,7 @@ private struct Composer: View {
     @State private var importing = false
     @State private var editorHeight: CGFloat = 28
     @State private var editorFocused = false
+    @State private var hasMarkedText = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -1489,6 +1490,7 @@ private struct Composer: View {
                 pendingInsertions: model.pendingTagInsertions,
                 consumeInsertions: { model.consumeTagInsertions($0) },
                 onSegmentsChanged: { model.syncDraft(segments: $0) },
+                onMarkedTextChanged: { hasMarkedText = $0 },
                 pasteAttachment: { model.pasteAttachments() },
                 pasteLongText: { model.collapsePastedTextIfNeeded($0) },
                 onRevealReply: { _ = model.revealReply($0) },
@@ -1496,7 +1498,7 @@ private struct Composer: View {
                 shortcuts: model.shortcutPreferences
             )
             .environment(\.chatSelectionColor, model.avatarColor.tint)
-            .frame(height: model.isComposerEmpty ? 28 : editorHeight)
+            .frame(height: (model.isComposerEmpty && !hasMarkedText) ? 28 : editorHeight)
             .padding(.horizontal, 4)
             HStack {
                 Button { importing = true } label: {
