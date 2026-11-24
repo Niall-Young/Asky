@@ -698,6 +698,24 @@ enum AgentReplyRegression {
         let linked = try AttributedString(markdown: "[Moonshot AI 官网](https://example.com) 与 [来源](https://example.com)")
         precondition(ChatSourceTextView.sources(in: linked).count == 1, "Repeated links in one information block share one favicon")
 
+        var scrollState = ChatSourceScrollGuard.WindowScrollState()
+        precondition(!scrollState.record(phase: .mayBegin, momentumPhase: [], hasDelta: false, at: 10.0),
+                     "Resting fingers without movement must not suppress hover")
+        precondition(!scrollState.isSuppressed(at: 10.0))
+        precondition(scrollState.record(phase: .began, momentumPhase: [], hasDelta: true, at: 10.1))
+        precondition(scrollState.isSuppressed(at: 10.2))
+        precondition(scrollState.record(phase: .ended, momentumPhase: [], hasDelta: false, at: 10.3))
+        precondition(scrollState.isSuppressed(at: 10.55), "Cooldown must bridge finger lift to momentum")
+        precondition(scrollState.record(phase: [], momentumPhase: .began, hasDelta: true, at: 10.4))
+        precondition(scrollState.record(phase: [], momentumPhase: .ended, hasDelta: false, at: 10.6))
+        precondition(scrollState.isSuppressed(at: 10.8))
+        precondition(!scrollState.isSuppressed(at: 11.0), "Hover must resume after momentum cooldown")
+        precondition(scrollState.record(phase: [], momentumPhase: [], hasDelta: true, at: 20.0))
+        precondition(scrollState.isSuppressed(at: 20.3))
+        precondition(!scrollState.isSuppressed(at: 20.4), "Discrete wheel cooldown must expire")
+        precondition(scrollState.record(phase: .began, momentumPhase: [], hasDelta: true, at: 30.0))
+        precondition(!scrollState.isSuppressed(at: 31.0), "Dropped end event must not stick suppression forever")
+
         let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 640, height: 440),
                               styleMask: [.titled], backing: .buffered, defer: false)
         window.title = "Asky Source Preview"
@@ -793,6 +811,50 @@ enum AgentReplyRegression {
                 precondition(text.textView(text, clickedOnLink: URL(string: "https://devin.ai/")!, at: linkRange.location),
                              "Clicking a grouped source tag opens its list rather than navigating to the first URL")
                 precondition(text.preview?.isShown == true)
+                if scheme == .dark {
+                    // Scrolling the parent conversation window immediately dismisses an open source card.
+                    ChatSourceScrollGuard.shared.recordScroll(in: window, phase: .began, momentumPhase: [], hasDelta: true)
+                    precondition(text.preview?.isShown != true, "Conversation scroll must dismiss an open source card")
+
+                    // Hovering during active scroll suppression must not open the card.
+                    text.mouseMoved(with: event)
+                    try await Task.sleep(for: .milliseconds(450))
+                    precondition(text.preview?.isShown != true, "Hover during scroll must not open source card")
+
+                    // Explicit click still opens the card even right after scrolling.
+                    ChatSourceScrollGuard.shared.recordScroll(in: window, phase: [], momentumPhase: [], hasDelta: true)
+                    precondition(text.textView(text, clickedOnLink: URL(string: "https://devin.ai/")!, at: linkRange.location))
+                    precondition(text.preview?.isShown == true, "Explicit click must still open source card after scroll")
+                    text.preview?.close()
+                    ChatSourceScrollGuard.shared.resetForTesting(window: window)
+
+                    // A scroll arriving mid-hover cancels the pending 300ms timer.
+                    text.mouseMoved(with: event)
+                    try await Task.sleep(for: .milliseconds(100))
+                    ChatSourceScrollGuard.shared.recordScroll(in: window, phase: .began, momentumPhase: [], hasDelta: true)
+                    try await Task.sleep(for: .milliseconds(350))
+                    precondition(text.preview?.isShown != true, "Mid-hover scroll must cancel pending source popover")
+                    ChatSourceScrollGuard.shared.resetForTesting(window: window)
+
+                    // Moving the scroll viewport without a scrollWheel event (e.g. scrollbar drag) also aborts hover.
+                    if let enclosingScroll = text.enclosingScrollView {
+                        let beforeOrigin = enclosingScroll.contentView.bounds.origin
+                        text.mouseMoved(with: event)
+                        try await Task.sleep(for: .milliseconds(100))
+                        enclosingScroll.contentView.scroll(to: NSPoint(x: beforeOrigin.x, y: beforeOrigin.y + 40))
+                        enclosingScroll.reflectScrolledClipView(enclosingScroll.contentView)
+                        try await Task.sleep(for: .milliseconds(350))
+                        precondition(text.preview?.isShown != true, "Anchor shift during hover delay must abort source popover")
+                        enclosingScroll.contentView.scroll(to: beforeOrigin)
+                        enclosingScroll.reflectScrolledClipView(enclosingScroll.contentView)
+                    }
+
+                    // After scrolling settles, hovering the same badge works again.
+                    ChatSourceScrollGuard.shared.resetForTesting(window: window)
+                    text.mouseMoved(with: event)
+                    try await Task.sleep(for: .milliseconds(450))
+                    precondition(text.preview?.isShown == true, "Hover must work again after scroll settles")
+                }
                 text.preview?.close()
             }
 

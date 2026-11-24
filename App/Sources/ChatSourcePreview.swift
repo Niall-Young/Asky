@@ -66,6 +66,7 @@ final class ChatSourceTextView: ChatSelectableTextView, NSTextViewDelegate {
         didSet {
             guard hasSourceBadges != oldValue else { return }
             if !hasSourceBadges { cancelPendingHover() }
+            syncScrollGuard()
             if window != nil { updateTrackingAreas() }
         }
     }
@@ -202,16 +203,29 @@ final class ChatSourceTextView: ChatSelectableTextView, NSTextViewDelegate {
         super.mouseMoved(with: event)
         guard hasSourceBadges else { return }
         cursorUpdate(with: event)
+        guard let window, !ChatSourceScrollGuard.shared.isSuppressed(for: window) else {
+            cancelPendingHover(); return
+        }
         guard let (index, sources) = source(at: event.locationInWindow), let url = sources.first else {
             cancelPendingHover(); return
         }
         if sourceURL == url, hoverTask != nil || preview?.isShown == true { return }
+        guard let initialAnchor = sourceAnchor(at: index) else {
+            cancelPendingHover(); return
+        }
         hoverTask?.cancel()
         preview?.close()
         sourceURL = url
         hoverTask = Task { @MainActor [weak self] in
             do { try await Task.sleep(for: .milliseconds(300)) } catch { return }
-            guard let self, self.sourceAnchor(at: index) != nil else { return }
+            guard let self, let window = self.window,
+                  !ChatSourceScrollGuard.shared.isSuppressed(for: window),
+                  let currentAnchor = self.sourceAnchor(at: index),
+                  abs(currentAnchor.origin.x - initialAnchor.origin.x) < 1,
+                  abs(currentAnchor.origin.y - initialAnchor.origin.y) < 1 else {
+                self?.cancelPendingHover()
+                return
+            }
             self.openSources(sources, at: index)
         }
     }
@@ -221,7 +235,7 @@ final class ChatSourceTextView: ChatSelectableTextView, NSTextViewDelegate {
         cancelPendingHover()
     }
 
-    private func cancelPendingHover() {
+    func cancelPendingHover() {
         hoverTask?.cancel()
         hoverTask = nil
         if preview?.isShown != true { sourceURL = nil }
@@ -229,14 +243,174 @@ final class ChatSourceTextView: ChatSelectableTextView, NSTextViewDelegate {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        syncScrollGuard()
         if window == nil { cancelPendingHover(); preview?.close(); preview = nil; sourceURL = nil }
+    }
+
+    private func syncScrollGuard() {
+        if window != nil && hasSourceBadges {
+            ChatSourceScrollGuard.shared.register(self)
+        } else {
+            ChatSourceScrollGuard.shared.unregister(self)
+        }
+    }
+
+    deinit {
+        MainActor.assumeIsolated { ChatSourceScrollGuard.shared.unregister(self) }
+    }
+}
+
+/// Suppresses citation hover popovers during conversation scrolling and dismisses open cards
+/// so accidental pointer hovers over badges never interrupt scrolling.
+@MainActor
+final class ChatSourceScrollGuard {
+    static let shared = ChatSourceScrollGuard()
+
+    struct WindowScrollState {
+        var activeGesture = false
+        var activeMomentum = false
+        var lastEventTime: TimeInterval = 0
+        var suppressedUntil: TimeInterval = 0
+
+        mutating func record(
+            phase: NSEvent.Phase,
+            momentumPhase: NSEvent.Phase,
+            hasDelta: Bool,
+            at now: TimeInterval
+        ) -> Bool {
+            if !momentumPhase.isEmpty {
+                lastEventTime = now
+                if momentumPhase.contains(.ended) || momentumPhase.contains(.cancelled) {
+                    activeMomentum = false
+                    suppressedUntil = max(suppressedUntil, now + 0.25)
+                } else {
+                    activeMomentum = true
+                    suppressedUntil = max(suppressedUntil, now + 0.35)
+                }
+                return true
+            }
+
+            if !phase.isEmpty {
+                if phase == .mayBegin && !hasDelta { return false }
+                lastEventTime = now
+                if phase.contains(.ended) || phase.contains(.cancelled) {
+                    activeGesture = false
+                    suppressedUntil = max(suppressedUntil, now + 0.3)
+                } else {
+                    activeGesture = true
+                    activeMomentum = false
+                    suppressedUntil = max(suppressedUntil, now + 0.35)
+                }
+                return true
+            }
+
+            guard hasDelta else { return false }
+            activeGesture = false
+            activeMomentum = false
+            lastEventTime = now
+            suppressedUntil = max(suppressedUntil, now + 0.35)
+            return true
+        }
+
+        func isSuppressed(at now: TimeInterval) -> Bool {
+            if now < suppressedUntil { return true }
+            // Safety cap in case AppKit drops an ended/cancelled phase event.
+            if (activeGesture || activeMomentum), now - lastEventTime < 0.6 { return true }
+            return false
+        }
+    }
+
+    private struct Entry { weak var textView: ChatSourceTextView? }
+    private var entries: [Entry] = []
+    private var states: [ObjectIdentifier: WindowScrollState] = [:]
+    nonisolated(unsafe) private var monitor: Any?
+
+    func register(_ textView: ChatSourceTextView) {
+        entries.removeAll { $0.textView == nil || $0.textView === textView }
+        entries.append(Entry(textView: textView))
+        if monitor == nil {
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+                let consumed = MainActor.assumeIsolated {
+                    self?.handle(event) ?? false
+                }
+                return consumed ? nil : event
+            }
+        }
+    }
+
+    func unregister(_ textView: ChatSourceTextView) {
+        entries.removeAll { $0.textView == nil || $0.textView === textView }
+        if entries.isEmpty, let monitor {
+            NSEvent.removeMonitor(monitor)
+            self.monitor = nil
+            states.removeAll()
+        }
+    }
+
+    func isSuppressed(for window: NSWindow, at now: TimeInterval = ProcessInfo.processInfo.systemUptime) -> Bool {
+        states[ObjectIdentifier(window)]?.isSuppressed(at: now) ?? false
+    }
+
+    @discardableResult
+    func recordScroll(
+        in window: NSWindow,
+        phase: NSEvent.Phase,
+        momentumPhase: NSEvent.Phase,
+        hasDelta: Bool,
+        at now: TimeInterval = ProcessInfo.processInfo.systemUptime
+    ) -> Bool {
+        var state = states[ObjectIdentifier(window)] ?? WindowScrollState()
+        guard state.record(phase: phase, momentumPhase: momentumPhase, hasDelta: hasDelta, at: now) else {
+            return false
+        }
+        states[ObjectIdentifier(window)] = state
+        if let active = ChatSourcePopover.active, active.isShown, active.parentWindow === window {
+            active.close()
+        }
+        for entry in entries where entry.textView?.window === window {
+            entry.textView?.cancelPendingHover()
+        }
+        return true
+    }
+
+    @discardableResult
+    func handle(_ event: NSEvent, at now: TimeInterval = ProcessInfo.processInfo.systemUptime) -> Bool {
+        entries.removeAll { $0.textView == nil }
+        let hasDelta = event.scrollingDeltaX != 0 || event.scrollingDeltaY != 0 || event.deltaX != 0 || event.deltaY != 0
+
+        if let active = ChatSourcePopover.active, active.isShown, event.window === active.panel {
+            if active.isScrollable { return false }
+            guard let parent = active.parentWindow else { return false }
+            let scroll = active.enclosingScrollView
+            guard recordScroll(in: parent, phase: event.phase, momentumPhase: event.momentumPhase, hasDelta: hasDelta, at: now) else {
+                return false
+            }
+            if let scroll {
+                scroll.scrollWheel(with: event)
+                return true
+            }
+            return false
+        }
+
+        guard let window = event.window else { return false }
+        let hasTarget = entries.contains { $0.textView?.window === window }
+            || (ChatSourcePopover.active?.isShown == true && ChatSourcePopover.active?.parentWindow === window)
+        guard hasTarget else { return false }
+
+        _ = recordScroll(in: window, phase: event.phase, momentumPhase: event.momentumPhase, hasDelta: hasDelta, at: now)
+        return false
+    }
+
+    func resetForTesting(window: NSWindow? = nil) {
+        if let window { states.removeValue(forKey: ObjectIdentifier(window)) }
+        else { states.removeAll() }
     }
 }
 
 /// A window-sized glass card stays attached to the source even in a scrolled transcript.
 @MainActor
 final class ChatSourcePopover {
-    private static weak var active: ChatSourcePopover?
+    private(set) static weak var active: ChatSourcePopover?
     let panel = SurfacePanel()
     private weak var textView: ChatSourceTextView?
     private let index: Int
@@ -245,8 +419,11 @@ final class ChatSourcePopover {
     private var host: FirstMouseHostingView<AnyView>?
     private var metadataTask: Task<Void, Never>?
     private var trackingTask: Task<Void, Never>?
+    private(set) var isScrollable = false
     var isShown: Bool { panel.isVisible }
     var contentView: NSView? { panel.contentView }
+    var parentWindow: NSWindow? { textView?.window }
+    var enclosingScrollView: NSScrollView? { textView?.enclosingScrollView }
 
     init(textView: ChatSourceTextView, index: Int, sources: [URL]) {
         self.textView = textView
@@ -342,7 +519,9 @@ final class ChatSourcePopover {
         let rows = ChatSourcePreview(sources: sources, metadata: metadata)
         let measured = SurfacePanel.fittingSize(of: rows, maxWidth: ChatSourcePreview.width)
         let available = textView?.window?.screen?.visibleFrame.height ?? 700
-        let size = NSSize(width: ChatSourcePreview.width, height: min(measured.height, min(460, available - 32)))
+        let maxHeight = min(460, available - 32)
+        let size = NSSize(width: ChatSourcePreview.width, height: min(measured.height, maxHeight))
+        isScrollable = measured.height > maxHeight + 1
         let view = ScrollView { rows }.frame(width: size.width, height: size.height)
             .windowSurfaceBackground(in: RoundedRectangle(cornerRadius: ChatSourcePreview.cornerRadius))
         if let host {
@@ -375,6 +554,7 @@ final class ChatSourcePopover {
     }
 
     func close() {
+        if Self.active === self { Self.active = nil }
         metadataTask?.cancel()
         trackingTask?.cancel()
         panel.remove()
