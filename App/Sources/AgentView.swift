@@ -197,7 +197,17 @@ enum ChatTranscriptBubbleLayout {
                         canConnectBelow: !item.needsPermissionSettings,
                         isUser: false
                     )
-                case .tool, .notice, .error:
+                case .tool:
+                    let hasCard = item.resultCard != nil
+                    entry = Entry(
+                        groupIndex: groupIndex,
+                        itemIndex: itemIndex,
+                        side: hasCard ? .leading : nil,
+                        canConnectAbove: hasCard,
+                        canConnectBelow: hasCard,
+                        isUser: false
+                    )
+                case .notice, .error:
                     entry = Entry(
                         groupIndex: groupIndex,
                         itemIndex: itemIndex,
@@ -1727,7 +1737,7 @@ private struct ChatBubble: View {
             .onHover { hoverState.bubbleHovered = $0 }
         case .tool:
             if let card = item.resultCard {
-                ToolResultCardView(card: card) { action in
+                ToolResultCardView(card: card, grouping: grouping) { action in
                     model.performCardAction(action)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)

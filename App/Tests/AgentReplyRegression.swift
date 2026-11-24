@@ -3698,13 +3698,34 @@ enum AgentReplyRegression {
         let trailingBot = ChatBubbleGrouping(connectsAbove: true, connectsBelow: false).cornerRadii(for: .trailing)
         precondition(trailingBot == RectangleCornerRadii(topLeading: 16, bottomLeading: 16, bottomTrailing: 16, topTrailing: 4))
 
+        let sampleCard1 = ToolResultCard(
+            id: "card-1",
+            kind: .messagesDraft,
+            source: .messages,
+            categoryTitle: "信息草稿",
+            headline: "老妈 Mum (139 4667 9235)",
+            title: "妈，我给你买的牛排到了，注意查收一下~",
+            action: ToolResultCard.Action(kind: .openMessagesDraft, label: "在信息中打开")
+        )
+        let sampleCard2 = ToolResultCard(
+            id: "card-2",
+            kind: .reminder,
+            source: .reminders,
+            categoryTitle: "提醒事项",
+            headline: "06:50",
+            title: "起床",
+            subtitle: "11月25日 周三 · 提醒事项",
+            action: ToolResultCard.Action(kind: .openReminders, label: "查看提醒事项")
+        )
+
         let groups: [ChatResponseGroup] = [
             // Solo user
             ChatResponseGroup(id: "u0", items: [ChatItem(id: "u0", kind: .user, text: "单条用户消息")]),
-            // 2-bubble assistant (toolNarration + assistant)
+            // 3-item assistant chain (toolNarration + assistant + result card)
             ChatResponseGroup(id: "r1", items: [
                 ChatItem(id: "n1", kind: .toolNarration, text: "我先查一下这条说法。", responseID: "r1"),
-                ChatItem(id: "a1", kind: .assistant, text: "第二条回复", responseID: "r1")
+                ChatItem(id: "a1", kind: .assistant, text: "第二条回复", responseID: "r1"),
+                ChatItem(id: "c1", kind: .tool(.completed), text: "调用 messages_prepare_draft", responseID: "r1", resultCard: sampleCard1)
             ]),
             // 3 consecutive user bubbles
             ChatResponseGroup(id: "u1", items: [ChatItem(id: "u1", kind: .user, text: "用户 1")]),
@@ -3712,6 +3733,12 @@ enum AgentReplyRegression {
             ChatResponseGroup(id: "u3", items: [ChatItem(id: "u3", kind: .user, text: "用户 3", agentReaction: "👍")]),
             // User after reaction must NOT link with u3
             ChatResponseGroup(id: "u4", items: [ChatItem(id: "u4", kind: .user, text: "表情回应后的新用户消息")]),
+            // Assistant with permission link must NOT link with following result card; two consecutive cards link
+            ChatResponseGroup(id: "r-permission", items: [
+                ChatItem(id: "a-permission", kind: .assistant, text: "需要权限的回复", needsPermissionSettings: true, responseID: "r-permission"),
+                ChatItem(id: "c2", kind: .tool(.completed), text: "调用 messages_prepare_draft", responseID: "r-permission", resultCard: sampleCard1),
+                ChatItem(id: "c3", kind: .tool(.completed), text: "调用 reminders_create", responseID: "r-permission", resultCard: sampleCard2)
+            ]),
             // Running group: toolNarration + typing indicator
             ChatResponseGroup(id: "r2", items: [
                 ChatItem(id: "n2", kind: .toolNarration, text: "正在查询", responseID: "r2")
@@ -3723,17 +3750,25 @@ enum AgentReplyRegression {
         precondition(resolved[1].topSpacing == 20)
         precondition(resolved[1].itemGroupings == [
             ChatBubbleGrouping(connectsAbove: false, connectsBelow: true),
+            ChatBubbleGrouping(connectsAbove: true, connectsBelow: true),
             ChatBubbleGrouping(connectsAbove: true, connectsBelow: false)
         ])
-        precondition(resolved[1].itemTopSpacings == [0, 4])
+        precondition(resolved[1].itemTopSpacings == [0, 4, 4])
         precondition(resolved[2].topSpacing == 20 && resolved[2].itemGroupings == [ChatBubbleGrouping(connectsAbove: false, connectsBelow: true)])
         precondition(resolved[3].topSpacing == 4 && resolved[3].itemGroupings == [ChatBubbleGrouping(connectsAbove: true, connectsBelow: true)])
         precondition(resolved[4].topSpacing == 4 && resolved[4].itemGroupings == [ChatBubbleGrouping(connectsAbove: true, connectsBelow: false)])
         precondition(resolved[5].topSpacing == 20 && resolved[5].itemGroupings == [.solo], "User bubble after reaction must start a fresh solo group")
         precondition(resolved[6].topSpacing == 20)
-        precondition(resolved[6].itemGroupings == [ChatBubbleGrouping(connectsAbove: false, connectsBelow: true)])
-        precondition(resolved[6].typingGrouping == ChatBubbleGrouping(connectsAbove: true, connectsBelow: false))
-        precondition(resolved[6].typingTopSpacing == 4)
+        precondition(resolved[6].itemGroupings == [
+            .solo,
+            ChatBubbleGrouping(connectsAbove: false, connectsBelow: true),
+            ChatBubbleGrouping(connectsAbove: true, connectsBelow: true)
+        ])
+        precondition(resolved[6].itemTopSpacings == [0, 12, 4])
+        precondition(resolved[7].topSpacing == 4)
+        precondition(resolved[7].itemGroupings == [ChatBubbleGrouping(connectsAbove: true, connectsBelow: true)])
+        precondition(resolved[7].typingGrouping == ChatBubbleGrouping(connectsAbove: true, connectsBelow: false))
+        precondition(resolved[7].typingTopSpacing == 4)
 
         // 2. Render in the real AgentWindow in dark & light appearances to verify rendered geometry and visual appearance.
         let store = ConversationStore(app.store)
@@ -3742,13 +3777,16 @@ enum AgentReplyRegression {
         try store.append(conversationID: cid, role: "tool_narration", text: "我先查一下这条说法。",
             presentation: MessagePresentation(responseID: "chain-r1"))
         try store.append(conversationID: cid, role: "assistant",
-            text: "你听到的那个说法是个被传变形的消息。原始信号是 9 月中旬一个 API 返回截图里出现了「RSI Model LiveRL LE」这种模型名，加上一位研究员发帖写了藏头字母 RSI。",
+            text: "你听到的那个说法是个被传变形的消息。原始信号是 9 月中旬一个 API 返回截图里出现了「RSI Model LiveRL LE」这种模型名。",
             presentation: MessagePresentation(responseID: "chain-r1"))
         try store.append(conversationID: cid, role: "user", text: "那这个模型名字是真的吗？")
         try store.append(conversationID: cid, role: "user", text: "顺便帮我看一下它和 DeepMind 的关系")
-        try store.append(conversationID: cid, role: "user", text: "谢谢！")
-        try store.append(conversationID: cid, role: "assistant", text: "好的，这是一个单条全圆角回复。",
+        try store.append(conversationID: cid, role: "user", text: "给老妈发消息说牛排到了")
+        try store.append(conversationID: cid, role: "assistant",
+            text: "已经给老妈 (139 4667 9235) 准备好草稿了：\n\n> 妈，我给你买的牛排到了，注意查收一下~\n\n你在信息里点一下发送就行。想改措辞的话，直接告诉我。",
             presentation: MessagePresentation(responseID: "chain-r2"))
+        try store.append(conversationID: cid, role: "tool", text: "调用 messages_prepare_draft", id: "chain-card-1",
+            presentation: MessagePresentation(responseID: "chain-r2", toolName: "messages_prepare_draft", toolStatus: .completed, resultCard: sampleCard1))
 
         let model = AgentModel(app: app)
         model.open(cid)

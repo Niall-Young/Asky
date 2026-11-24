@@ -5,6 +5,7 @@ import Theme
 /// Dedicated native result card rendered below assistant replies for completed macOS capabilities.
 struct ToolResultCardView: View {
     let card: ToolResultCard
+    var grouping: ChatBubbleGrouping = .solo
     var onAction: (ToolResultCard.Action) -> Void = { _ in }
     @Environment(\.colorScheme) private var scheme
     @State private var actionHovered = false
@@ -19,6 +20,7 @@ struct ToolResultCardView: View {
     }
 
     var body: some View {
+        let bubbleShape = grouping.shape(for: .leading)
         VStack(alignment: .leading, spacing: 12) {
             header
             Rectangle()
@@ -36,12 +38,10 @@ struct ToolResultCardView: View {
         .padding(.vertical, 14)
         .frame(maxWidth: 360, alignment: .leading)
         .background {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(ThemeColor.kBackgroundNeutral)
+            bubbleShape.fill(ThemeColor.kBackgroundNeutral)
         }
         .overlay {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(ThemeColor.kBorder.color(for: scheme).opacity(scheme == .light ? 0.55 : 0.85), lineWidth: 1)
+            bubbleShape.strokeBorder(ThemeColor.kBorder.color(for: scheme).opacity(scheme == .light ? 0.55 : 0.85), lineWidth: 1)
         }
     }
 
