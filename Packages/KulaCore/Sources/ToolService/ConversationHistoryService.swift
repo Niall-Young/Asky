@@ -111,6 +111,37 @@ public actor ConversationHistoryService {
         return CleanupResult(deletedIDs: [], pendingFiles: try drainFiles(draftPaths: draftPaths, protecting: active))
     }
 
+    /// Permanently delete a single message without disturbing sibling replies in the same conversation.
+    /// Removes the entire conversation record when no messages remain.
+    public func deleteMessage(_ message: StoredMessage, protecting active: Set<String> = [], draftPaths: Set<String> = []) throws -> CleanupResult {
+        let id = message.conversationID
+        guard ConversationStore(store).message(message.id, conversationID: id) != nil else { return CleanupResult(deletedIDs: [], pendingFiles: 0) }
+        guard !active.contains(id) else { return CleanupResult(deletedIDs: [], pendingFiles: 0) }
+        let remaining = try store.db.scalarInt("SELECT COUNT(*) FROM messages WHERE conversation_id = ? AND id != ?", [id, message.id])
+        if remaining == 0 { return try delete(id, protecting: active, draftPaths: draftPaths) }
+        try store.db.transaction {
+            store.setSetting("history.revision", UUID().uuidString)
+            for row in try store.db.query("SELECT DISTINCT json_extract(j.value, '$.path') AS path FROM messages m, json_each(m.attachments_json) j WHERE m.conversation_id = ? AND m.id = ?", [id, message.id]) {
+                if let path = row.string("path") { try queue(path, kind: "attachment") }
+            }
+            try store.db.run("DELETE FROM messages_fts WHERE id = ? AND conversation_id = ?", [message.id, id])
+            try store.db.run("DELETE FROM messages WHERE id = ? AND conversation_id = ?", [message.id, id])
+            try store.db.run("""
+                DELETE FROM attachments WHERE conversation_id = ?
+                  AND path IN (SELECT path FROM conversation_file_cleanup WHERE kind = 'attachment')
+                  AND NOT EXISTS (
+                      SELECT 1 FROM messages m, json_each(m.attachments_json) j
+                      WHERE m.conversation_id = attachments.conversation_id
+                        AND json_extract(j.value, '$.path') = attachments.path
+                  )
+                """, [id])
+            try store.db.run("DELETE FROM activity WHERE source_id = ?", ["conversation:\(id)"])
+            try refreshTitle(id)
+        }
+        try invalidateDerivedSnapshots(protecting: active)
+        return CleanupResult(deletedIDs: [], pendingFiles: try drainFiles(draftPaths: draftPaths, protecting: active))
+    }
+
     private func refreshTitle(_ id: String) throws {
         let text = try store.db.query("SELECT text FROM messages WHERE conversation_id = ? AND role = 'user' ORDER BY seq LIMIT 1", [id]).first?.string("text") ?? ""
         try store.db.run("UPDATE conversations SET title = ? WHERE id = ?", [String(text.prefix(40)), id])

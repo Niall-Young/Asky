@@ -77,7 +77,40 @@ extension AgentReplyRegression {
         model.handle(.taskState(taskID: "missing-target", .completed), conversationID: other)
         model.finishTask(conversationID: other)
         precondition(model.items.last?.text == "😊", "Missing target falls back to a visible reply")
-        print("Reaction regression passed: all three modes, completed-only presentation, history, cancellation and target isolation")
+
+        // User reacting to an AI bubble persists without starting a new agent turn.
+        let reactionCID = try store.create(title: "用户给 AI 贴表情")
+        let reactionUser = try store.append(conversationID: reactionCID, role: "user", text: "帮我总结一下")
+        let reactionReply = try store.append(conversationID: reactionCID, role: "assistant", text: "已经为你总结好了。")
+        model.open(reactionCID)
+        let countBefore = model.items.count
+        model.toggleUserReaction("👍", for: reactionReply.id)
+        precondition(!model.isRunning, "User reacting to an AI bubble must not invoke the agent")
+        precondition(model.items.count == countBefore, "User reacting must not append any reply")
+        precondition(model.items.first { $0.id == reactionReply.id }?.userReaction == "👍")
+        model.open(reactionCID)
+        precondition(model.items.first { $0.id == reactionReply.id }?.userReaction == "👍", "History preserves user reactions on AI bubbles")
+        model.setUserReaction("not-an-emoji", for: reactionReply.id)
+        precondition(model.items.first { $0.id == reactionReply.id }?.userReaction == "👍", "Invalid non-emoji reaction is ignored")
+        model.toggleUserReaction("❤️", for: reactionReply.id)
+        precondition(model.items.first { $0.id == reactionReply.id }?.userReaction == "❤️", "Selecting a different emoji swaps the reaction")
+        model.open(reactionCID)
+        precondition(model.items.first { $0.id == reactionReply.id }?.userReaction == "❤️", "Swapped user reaction persists across reload")
+        model.toggleUserReaction("❤️", for: reactionReply.id)
+        precondition(model.items.first { $0.id == reactionReply.id }?.userReaction == nil, "Selecting the active reaction clears it")
+        model.open(reactionCID)
+        precondition(model.items.first { $0.id == reactionReply.id }?.userReaction == nil, "Cleared user reaction stays cleared")
+
+        // Deleting a single user message removes only that message and keeps the AI reply.
+        let deleted = await model.deleteUserMessage(reactionUser.id)
+        precondition(deleted, "Deleting an idle user message must succeed")
+        precondition(!model.items.contains { $0.id == reactionUser.id })
+        precondition(model.items.contains { $0.id == reactionReply.id }, "Deleting user message preserves AI reply")
+        model.open(reactionCID)
+        precondition(store.message(reactionUser.id, conversationID: reactionCID) == nil)
+        precondition(model.items.contains { $0.id == reactionReply.id })
+
+        print("Reaction regression passed: all three modes, completed-only presentation, history, cancellation, target isolation, user reactions on AI bubbles, and single user message deletion")
     }
 }
 
@@ -129,8 +162,8 @@ extension AgentReplyRegression {
                 let answerFrame = answer.convert(answer.bounds, to: surface)
                 let textFrame = text.convert(text.bounds, to: nil)
                 // Left side action bar sits 8 pt left of the bubble (18 pt text inset),
-                // containing Copy (28 pt) + 2 pt gap + Reply (28 pt), centered vertically.
-                let copyPoint = NSPoint(x: textFrame.minX - 70, y: textFrame.midY)
+                // containing More (28 pt) + 2 pt gap + Copy (28 pt), centered vertically.
+                let copyPoint = NSPoint(x: textFrame.minX - 40, y: textFrame.midY)
                 let copyRect = surface.convert(NSRect(x: copyPoint.x - 14, y: copyPoint.y - 14, width: 28, height: 28), from: nil)
                 func snapshot() -> NSBitmapImageRep {
                     let bitmap = surface.bitmapImageRepForCachingDisplay(in: surface.bounds)!
@@ -180,5 +213,180 @@ extension AgentReplyRegression {
             }
         }
         print("User bubble hover passed: 72 native pointer transitions, copy visibility, stable user/AI frames and bubble pixels, reactions, short/emoji/long text, light/dark")
+    }
+
+    static func bubbleMenuPreviewRegression() async throws {
+        let originalPointer = NSEvent.mouseLocation
+        func move(_ point: NSPoint) {
+            CGWarpMouseCursorPosition(CGPoint(x: point.x, y: NSScreen.screens[0].frame.maxY - point.y))
+            CGEvent(mouseEventSource: nil, mouseType: .mouseMoved,
+                mouseCursorPosition: CGPoint(x: point.x, y: NSScreen.screens[0].frame.maxY - point.y),
+                mouseButton: .left)?.post(tap: .cghidEventTap)
+        }
+        func click(_ point: NSPoint, in window: NSWindow) async throws {
+            let screen = window.convertPoint(toScreen: point)
+            move(screen)
+            try await Task.sleep(for: .milliseconds(160))
+            let quartz = CGPoint(x: screen.x, y: NSScreen.screens[0].frame.maxY - screen.y)
+            for type in [CGEventType.leftMouseDown, .leftMouseUp] {
+                CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: quartz,
+                        mouseButton: .left)?.post(tap: .cghidEventTap)
+                try await Task.sleep(for: .milliseconds(80))
+            }
+            try await Task.sleep(for: .milliseconds(260))
+        }
+        defer { move(originalPointer) }
+        func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
+
+        let root = FileManager.default.temporaryDirectory.appending(path: "Asky-bubble-menu-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let app = try AppModel(root: root)
+        let store = ConversationStore(app.store)
+        let cid = try store.create(title: "气泡操作菜单")
+        let userText = "帮我把今天的会议要点整理成三句话吧"
+        let replyText = "好的，今天会议主要确定了三件事：本周完成设计联调、下周二提测、发布前保留一次全量回归。"
+        let userMessage = try store.append(conversationID: cid, role: "user", text: userText)
+        let model = AgentModel(app: app)
+        model.open(cid)
+        model.avatarColor = .blue
+        model.beginResponse(taskID: "menu-turn")
+        model.handle(.message(taskID: "menu-turn", "<asky-reaction>😊</asky-reaction>\n" + replyText), conversationID: cid)
+        model.handle(.taskState(taskID: "menu-turn", .completed), conversationID: cid)
+        model.finishTask(conversationID: cid)
+        let replyID = model.items.first { $0.kind == .assistant }!.id
+        model.setUserReaction("👍", for: replyID)
+
+        let controller = AgentWindowController(model: model, presentation: WindowPresentation())
+        controller.show()
+        let window = NSApp.windows.first { $0.title == "Asky AI" && $0.isVisible }!
+        defer { window.orderOut(nil) }
+        window.level = .floating
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+
+        let backing = NSWindow(contentRect: window.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        backing.backgroundColor = NSColor(white: 0.25, alpha: 1)
+        backing.level = .floating
+        backing.order(.below, relativeTo: window.windowNumber)
+        defer { backing.orderOut(nil) }
+
+        func capture(_ name: String) throws {
+            let path = "build/bubble-menu-\(name).png"
+            let capture = Process()
+            capture.executableURL = URL(filePath: "/usr/sbin/screencapture")
+            let rect = window.frame
+            capture.arguments = ["-x", "-R", "\(Int(rect.minX)),\(Int(NSScreen.screens[0].frame.maxY - rect.maxY)),\(Int(rect.width)),\(Int(rect.height))", path]
+            try capture.run()
+            capture.waitUntilExit()
+            precondition(capture.terminationStatus == 0)
+        }
+
+        for (name, appearance) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
+            window.appearance = NSAppearance(named: appearance)
+            backing.backgroundColor = name == "light" ? NSColor(white: 0.90, alpha: 1) : NSColor(white: 0.16, alpha: 1)
+            window.makeKeyAndOrderFront(nil)
+            backing.order(.below, relativeTo: window.windowNumber)
+            NSApp.activate(ignoringOtherApps: true)
+            try await Task.sleep(for: .milliseconds(600))
+            let surface = window.contentView!
+            let texts = descendants(surface).compactMap { $0 as? NSTextView }
+            let userView = texts.first { $0.string == userText }!
+            let replyView = texts.first { $0.string == replyText }!
+            let userFrame = userView.convert(userView.bounds, to: nil)
+            let replyFrame = replyView.convert(replyView.bounds, to: nil)
+
+            // 1. Hover AI bubble -> click Emoji button (first button in 86pt bar, 8pt right of bubble + 18pt inset)
+            window.makeKeyAndOrderFront(nil)
+            move(window.convertPoint(toScreen: NSPoint(x: replyFrame.midX, y: replyFrame.midY)))
+            try await Task.sleep(for: .milliseconds(250))
+            let aiBarLeft = replyFrame.maxX + 18 + 8
+            let aiEmojiPoint = NSPoint(x: aiBarLeft + 14, y: replyFrame.midY)
+            let aiMorePoint = NSPoint(x: aiBarLeft + 72, y: replyFrame.midY)
+            try await click(aiEmojiPoint, in: window)
+            try capture("emoji-\(name)")
+
+            // Dismiss then open AI More menu
+            try await click(NSPoint(x: 20, y: 200), in: window)
+            window.makeKeyAndOrderFront(nil)
+            move(window.convertPoint(toScreen: NSPoint(x: replyFrame.midX, y: replyFrame.midY)))
+            try await Task.sleep(for: .milliseconds(250))
+            try await click(aiMorePoint, in: window)
+            try capture("assistant-more-\(name)")
+
+            // Dismiss then open User More menu (first button in 58pt bar left of user bubble)
+            try await click(NSPoint(x: 20, y: 200), in: window)
+            window.makeKeyAndOrderFront(nil)
+            move(window.convertPoint(toScreen: NSPoint(x: userFrame.midX, y: userFrame.midY)))
+            try await Task.sleep(for: .milliseconds(250))
+            let userMorePoint = NSPoint(x: userFrame.minX - 18 - 8 - 44, y: userFrame.midY)
+            try await click(userMorePoint, in: window)
+            try capture("user-more-\(name)")
+
+            // Dismiss
+            try await click(NSPoint(x: 20, y: 200), in: window)
+            _ = userMessage
+        }
+        print("Bubble menu visual preview captured in light and dark")
+    }
+
+    static func reactionSwapPreviewRegression() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: "Asky-reaction-swap-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let app = try AppModel(root: root)
+        let store = ConversationStore(app.store)
+        let cid = try store.create(title: "表情切换动效预览")
+        let userText = "谢谢 🤖"
+        let replyText = "短 AI 回复也应保持宽度。"
+        try store.append(conversationID: cid, role: "user", text: userText)
+        let model = AgentModel(app: app)
+        model.open(cid)
+        model.avatarColor = .yellow
+        model.beginResponse(taskID: "swap-turn")
+        model.handle(.message(taskID: "swap-turn", "<asky-reaction>🤖</asky-reaction>\n" + replyText), conversationID: cid)
+        model.handle(.taskState(taskID: "swap-turn", .completed), conversationID: cid)
+        model.finishTask(conversationID: cid)
+        let replyID = model.items.first { $0.kind == .assistant }!.id
+        model.setUserReaction("👍", for: replyID)
+
+        let controller = AgentWindowController(model: model, presentation: WindowPresentation())
+        controller.show()
+        let window = NSApp.windows.first { $0.title == "Asky AI" && $0.isVisible }!
+        defer { window.orderOut(nil) }
+        window.level = .floating
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+
+        let backing = NSWindow(contentRect: window.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        backing.level = .floating
+        backing.order(.below, relativeTo: window.windowNumber)
+        defer { backing.orderOut(nil) }
+
+        func capture(_ name: String) throws {
+            let path = "build/reaction-swap-\(name).png"
+            let capture = Process()
+            capture.executableURL = URL(filePath: "/usr/sbin/screencapture")
+            let rect = window.frame
+            capture.arguments = ["-x", "-R", "\(Int(rect.minX)),\(Int(NSScreen.screens[0].frame.maxY - rect.maxY)),\(Int(rect.width)),\(Int(rect.height))", path]
+            try capture.run()
+            capture.waitUntilExit()
+            precondition(capture.terminationStatus == 0)
+        }
+
+        for (name, appearance) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
+            window.appearance = NSAppearance(named: appearance)
+            backing.backgroundColor = name == "light" ? NSColor(white: 0.90, alpha: 1) : NSColor(white: 0.16, alpha: 1)
+            model.setUserReaction("👍", for: replyID)
+            try await Task.sleep(for: .milliseconds(550))
+            try capture("before-\(name)")
+
+            // Trigger dedicated emoji swap animation and capture mid-flight + settled states.
+            model.toggleUserReaction("❤️", for: replyID)
+            try await Task.sleep(for: .milliseconds(115))
+            try capture("mid-\(name)")
+            try await Task.sleep(for: .milliseconds(420))
+            try capture("after-\(name)")
+            precondition(model.items.first { $0.id == replyID }?.userReaction == "❤️")
+        }
+        print("Reaction swap preview passed in light and dark")
     }
 }

@@ -242,6 +242,25 @@ final class AppModel {
         } catch { conversationCleanupError = NSLocalizedString("对话历史清理失败，将自动重试。", comment: "") }
     }
 
+    @discardableResult func deleteConversationMessage(_ message: StoredMessage) async -> Bool {
+        guard !isCleaningConversationHistory else { return false }
+        historyOperations += 1
+        defer { historyOperations -= 1 }
+        let protected = activeConversationIDs.union(await tools.activeAgentSessionIDs)
+        guard protected.isEmpty else {
+            conversationCleanupError = NSLocalizedString("对话仍有任务正在执行，请稍后重试。", comment: "")
+            return false
+        }
+        do {
+            await historyDidDelete(try await conversationHistory.deleteMessage(message, protecting: protected,
+                draftPaths: conversationDraftPaths?() ?? []))
+            return true
+        } catch {
+            conversationCleanupError = NSLocalizedString("对话历史清理失败，将自动重试。", comment: "")
+            return false
+        }
+    }
+
     func clearConversationHistory() async {
         guard !isCleaningConversationHistory else { return }
         let alert = AppDialog.make()

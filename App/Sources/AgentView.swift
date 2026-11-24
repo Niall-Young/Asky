@@ -194,7 +194,7 @@ enum ChatTranscriptBubbleLayout {
                         itemIndex: itemIndex,
                         side: .leading,
                         canConnectAbove: true,
-                        canConnectBelow: !item.needsPermissionSettings,
+                        canConnectBelow: !item.needsPermissionSettings && item.userReaction == nil,
                         isUser: false
                     )
                 case .tool:
@@ -285,6 +285,7 @@ struct AgentView: View {
     @State private var composerHeight: CGFloat = 94
     @State private var emptyComposerHeight: CGFloat = 94
     @State private var showingApprovalMenu = false
+    @State private var bubblePopover = ChatBubblePopoverController()
     @State private var pinned = false
     @State private var toolbarPressed: Int?
     @State private var toolbarHovered: Int?
@@ -311,7 +312,7 @@ struct AgentView: View {
                         .background(WindowDragArea())
                         .transition(conversationTransition).zIndex(1)
                 } else {
-                    Transcript(model: model, bottomInset: effectiveComposerHeight)
+                    Transcript(model: model, bottomInset: effectiveComposerHeight, bubblePopover: bubblePopover)
                         .id("continuous-transcript")
                         .transition(conversationTransition).zIndex(1)
                 }
@@ -346,6 +347,11 @@ struct AgentView: View {
         .modifier(ApprovalMenuPresentation(showing: $showingApprovalMenu) {
             ApprovalModeMenu(model: model, showing: $showingApprovalMenu)
         })
+        .modifier(ChatBubblePopoverPresentation(
+            controller: bubblePopover,
+            showingApprovalMenu: $showingApprovalMenu,
+            headerHeight: AgentLayout.headerHeight
+        ))
         .foregroundStyle(ThemeColor.kText.color(for: colorScheme))
         .windowSurfaceBackground(in: shape)
         .modifier(FallbackClipShape(active: !WindowSurface.usesNativeGlass, shape: shape))
@@ -539,6 +545,7 @@ private struct TranscriptPagingButton: View {
 private struct Transcript: View {
     let model: AgentModel
     let bottomInset: CGFloat
+    let bubblePopover: ChatBubblePopoverController
     // Value snapshots let an outgoing transcript finish fading after model.open
     // clears/replaces the active conversation. The live model still owns actions.
     private let items: [ChatItem]
@@ -551,9 +558,10 @@ private struct Transcript: View {
 
     @State private var viewport = TranscriptViewport()
 
-    init(model: AgentModel, bottomInset: CGFloat) {
+    init(model: AgentModel, bottomInset: CGFloat, bubblePopover: ChatBubblePopoverController) {
         self.model = model
         self.bottomInset = bottomInset
+        self.bubblePopover = bubblePopover
         items = model.items
         streaming = model.streaming
         hasOlder = model.hasOlder
@@ -584,7 +592,7 @@ private struct Transcript: View {
                         let layout = groupLayouts[index]
                         TranscriptGroupWindow(pinned: index >= latestIndex - 1
                             || (navigationTarget != nil && group.items.contains { $0.id == navigationTarget })) {
-                            ResponseGroupView(group: group, layout: layout, model: model, isLatest: index == latestIndex)
+                            ResponseGroupView(group: group, layout: layout, model: model, bubblePopover: bubblePopover, isLatest: index == latestIndex)
                         }
                             .background { TranscriptGroupPosition(id: group.id) }
                             .padding(.top, layout.topSpacing)
@@ -1306,6 +1314,7 @@ private struct ResponseGroupView: View {
     let group: ChatResponseGroup
     let layout: ChatGroupBubbleLayout
     let model: AgentModel
+    let bubblePopover: ChatBubblePopoverController
     /// Only the newest turn can morph from the typing bubble. Older replies skip
     /// matched geometry, whose global anchors would otherwise update on every scroll frame.
     var isLatest = true
@@ -1334,7 +1343,7 @@ private struct ResponseGroupView: View {
 
     private func message(_ item: ChatItem, grouping: ChatBubbleGrouping) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            ChatBubble(item: item, model: model, bubbleMotion: isLatest ? bubbleMotion : nil,
+            ChatBubble(item: item, model: model, bubblePopover: bubblePopover, bubbleMotion: isLatest ? bubbleMotion : nil,
                 morphsFromTyping: !group.isRunning && group.content.last(where: { $0.kind == .assistant })?.id == item.id,
                 grouping: grouping)
             if item.needsPermissionSettings {
@@ -1439,18 +1448,36 @@ private struct ChatReplyButton: View {
     }
 }
 
-private struct ChatShareButton: View {
+private struct ChatEmojiButton: View {
+    let isActive: Bool
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            Image("ChatShare").resizable().scaledToFit().frame(width: 14, height: 14)
+            Image("ChatEmoji").resizable().scaledToFit().frame(width: 14, height: 14)
                 .frame(width: 16, height: 16).padding(6)
         }
         .buttonStyle(AgentIconButtonStyle())
-        .foregroundStyle(ThemeColor("iconSubtlest"))
-        .accessibilityLabel(NSLocalizedString("分享回复", comment: ""))
-        .help(NSLocalizedString("分享回复", comment: ""))
+        .foregroundStyle(isActive ? ThemeColor.kText : ThemeColor("iconSubtlest"))
+        .accessibilityLabel(NSLocalizedString("贴表情", comment: ""))
+        .help(NSLocalizedString("贴表情", comment: ""))
+    }
+}
+
+private struct ChatMoreButton: View {
+    let isActive: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(mingCute: "ellipsis.vertical", size: 14)
+                .rotationEffect(.degrees(90))
+                .frame(width: 16, height: 16).padding(6)
+        }
+        .buttonStyle(AgentIconButtonStyle())
+        .foregroundStyle(isActive ? ThemeColor.kText : ThemeColor("iconSubtlest"))
+        .accessibilityLabel(NSLocalizedString("更多操作", comment: ""))
+        .help(NSLocalizedString("更多操作", comment: ""))
     }
 }
 
@@ -1487,29 +1514,69 @@ private struct AssistantSideActionBar: View {
     static let width: CGFloat = 86
     static let height: CGFloat = 28
 
-    let text: String
+    let messageID: String
+    let timestamp: Date?
+    let currentReaction: String?
+    let accentColor: Color
     let hoverState: UserMessageHoverState
+    let bubblePopover: ChatBubblePopoverController
+    let onSelectReaction: (String) -> Void
     let onReply: () -> Void
+    let onCopy: () -> Void
     let onShare: () -> Void
     @State private var rowHovering = false
-    @State private var copyFeedbackID: UUID?
+    @State private var emojiAnchor = ChatBubbleAnchorBox()
+    @State private var moreAnchor = ChatBubbleAnchorBox()
     @FocusState private var actionFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.transcriptVisibleInsets) private var visibleInsets
 
+    private var emojiTarget: ChatBubblePopoverTarget { .emojiPicker(messageID: messageID) }
+    private var moreTarget: ChatBubblePopoverTarget { .assistantMore(messageID: messageID) }
+    private var isEmojiOpen: Bool { bubblePopover.isActive(emojiTarget) }
+    private var isMoreOpen: Bool { bubblePopover.isActive(moreTarget) }
+
     private var isVisible: Bool {
-        hoverState.bubbleHovered || rowHovering || actionFocused || copyFeedbackID != nil
+        hoverState.bubbleHovered || rowHovering || actionFocused || isEmojiOpen || isMoreOpen
     }
 
     var body: some View {
         GeometryReader { proxy in
             HStack(spacing: 2) {
-                ChatCopyButton(text: text, copyFeedbackID: $copyFeedbackID)
-                    .focused($actionFocused)
+                ChatEmojiButton(isActive: isEmojiOpen) {
+                    guard let anchor = emojiAnchor.swiftUIFrameInWindow() else { return }
+                    bubblePopover.toggle(
+                        emojiTarget,
+                        anchor: anchor,
+                        payload: .emojiPicker(
+                            selectedEmoji: currentReaction,
+                            accentColor: accentColor,
+                            onSelect: onSelectReaction
+                        )
+                    )
+                }
+                .background(ChatBubbleAnchorReader(box: emojiAnchor).allowsHitTesting(false))
+                .focused($actionFocused)
+                .accessibilityIdentifier("assistant-emoji-trigger-" + messageID)
+
                 ChatReplyButton(action: onReply)
                     .focused($actionFocused)
-                ChatShareButton(action: onShare)
-                    .focused($actionFocused)
+
+                ChatMoreButton(isActive: isMoreOpen) {
+                    guard let anchor = moreAnchor.swiftUIFrameInWindow() else { return }
+                    bubblePopover.toggle(
+                        moreTarget,
+                        anchor: anchor,
+                        payload: .assistantMore(
+                            timestamp: timestamp,
+                            onCopy: onCopy,
+                            onShare: onShare
+                        )
+                    )
+                }
+                .background(ChatBubbleAnchorReader(box: moreAnchor).allowsHitTesting(false))
+                .focused($actionFocused)
+                .accessibilityIdentifier("assistant-more-trigger-" + messageID)
             }
             .frame(width: Self.width, height: Self.height)
             .onHover { rowHovering = $0 }
@@ -1526,25 +1593,49 @@ private struct UserSideActionBar: View {
     static let width: CGFloat = 58
     static let height: CGFloat = 28
 
+    let messageID: String
     let text: String
+    let timestamp: Date?
+    let canDelete: Bool
     let hoverState: UserMessageHoverState
+    let bubblePopover: ChatBubblePopoverController
     let onReply: () -> Void
+    let onDelete: () -> Void
     @State private var rowHovering = false
     @State private var copyFeedbackID: UUID?
+    @State private var moreAnchor = ChatBubbleAnchorBox()
     @FocusState private var actionFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.transcriptVisibleInsets) private var visibleInsets
 
+    private var moreTarget: ChatBubblePopoverTarget { .userMore(messageID: messageID) }
+    private var isMoreOpen: Bool { bubblePopover.isActive(moreTarget) }
+
     private var isVisible: Bool {
-        hoverState.bubbleHovered || rowHovering || actionFocused || copyFeedbackID != nil
+        hoverState.bubbleHovered || rowHovering || actionFocused || copyFeedbackID != nil || isMoreOpen
     }
 
     var body: some View {
         GeometryReader { proxy in
             HStack(spacing: 2) {
+                ChatMoreButton(isActive: isMoreOpen) {
+                    guard let anchor = moreAnchor.swiftUIFrameInWindow() else { return }
+                    bubblePopover.toggle(
+                        moreTarget,
+                        anchor: anchor,
+                        payload: .userMore(
+                            timestamp: timestamp,
+                            canDelete: canDelete,
+                            onReply: onReply,
+                            onDelete: onDelete
+                        )
+                    )
+                }
+                .background(ChatBubbleAnchorReader(box: moreAnchor).allowsHitTesting(false))
+                .focused($actionFocused)
+                .accessibilityIdentifier("user-more-trigger-" + messageID)
+
                 ChatCopyButton(text: text, copyFeedbackID: $copyFeedbackID)
-                    .focused($actionFocused)
-                ChatReplyButton(action: onReply)
                     .focused($actionFocused)
             }
             .frame(width: Self.width, height: Self.height)
@@ -1573,6 +1664,7 @@ private struct ChatBubble: View {
     @Environment(\.colorScheme) private var scheme
     let item: ChatItem
     let model: AgentModel
+    let bubblePopover: ChatBubblePopoverController
     let bubbleMotion: Namespace.ID?
     var morphsFromTyping = true
     var grouping: ChatBubbleGrouping = .solo
@@ -1621,33 +1713,27 @@ private struct ChatBubble: View {
                                 }
                         }
                         .overlay(alignment: .bottomLeading) {
-                            if let emoji = item.agentReaction {
-                                Text(emoji)
-                                    .font(.system(size: 15))
-                                    .padding(.horizontal, 7)
-                                    .frame(height: 26)
-                                    .background {
-                                        Capsule().fill(ThemeColor.kBackgroundNeutral)
-                                            .overlay {
-                                                Capsule().fill(model.avatarColor.userBubbleTint(for: scheme))
-                                            }
-                                    }
-                                    .overlay(Capsule().strokeBorder(scheme == .dark ? ThemeColor.kBorder.color(for: scheme) : .white, lineWidth: 1))
-                                    // Keep the overlapping badge within the bottom text inset.
-                                    .offset(x: -8, y: 26 - AgentLayout.userMessageVerticalInset)
-                                    .allowsHitTesting(false)
-                                    .accessibilityLabel(String(format: NSLocalizedString("Asky 回应了 %@", comment: ""), emoji))
-                            }
+                            ChatReactionBadge(
+                                emoji: item.agentReaction,
+                                side: .leading,
+                                accentColor: model.avatarColor.tint,
+                                accessibilityLabelFormat: NSLocalizedString("Asky 回应了 %@", comment: "")
+                            )
                         }
                 }
                 .overlay(alignment: .leading) {
                     UserSideActionBar(
+                        messageID: item.id,
                         text: item.copyableText,
+                        timestamp: item.createdAt,
+                        canDelete: !model.isRunning && !model.isCleaningHistory,
                         hoverState: hoverState,
-                        onReply: { model.addQuote(item.copyableText, sourceMessageID: item.id, kind: .reply) }
+                        bubblePopover: bubblePopover,
+                        onReply: { model.addQuote(item.copyableText, sourceMessageID: item.id, kind: .reply) },
+                        onDelete: { model.confirmAndDeleteUserMessage(item) }
                     )
                 }
-                .padding(.bottom, item.agentReaction == nil ? 0 : 26 - AgentLayout.userMessageVerticalInset)
+                .padding(.bottom, item.agentReaction == nil ? 0 : ChatReactionBadgeLayout.verticalOverhang)
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
             // Include the leading side action bar and the gap next to the bubble in
@@ -1678,6 +1764,9 @@ private struct ChatBubble: View {
                         bubbleShape.fill(ThemeColor.kBackgroundNeutral)
                             .replySurfaceMotion(morphsFromTyping ? bubbleMotion : nil, reduceMotion: reduceMotion)
                     }
+                    .overlay(alignment: .bottomTrailing) {
+                        userReactionBadge
+                    }
                     .contextMenu {
                         if let actions = contextActions {
                             assistantContextMenuItems(actions)
@@ -1692,13 +1781,21 @@ private struct ChatBubble: View {
             .overlay(alignment: .trailing) {
                 if let actions = contextActions {
                     AssistantSideActionBar(
-                        text: item.text,
+                        messageID: item.id,
+                        timestamp: item.completedAt ?? item.createdAt,
+                        currentReaction: item.userReaction,
+                        accentColor: model.avatarColor.tint,
                         hoverState: hoverState,
+                        bubblePopover: bubblePopover,
+                        onSelectReaction: { model.toggleUserReaction($0, for: item.id) },
                         onReply: actions.reply,
+                        onCopy: actions.copy,
                         onShare: actions.share
                     )
                 }
             }
+            .padding(.bottom, item.userReaction == nil ? 0 : ChatReactionBadgeLayout.verticalOverhang)
+            .animation(reduceMotion ? nil : .spring(response: 0.28, dampingFraction: 0.85), value: item.userReaction != nil)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(.rect)
             .onHover { hoverState.bubbleHovered = $0 }
@@ -1717,6 +1814,9 @@ private struct ChatBubble: View {
                     .background {
                         bubbleShape.fill(ThemeColor.kBackgroundNeutral)
                     }
+                    .overlay(alignment: .bottomTrailing) {
+                        userReactionBadge
+                    }
                     .contextMenu {
                         assistantContextMenuItems(contextActions)
                     }
@@ -1726,12 +1826,20 @@ private struct ChatBubble: View {
             }
             .overlay(alignment: .trailing) {
                 AssistantSideActionBar(
-                    text: item.text,
+                    messageID: item.id,
+                    timestamp: item.completedAt ?? item.createdAt,
+                    currentReaction: item.userReaction,
+                    accentColor: model.avatarColor.tint,
                     hoverState: hoverState,
+                    bubblePopover: bubblePopover,
+                    onSelectReaction: { model.toggleUserReaction($0, for: item.id) },
                     onReply: contextActions.reply,
+                    onCopy: contextActions.copy,
                     onShare: contextActions.share
                 )
             }
+            .padding(.bottom, item.userReaction == nil ? 0 : ChatReactionBadgeLayout.verticalOverhang)
+            .animation(reduceMotion ? nil : .spring(response: 0.28, dampingFraction: 0.85), value: item.userReaction != nil)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(.rect)
             .onHover { hoverState.bubbleHovered = $0 }
@@ -1752,6 +1860,18 @@ private struct ChatBubble: View {
             Label { Text(item.text) } icon: { Image(mingCute: "warning", size: 16) }.textStyle(.secondary).foregroundStyle(ThemeColor.kTextNegative)
                 .padding(12).background(ThemeColor.kBackgroundNeutral, in: .rect(cornerRadius: 16))
         }
+    }
+
+    private var userReactionBadge: some View {
+        ChatReactionBadge(
+            emoji: item.userReaction,
+            side: .trailing,
+            accentColor: model.avatarColor.tint,
+            accessibilityLabelFormat: NSLocalizedString("已贴表情 %@", comment: ""),
+            helpText: NSLocalizedString("移除表情", comment: ""),
+            accessibilityID: "user-reaction-badge-" + item.id,
+            onTap: { model.setUserReaction(nil, for: item.id) }
+        )
     }
 
     private var assistantContextActions: ChatBubbleContextActions {

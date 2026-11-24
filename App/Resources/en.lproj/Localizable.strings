@@ -1062,3 +1062,10 @@
 "归零" = "Reset";
 "今天" = "Today";
 "完成" = "Done";
+"贴表情" = "Add reaction";
+"分享" = "Share";
+"回复" = "Reply";
+"移除表情" = "Remove reaction";
+"已贴表情 %@" = "Reacted with %@";
+"删除这条消息？" = "Delete this message?";
+"这会永久删除你的消息。此操作无法撤销" = "This will permanently delete your message. This action cannot be undone.";

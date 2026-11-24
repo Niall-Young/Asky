@@ -3236,7 +3236,7 @@ enum AgentReplyRegression {
     static func main() async throws {
         let application = NSApplication.shared
         application.setActivationPolicy(.accessory)
-        if CommandLine.arguments.contains("--window-presentation") || CommandLine.arguments.contains("--first-open-stability") || CommandLine.arguments.contains("--header-cursor-preview") || CommandLine.arguments.contains("--header-drag") || CommandLine.arguments.contains("--action-cursor-preview") || CommandLine.arguments.contains("--user-bubble-hover") || CommandLine.arguments.contains("--approval-menu-hover") {
+        if CommandLine.arguments.contains("--window-presentation") || CommandLine.arguments.contains("--first-open-stability") || CommandLine.arguments.contains("--header-cursor-preview") || CommandLine.arguments.contains("--header-drag") || CommandLine.arguments.contains("--action-cursor-preview") || CommandLine.arguments.contains("--user-bubble-hover") || CommandLine.arguments.contains("--approval-menu-hover") || CommandLine.arguments.contains("--bubble-menu-preview") || CommandLine.arguments.contains("--reaction-swap-preview") {
             var completed = false
             Task { @MainActor in
                 do {
@@ -3246,6 +3246,8 @@ enum AgentReplyRegression {
                     else if CommandLine.arguments.contains("--header-drag") { try await headerDragRegression() }
                     else if CommandLine.arguments.contains("--action-cursor-preview") { try await actionCursorPreview() }
                     else if CommandLine.arguments.contains("--approval-menu-hover") { try await approvalMenuHoverRegression() }
+                    else if CommandLine.arguments.contains("--bubble-menu-preview") { try await bubbleMenuPreviewRegression() }
+                    else if CommandLine.arguments.contains("--reaction-swap-preview") { try await reactionSwapPreviewRegression() }
                     else { try await userBubbleHoverRegression() }
                 } catch { preconditionFailure("Header/hover regression failed: \(error)") }
                 completed = true

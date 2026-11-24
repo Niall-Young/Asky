@@ -274,6 +274,8 @@ public struct MessagePresentation: Sendable, Hashable, Codable {
     public var segments: [MessageSegment]?
     /// The assistant's single emoji reaction, attached to the user message.
     public var agentReaction: String?
+    /// The user's single emoji reaction, attached to an assistant message.
+    public var userReaction: String?
     /// Native capability result card derived from a completed tool execution.
     public var resultCard: ToolResultCard?
 
@@ -282,7 +284,7 @@ public struct MessagePresentation: Sendable, Hashable, Codable {
                 workSeconds: Int? = nil, completedAt: Date? = nil,
                 submittedFormValues: [String: [String]]? = nil, quotes: [MessageQuote]? = nil,
                 pastedTexts: [MessagePastedText]? = nil, segments: [MessageSegment]? = nil,
-                agentReaction: String? = nil, resultCard: ToolResultCard? = nil) {
+                agentReaction: String? = nil, userReaction: String? = nil, resultCard: ToolResultCard? = nil) {
         self.responseID = responseID
         self.toolName = toolName
         self.toolStatus = toolStatus
@@ -295,6 +297,7 @@ public struct MessagePresentation: Sendable, Hashable, Codable {
         self.pastedTexts = pastedTexts
         self.segments = segments
         self.agentReaction = agentReaction
+        self.userReaction = userReaction
         self.resultCard = resultCard
     }
 

@@ -30,4 +30,28 @@ import Contracts
         #expect(saved?.presentation?.submittedFormValues == ["answer": ["yes"]])
         #expect(reopened.timeline(limit: 40).first?.presentation?.agentReaction == "👍🏽")
     }
+
+    @Test func userReactionOnAssistantSurvivesReopeningAndClears() throws {
+        let root = tempRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let database = try LocalStore(root: root)
+        let store = ConversationStore(database)
+        let cid = try store.create(title: "UserReaction")
+        let reply = try store.append(conversationID: cid, role: "assistant", text: "已经处理好了",
+            presentation: MessagePresentation(responseID: "turn-1"))
+        var presentation = reply.presentation!
+        #expect(presentation.userReaction == nil)
+        presentation.userReaction = "🎉"
+        try store.updateMessage(reply.id, conversationID: cid, text: reply.text, presentation: presentation)
+
+        let reopened = ConversationStore(try LocalStore(root: root))
+        let saved = reopened.message(reply.id, conversationID: cid)
+        #expect(saved?.text == "已经处理好了")
+        #expect(saved?.presentation?.userReaction == "🎉")
+        #expect(saved?.presentation?.responseID == "turn-1")
+
+        presentation.userReaction = nil
+        try reopened.updateMessage(reply.id, conversationID: cid, text: reply.text, presentation: presentation)
+        #expect(reopened.message(reply.id, conversationID: cid)?.presentation?.userReaction == nil)
+    }
 }

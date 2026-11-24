@@ -157,4 +157,37 @@ import LocalStore
         #expect(FileManager.default.fileExists(atPath: draft.path))
         #expect(ConversationStore(reopened).list(limit: 10).contains { $0.id == kept })
     }
+
+    @Test func deleteSingleMessagePreservesSiblingRepliesAndCleansUnusedAttachments() async throws {
+        let root = try root()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let local = try LocalStore(root: root)
+        let store = ConversationStore(local)
+        let cid = try store.create(title: "单条删除")
+        let onlyUserFile = root.appending(path: "Attachments/single/user-only.txt")
+        let sharedFile = root.appending(path: "Attachments/shared/shared.txt")
+        try write("only", to: onlyUserFile)
+        try write("shared", to: sharedFile)
+        let userOnlyRef = AttachmentRef(kind: .text, path: onlyUserFile.path, mimeType: "text/plain", byteSize: 4, temporary: false)
+        let sharedRef = AttachmentRef(kind: .text, path: sharedFile.path, mimeType: "text/plain", byteSize: 6, temporary: false)
+
+        let user = try store.append(conversationID: cid, role: "user", text: "uniquedeletablequery", attachments: [userOnlyRef, sharedRef])
+        let assistant = try store.append(conversationID: cid, role: "assistant", text: "保留这条回复", attachments: [sharedRef])
+
+        let service = ConversationHistoryService(store: local)
+        let partial = try await service.deleteMessage(user)
+        #expect(partial.deletedIDs.isEmpty)
+        #expect(partial.pendingFiles == 0)
+        #expect(store.message(user.id, conversationID: cid) == nil)
+        #expect(store.message(assistant.id, conversationID: cid)?.text == "保留这条回复")
+        #expect(store.search("uniquedeletablequery").isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: onlyUserFile.path))
+        #expect(FileManager.default.fileExists(atPath: sharedFile.path))
+
+        let finalResult = try await service.deleteMessage(assistant)
+        #expect(finalResult.deletedIDs == [cid])
+        #expect(finalResult.pendingFiles == 0)
+        #expect(store.messages(conversationID: cid, limit: 10).isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: sharedFile.path))
+    }
 }

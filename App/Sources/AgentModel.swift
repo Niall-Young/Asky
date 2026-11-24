@@ -16,6 +16,7 @@ struct ChatItem: Identifiable, Hashable {
     var toolName: String? = nil
     var toolError: String? = nil
     var workSeconds: Int? = nil
+    var createdAt: Date? = nil
     var completedAt: Date? = nil
     var responseID: String? = nil
     var attachments: [AttachmentRef] = []
@@ -25,6 +26,7 @@ struct ChatItem: Identifiable, Hashable {
     var pastedTexts: [MessagePastedText] = []
     var segments: [MessageSegment]? = nil
     var agentReaction: String? = nil
+    var userReaction: String? = nil
     var resultCard: ToolResultCard? = nil
 
     var storedRole: String {
@@ -56,6 +58,7 @@ struct ChatItem: Identifiable, Hashable {
             pastedTexts: pastedTexts.isEmpty ? nil : pastedTexts,
             segments: segments,
             agentReaction: agentReaction,
+            userReaction: userReaction,
             resultCard: resultCard)
     }
 
@@ -326,6 +329,7 @@ final class AgentModel {
     private var store: ConversationStore { ConversationStore(app.store) }
 
     var isRunning: Bool { taskID != nil }
+    var isCleaningHistory: Bool { app.isCleaningConversationHistory }
 
     // MARK: History (native reads only; never starts Pi)
 
@@ -465,12 +469,61 @@ final class AgentModel {
         return ChatItem(id: m.id, kind: kind, text: m.text,
             needsPermissionSettings: p?.needsPermissionSettings ?? false,
             toolName: p?.toolName, toolError: p?.toolError, workSeconds: p?.workSeconds,
+            createdAt: m.createdAt,
             completedAt: p?.completedAt ?? (p == nil && m.role == "assistant" ? m.createdAt : nil),
             responseID: p?.responseID ?? (m.role == "assistant" ? m.id : nil), attachments: m.attachments,
             conversationID: m.conversationID, submittedFormValues: p?.submittedFormValues, quotes: p?.quotes ?? [],
             pastedTexts: p?.pastedTexts ?? [], segments: p?.segments,
             agentReaction: p?.agentReaction.flatMap { AgentReactionReply.isEmoji($0) ? $0 : nil },
+            userReaction: p?.userReaction.flatMap { AgentReactionReply.isEmoji($0) ? $0 : nil },
             resultCard: p?.resultCard)
+    }
+
+    /// Attach or clear the user's emoji reaction on an AI-generated bubble without invoking the agent.
+    func setUserReaction(_ emoji: String?, for messageID: String) {
+        if let emoji, !AgentReactionReply.isEmoji(emoji) { return }
+        guard let index = items.firstIndex(where: { $0.id == messageID && ($0.kind == .assistant || $0.kind == .toolNarration) }) else { return }
+        let cid = items[index].conversationID ?? conversationID
+        items[index].userReaction = emoji
+        if let cid, let saved = store.message(messageID, conversationID: cid) {
+            var presentation = saved.presentation ?? items[index].presentation
+            presentation.userReaction = emoji
+            try? store.updateMessage(messageID, conversationID: cid, text: saved.text, presentation: presentation)
+        }
+    }
+
+    func toggleUserReaction(_ emoji: String, for messageID: String) {
+        guard let current = items.first(where: { $0.id == messageID && ($0.kind == .assistant || $0.kind == .toolNarration) }) else { return }
+        setUserReaction(current.userReaction == emoji ? nil : emoji, for: messageID)
+    }
+
+    func confirmAndDeleteUserMessage(_ item: ChatItem) {
+        guard item.kind == .user, !isRunning, !app.isCleaningConversationHistory else { return }
+        Task { @MainActor in
+            let alert = AppDialog.make()
+            alert.messageText = NSLocalizedString("删除这条消息？", comment: "")
+            alert.informativeText = NSLocalizedString("这会永久删除你的消息。此操作无法撤销", comment: "")
+            let deleteButton = alert.addButton(withTitle: NSLocalizedString("删除", comment: ""))
+            deleteButton.hasDestructiveAction = true
+            let cancelButton = alert.addButton(withTitle: NSLocalizedString("取消", comment: ""))
+            cancelButton.keyEquivalent = "\u{1b}"
+            guard await AppDialog.present(alert) == .alertFirstButtonReturn else { return }
+            _ = await deleteUserMessage(item.id)
+        }
+    }
+
+    @discardableResult
+    func deleteUserMessage(_ id: String) async -> Bool {
+        guard !isRunning, !app.isCleaningConversationHistory,
+              let item = items.first(where: { $0.id == id && $0.kind == .user }) else { return false }
+        if let stored = storedMessage(item) ?? store.message(id) {
+            let deleted = await app.deleteConversationMessage(stored)
+            guard deleted else { return false }
+        }
+        items.removeAll { $0.id == id }
+        pruneFormValues()
+        reloadConversations()
+        return true
     }
 
     private func pruneFormValues() {
@@ -486,9 +539,12 @@ final class AgentModel {
         }
         if item.kind != .user, let cid = conversationID {
             item.conversationID = cid
-            _ = try? store.append(conversationID: cid, role: item.storedRole, text: item.text,
-                                  attachments: item.attachments, id: item.id, presentation: item.presentation)
+            if let saved = try? store.append(conversationID: cid, role: item.storedRole, text: item.text,
+                                             attachments: item.attachments, id: item.id, presentation: item.presentation) {
+                item.createdAt = saved.createdAt
+            }
         }
+        if item.createdAt == nil { item.createdAt = Date() }
         items.append(item)
         if items.count > Self.window {
             let removed = items.count - Self.window
