@@ -410,8 +410,8 @@ final class ChatShareWindowController: NSWindowController, NSWindowDelegate {
 
     private func makeWindow() -> NSWindow {
         let window = ChatShareWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 660, height: 680),
-            styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
+            contentRect: NSRect(x: 0, y: 0, width: 648, height: 604),
+            styleMask: [.titled, .closable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
@@ -422,7 +422,6 @@ final class ChatShareWindowController: NSWindowController, NSWindowDelegate {
         window.isOpaque = false
         window.backgroundColor = .clear
         window.hasShadow = true
-        window.contentMinSize = NSSize(width: 520, height: 460)
         window.center()
         self.window = window
         return window
@@ -436,11 +435,15 @@ private final class ChatShareWindow: NSWindow {
 }
 
 private struct ChatSharePreviewSheet: View {
+    private static let maxPreviewHeight: CGFloat = 468
+    private static let bottomFadeHeight: CGFloat = 128
+
     let text: String
     let windowProvider: () -> NSWindow?
     let close: () -> Void
 
     @State private var appearance: ShareCardAppearance
+    @State private var cardHeight: CGFloat = 0
     @State private var copied = false
     @State private var saved = false
     @State private var errorMessage: String?
@@ -451,6 +454,11 @@ private struct ChatSharePreviewSheet: View {
         self.windowProvider = windowProvider
         self.close = close
         _appearance = State(initialValue: initialAppearance)
+    }
+
+    private var isOverflowing: Bool { cardHeight > Self.maxPreviewHeight }
+    private var visiblePreviewHeight: CGFloat {
+        cardHeight > 0 ? min(cardHeight, Self.maxPreviewHeight) : Self.maxPreviewHeight
     }
 
     var body: some View {
@@ -471,15 +479,40 @@ private struct ChatSharePreviewSheet: View {
             .padding(.top, 14)
             .padding(.bottom, 12)
 
-            ScrollView {
-                ChatShareCardView(text: text, appearance: appearance)
-                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    .shadow(color: .black.opacity(0.16), radius: 16, x: 0, y: 6)
-                    .padding(.horizontal, 24)
-                    .padding(.vertical, 12)
-                    .frame(maxWidth: .infinity)
-            }
-            .scrollIndicators(.hidden)
+            ChatShareCardView(text: text, appearance: appearance)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { cardHeight = $0 }
+                .frame(width: ChatShareCardView.canvasWidth, height: visiblePreviewHeight, alignment: .top)
+                .clipShape(
+                    UnevenRoundedRectangle(
+                        topLeadingRadius: 16,
+                        bottomLeadingRadius: isOverflowing ? 0 : 16,
+                        bottomTrailingRadius: isOverflowing ? 0 : 16,
+                        topTrailingRadius: 16,
+                        style: .continuous
+                    )
+                )
+                .mask {
+                    VStack(spacing: 0) {
+                        Color.black
+                        if isOverflowing {
+                            LinearGradient(
+                                stops: [
+                                    .init(color: .black, location: 0.0),
+                                    .init(color: .black.opacity(0.68), location: 0.38),
+                                    .init(color: .black.opacity(0.22), location: 0.74),
+                                    .init(color: .clear, location: 1.0)
+                                ],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                            .frame(height: Self.bottomFadeHeight)
+                        }
+                    }
+                }
+                .shadow(color: .black.opacity(isOverflowing ? 0 : 0.16), radius: 16, x: 0, y: 6)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: isOverflowing ? .top : .center)
+                .padding(.horizontal, 24)
+                .padding(.top, 6)
 
             HStack(spacing: 10) {
                 SettingsButton(NSLocalizedString("系统分享", comment: ""), assetImage: "ChatShare") {

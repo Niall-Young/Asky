@@ -3649,19 +3649,24 @@ enum AgentReplyRegression {
             print("Share card \(appearance.rawValue): \(rep.pixelsWide)x\(rep.pixelsHigh) (\(png.count) bytes)")
         }
 
-        // 3. Open the actual share preview window and capture it for visual inspection.
-        ChatShareWindowController.shared.show(text: sampleReply, colorScheme: .dark)
-        try await Task.sleep(for: .milliseconds(500))
-        if let shareWindow = ChatShareWindowController.shared.window,
-           let surface = shareWindow.contentView {
-            surface.layoutSubtreeIfNeeded()
-            if let rep = surface.bitmapImageRepForCachingDisplay(in: surface.bounds) {
-                surface.cacheDisplay(in: surface.bounds, to: rep)
-                if let png = rep.representation(using: .png, properties: [:]) {
-                    try png.write(to: URL(filePath: "build/share-preview-window.png"))
+        // 3. Open the actual share preview window for both short and long replies to inspect layout and bottom fade.
+        let longReply = sampleReply + "\n\n" + (1...6).map { index in
+            "### 第 \(index) 项补充说明\n\n这是用于验证长图预览在固定高度截断后，底部是否通过平滑渐变自然融合到窗口背景中的长段落示例文本。"
+        }.joined(separator: "\n\n")
+        for (name, content, scheme) in [("window", sampleReply, ColorScheme.dark), ("long", longReply, .light)] {
+            ChatShareWindowController.shared.show(text: content, colorScheme: scheme)
+            try await Task.sleep(for: .milliseconds(500))
+            if let shareWindow = ChatShareWindowController.shared.window,
+               let surface = shareWindow.contentView {
+                surface.layoutSubtreeIfNeeded()
+                if let rep = surface.bitmapImageRepForCachingDisplay(in: surface.bounds) {
+                    surface.cacheDisplay(in: surface.bounds, to: rep)
+                    if let png = rep.representation(using: .png, properties: [:]) {
+                        try png.write(to: URL(filePath: "build/share-preview-\(name).png"))
+                    }
                 }
+                shareWindow.close()
             }
-            shareWindow.close()
         }
         print("Share card and user reply regression passed")
     }
