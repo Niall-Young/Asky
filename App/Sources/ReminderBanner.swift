@@ -432,6 +432,8 @@ private final class ReminderBannerPanel: NSPanel {
 }
 
 private struct ReminderBannerCard: View {
+    private static let closeIcon = MingCute.image("xmark", size: 9.5)
+
     let item: ReminderBannerItem
     let contentVisible: Bool
     let foldedHeight: CGFloat?
@@ -447,10 +449,6 @@ private struct ReminderBannerCard: View {
         return item.source.hasPrefix(prefix) ? String(item.source.dropFirst(prefix.count)) : item.source
     }
 
-    private var symbolTint: Color {
-        item.symbol == "car.fill" ? ToolIconPalette.teal : ToolIconPalette.blue
-    }
-
     /// Keep punctuation inside sentences, but omit Chinese full stops at the end of card copy.
     private func displayText(_ text: String) -> String {
         text.replacingOccurrences(of: #"。+(?=\s*$)"#, with: "", options: .regularExpression)
@@ -463,6 +461,7 @@ private struct ReminderBannerCard: View {
     }
 
     var body: some View {
+        let showClose = hovering && contentVisible
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 6) {
                 Image(nsImage: NSApp.applicationIconImage)
@@ -481,32 +480,26 @@ private struct ReminderBannerCard: View {
                         .font(.system(size: 12, weight: .regular))
                         .monospacedDigit()
                         .foregroundStyle(ThemeColor.kTextSubtlest)
-                        .opacity(hovering && contentVisible ? 0 : 1)
-                    if hovering && contentVisible {
-                        Button(action: onDismiss) {
-                            Image(mingCute: "xmark", size: 9.5)
-                        }
-                        .buttonStyle(BannerCloseButtonStyle())
-                        .accessibilityLabel(Text("关闭"))
-                        .transition(.opacity)
+                        .opacity(showClose ? 0 : 1)
+                    Button(action: onDismiss) {
+                        Image(nsImage: Self.closeIcon)
+                            .renderingMode(.template)
                     }
+                    .buttonStyle(BannerCloseButtonStyle())
+                    .accessibilityLabel(Text("关闭"))
+                    .opacity(showClose ? 1 : 0)
+                    .allowsHitTesting(showClose)
+                    .accessibilityHidden(!showClose)
                 }
                 .frame(height: 20)
+                .animation(ReminderBannerCenter.reduceMotion ? nil : .easeOut(duration: 0.14), value: showClose)
             }
 
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(alignment: .center, spacing: 8) {
-                    Image(mingCute: item.symbol, size: 12.5)
-                        .foregroundStyle(symbolTint)
-                        .frame(width: 22, height: 22)
-                        .background(symbolTint.opacity(colorScheme == .dark ? 0.22 : 0.12),
-                                    in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                        .accessibilityHidden(true)
-                    Text(displayText(item.title))
-                        .font(.system(size: 14.5, weight: .semibold))
-                        .foregroundStyle(ThemeColor.kText)
-                        .lineLimit(1)
-                }
+            VStack(alignment: .leading, spacing: 4) {
+                Text(displayText(item.title))
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(ThemeColor.kText)
+                    .lineLimit(1)
 
                 let lines = bodyLines
                 if lines.count > 1 {
@@ -531,7 +524,7 @@ private struct ReminderBannerCard: View {
                         .lineLimit(4)
                 }
             }
-            .padding(.top, 8)
+            .padding(.top, 7)
 
             if !item.actions.isEmpty {
                 HStack(spacing: 6) {
@@ -560,11 +553,7 @@ private struct ReminderBannerCard: View {
         .frame(height: foldedHeight, alignment: .top)
         .clipped()
         .nativeGlassBackground(in: shape)
-        .onHover { inside in
-            withAnimation(ReminderBannerCenter.reduceMotion ? nil : .easeOut(duration: 0.14)) {
-                hovering = inside
-            }
-        }
+        .onHover { hovering = $0 }
         .accessibilityElement(children: .contain)
     }
 }
