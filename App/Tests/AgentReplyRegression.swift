@@ -8,6 +8,93 @@ import ToolService
 @main
 @MainActor
 enum AgentReplyRegression {
+    static func composerTagHeightRegression(app: AppModel, capturePrefix: String?) async throws {
+        let model = AgentModel(app: app)
+        let controller = AgentWindowController(model: model, presentation: WindowPresentation())
+        controller.show()
+        let window = NSApp.windows.first { $0.title == "Asky AI" }!
+        defer { window.orderOut(nil) }
+        try await Task.sleep(for: .milliseconds(400))
+
+        guard let editor = window.firstResponder as? NSTextView,
+              let scroll = editor.enclosingScrollView,
+              let layout = editor.layoutManager,
+              let container = editor.textContainer else {
+            preconditionFailure("Expected focused ComposerTextView with scroll view")
+        }
+
+        func capture(_ suffix: String) throws {
+            guard let capturePrefix, let view = window.contentView else { return }
+            if let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
+                view.cacheDisplay(in: view.bounds, to: rep)
+                if let png = rep.representation(using: .png, properties: [:]) {
+                    try png.write(to: URL(filePath: "\(capturePrefix)-\(suffix).png"))
+                }
+            }
+        }
+
+        func waitLayout() async throws {
+            try await Task.sleep(for: .milliseconds(150))
+            layout.ensureLayout(for: container)
+        }
+
+        // 1. Empty composer height
+        try await waitLayout()
+        let emptyScrollHeight = scroll.frame.height
+        try capture("empty")
+
+        // 2. Tag-only on empty composer must keep the exact same height
+        model.addQuote("引用一段内容", sourceMessageID: "src-1")
+        for _ in 0..<100 where !model.pendingTagInsertions.isEmpty {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        try await waitLayout()
+        let tagOnlyHeight = scroll.frame.height
+        try capture("tag-only")
+        precondition(abs(tagOnlyHeight - emptyScrollHeight) < 0.5,
+                     "Inserting a tag into empty composer changed height: empty=\(emptyScrollHeight), tagOnly=\(tagOnlyHeight)")
+
+        // 3. Single-line plain text vs single-line text + tag must keep identical height & text baseline
+        editor.selectAll(nil)
+        editor.insertText("你好世界 ", replacementRange: editor.selectedRange())
+        try await waitLayout()
+        let plainTextHeight = scroll.frame.height
+        let plainBaseline = layout.location(forGlyphAt: 0).y
+        try capture("plain-text")
+        precondition(abs(plainTextHeight - emptyScrollHeight) < 0.5,
+                     "Single-line plain text changed height: empty=\(emptyScrollHeight), plain=\(plainTextHeight)")
+
+        model.addQuote("测试引用", sourceMessageID: "src-2")
+        for _ in 0..<100 where !model.pendingTagInsertions.isEmpty {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        try await waitLayout()
+        let textWithTagHeight = scroll.frame.height
+        let textWithTagBaseline = layout.location(forGlyphAt: 0).y
+        try capture("text-and-tag")
+        precondition(abs(textWithTagHeight - plainTextHeight) < 0.5,
+                     "Adding tag to single-line text changed height: plain=\(plainTextHeight), withTag=\(textWithTagHeight)")
+        precondition(abs(textWithTagBaseline - plainBaseline) < 0.5,
+                     "Adding tag shifted text baseline: plain=\(plainBaseline), withTag=\(textWithTagBaseline)")
+
+        // 4. Multi-line plain text vs multi-line with tag must keep identical height
+        editor.selectAll(nil)
+        editor.insertText("第一行内容\n第二行内容 ", replacementRange: editor.selectedRange())
+        try await waitLayout()
+        let twoLinePlainHeight = scroll.frame.height
+
+        model.addQuote("第二行标签", sourceMessageID: "src-3")
+        for _ in 0..<100 where !model.pendingTagInsertions.isEmpty {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        try await waitLayout()
+        let twoLineTagHeight = scroll.frame.height
+        precondition(abs(twoLineTagHeight - twoLinePlainHeight) < 0.5,
+                     "Adding tag on 2nd line changed height: plain2=\(twoLinePlainHeight), tag2=\(twoLineTagHeight)")
+
+        print("Composer tag height regression passed: empty=\(emptyScrollHeight), tagOnly=\(tagOnlyHeight), plain=\(plainTextHeight), text+tag=\(textWithTagHeight), baseline=\(plainBaseline)->\(textWithTagBaseline), twoLine=\(twoLinePlainHeight)->\(twoLineTagHeight)")
+    }
+
     static func composerBackspaceRegression(app: AppModel) async throws {
         let model = AgentModel(app: app)
         let controller = AgentWindowController(model: model, presentation: WindowPresentation())
@@ -2942,6 +3029,12 @@ enum AgentReplyRegression {
         let root = FileManager.default.temporaryDirectory.appending(path: "Asky-reply-\(UUID())")
         defer { try? FileManager.default.removeItem(at: root) }
         let app = try AppModel(root: root)
+        if CommandLine.arguments.contains("--composer-tag-height") {
+            let captureIdx = CommandLine.arguments.firstIndex(of: "--capture-prefix").map { $0 + 1 }
+            let capturePrefix = captureIdx.flatMap { $0 < CommandLine.arguments.count ? CommandLine.arguments[$0] : nil }
+            try await composerTagHeightRegression(app: app, capturePrefix: capturePrefix)
+            return
+        }
         if CommandLine.arguments.contains("--composer-backspace") {
             try await composerBackspaceRegression(app: app)
             return

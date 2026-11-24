@@ -9,6 +9,45 @@ struct ComposerTagInsertion: Identifiable, Equatable {
     let atStart: Bool
 }
 
+/// Keeps plain text lines and inline-tag lines at identical height and baseline
+/// so inserting or removing a tag never shifts the composer height or text baseline.
+private final class ComposerLineLayoutDelegate: NSObject, NSLayoutManagerDelegate {
+    let lineHeight: CGFloat
+    let lineSpacing: CGFloat
+    let baseline: CGFloat
+
+    init(lineHeight: CGFloat, lineSpacing: CGFloat, baseline: CGFloat) {
+        self.lineHeight = lineHeight
+        self.lineSpacing = lineSpacing
+        self.baseline = baseline
+    }
+
+    func layoutManager(
+        _ layoutManager: NSLayoutManager,
+        shouldSetLineFragmentRect lineFragmentRect: UnsafeMutablePointer<NSRect>,
+        lineFragmentUsedRect: UnsafeMutablePointer<NSRect>,
+        baselineOffset: UnsafeMutablePointer<CGFloat>,
+        in textContainer: NSTextContainer,
+        forGlyphRange glyphRange: NSRange
+    ) -> Bool {
+        var changed = false
+        if lineFragmentRect.pointee.height < lineHeight {
+            lineFragmentRect.pointee.size.height = lineHeight
+            changed = true
+        }
+        if lineFragmentUsedRect.pointee.height < lineHeight {
+            lineFragmentUsedRect.pointee.size.height = lineHeight
+            changed = true
+        }
+        if lineFragmentUsedRect.pointee.height <= lineHeight + lineSpacing + 0.5,
+           abs(baselineOffset.pointee - baseline) > 0.01 {
+            baselineOffset.pointee = baseline
+            changed = true
+        }
+        return changed
+    }
+}
+
 private final class ComposerTextView: NSTextView {
     var pasteAttachment: () -> Bool = { false }
     var pasteLongText: (String) -> InlineTagKind? = { _ in nil }
@@ -29,15 +68,25 @@ private final class ComposerTextView: NSTextView {
     private weak var hoveredTag: InlineTagAttachment?
     private var hoveredTagIndex: Int?
 
-    static let minEditorHeight: CGFloat = 28
+    static let lineHeight: CGFloat = InlineTagAttachment.pillHeight
+    static let lineSpacing: CGFloat = 3
+    static let verticalInset: CGFloat = 3
+    static let minEditorHeight: CGFloat = lineHeight + verticalInset * 2
     static let maxEditorHeight: CGFloat = 160
     static let bodyFont = NSFont.systemFont(ofSize: 14, weight: .regular)
     static let maxCaretHeight: CGFloat = ceil(bodyFont.ascender - bodyFont.descender) + 1
+    static let lineBaseline: CGFloat = InlineTagAttachment.pillHeight + InlineTagAttachment.pillYOffset
     static let bodyParagraphStyle: NSParagraphStyle = {
         let style = NSMutableParagraphStyle()
-        style.lineSpacing = max(0, TextStyle(size: 14, weight: 400, mode: .default).lineHeight - 14 * 1.2)
+        style.minimumLineHeight = lineHeight
+        style.lineSpacing = lineSpacing
         return style.copy() as! NSParagraphStyle
     }()
+    let lineLayoutDelegate = ComposerLineLayoutDelegate(
+        lineHeight: lineHeight,
+        lineSpacing: lineSpacing,
+        baseline: lineBaseline
+    )
 
     func baseAttributes() -> [NSAttributedString.Key: Any] {
         [
@@ -97,7 +146,8 @@ private final class ComposerTextView: NSTextView {
 
     private func clampedCaretRect(_ rect: NSRect) -> NSRect {
         guard rect.height > Self.maxCaretHeight else { return rect }
-        let delta = floor((rect.height - Self.maxCaretHeight) / 2)
+        let effectiveLineHeight = min(rect.height, Self.lineHeight)
+        let delta = floor((effectiveLineHeight - Self.maxCaretHeight) / 2)
         return NSRect(x: rect.origin.x, y: rect.origin.y + delta,
                       width: rect.width, height: Self.maxCaretHeight)
     }
@@ -362,6 +412,7 @@ private final class ComposerTextView: NSTextView {
             .font: Self.bodyFont, .foregroundColor: placeholderColor, .paragraphStyle: Self.bodyParagraphStyle
         ])
         let layout = NSLayoutManager()
+        layout.delegate = lineLayoutDelegate
         let container = NSTextContainer(containerSize: textContainer.containerSize)
         container.lineFragmentPadding = textContainer.lineFragmentPadding
         storage.addLayoutManager(layout)
@@ -519,6 +570,7 @@ struct ComposerTextEditor: NSViewRepresentable {
 
         let editor = ComposerTextView(frame: NSRect(x: 0, y: 0, width: 0, height: ComposerTextView.minEditorHeight),
                                       textContainer: container)
+        layout.delegate = editor.lineLayoutDelegate
         editor.isRichText = true
         editor.allowsUndo = true
         editor.importsGraphics = false
@@ -527,7 +579,7 @@ struct ComposerTextEditor: NSViewRepresentable {
         editor.defaultParagraphStyle = ComposerTextView.bodyParagraphStyle
         editor.updateTypingAttributes()
         // Keep text 12 pt from the glass while the scroll view sits only 4 pt in.
-        editor.textContainerInset = NSSize(width: 8, height: 4)
+        editor.textContainerInset = NSSize(width: 8, height: ComposerTextView.verticalInset)
         editor.minSize = NSSize(width: 0, height: ComposerTextView.minEditorHeight)
         editor.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         editor.isVerticallyResizable = true

@@ -125,6 +125,11 @@ final class InlineTagAttachment: NSTextAttachment {
     private(set) var hoverState: InlineTagHoverState = .none
 
     static let pillHeight: CGFloat = 22
+    static let pillYOffset: CGFloat = {
+        let bodyFont = NSFont.systemFont(ofSize: 14)
+        let bodyHeight = bodyFont.ascender - bodyFont.descender
+        return floor(bodyFont.descender + (bodyHeight - pillHeight) / 2)
+    }()
     static let horizontalMargin: CGFloat = 5
     static let horizontalPadding: CGFloat = 7
     static let iconLeadingPadding: CGFloat = 6
@@ -142,7 +147,6 @@ final class InlineTagAttachment: NSTextAttachment {
     }
 
     private var pillWidth: CGFloat = 0
-    private var pillYOffset: CGFloat = 0
     private var imageCache: [MarginKey: NSImage] = [:]
 
     private var hasThumbnail: Bool {
@@ -205,7 +209,7 @@ final class InlineTagAttachment: NSTextAttachment {
         return MainActor.assumeIsolated {
             let leading: CGFloat = position.x <= lineFrag.minX + 0.5 ? 0 : Self.horizontalMargin
             let trailing = attachment.trailingMargin(atParagraphEnd: atParagraphEnd)
-            return NSRect(x: 0, y: attachment.pillYOffset, width: attachment.pillWidth + leading + trailing, height: Self.pillHeight)
+            return NSRect(x: 0, y: Self.pillYOffset, width: attachment.pillWidth + leading + trailing, height: Self.pillHeight)
         }
     }
 
@@ -229,14 +233,10 @@ final class InlineTagAttachment: NSTextAttachment {
         let textWidth = min(maxTextWidth, max(12, measuredWidth))
         pillWidth = ceil(leadingPad + iconWidth + Self.iconSpacing + textWidth + Self.horizontalPadding)
 
-        let bodyFont = NSFont.systemFont(ofSize: 14)
-        let bodyHeight = bodyFont.ascender - bodyFont.descender
-        pillYOffset = floor(bodyFont.descender + (bodyHeight - Self.pillHeight) / 2)
-
         imageCache.removeAll()
         let fallback = renderedImage(leadingMargin: Self.horizontalMargin, trailingMargin: Self.horizontalMargin)
         self.image = fallback
-        self.bounds = NSRect(x: 0, y: pillYOffset, width: fallback.size.width, height: fallback.size.height)
+        self.bounds = NSRect(x: 0, y: Self.pillYOffset, width: fallback.size.width, height: fallback.size.height)
     }
 
     private func renderedImage(leadingMargin: CGFloat, trailingMargin: CGFloat) -> NSImage {
