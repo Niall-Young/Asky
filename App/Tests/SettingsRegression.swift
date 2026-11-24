@@ -33,6 +33,11 @@ enum SettingsRegression {
                     print("Model capability HTTP diagnostics regression passed")
                     exit(0)
                 }
+                if CommandLine.arguments.contains("--button-states") {
+                    try await assertSettingsButtonStates()
+                    print("Settings button state regression passed")
+                    exit(0)
+                }
                 let root = FileManager.default.temporaryDirectory.appending(path: "Asky-settings-\(UUID())")
                 let legacyStore = try LocalStore(root: root)
                 if CommandLine.arguments.contains("--plugin-icons") {
@@ -1319,5 +1324,68 @@ enum SettingsRegression {
     private static func findScrollView(in view: NSView) -> NSScrollView? {
         if let scroll = view as? NSScrollView { return scroll }
         return view.subviews.lazy.compactMap { findScrollView(in: $0) }.first
+    }
+
+    private static func assertSettingsButtonStates() async throws {
+        struct HarnessView: View {
+            var body: some View {
+                VStack(alignment: .trailing, spacing: 14) {
+                    HStack(spacing: 12) {
+                        SettingsButton("保存并检查") {}
+                        SettingsButton("保存并检查", isLoading: true, loadingTitle: "检查中…") {}
+                            .disabled(true)
+                        SettingsButton("保存并检查", isComplete: true) {}
+                            .disabled(true)
+                        SettingsButton("", systemImage: "arrow.clockwise", isLoading: true) {}
+                            .disabled(true)
+                    }
+                    HStack(spacing: 12) {
+                        SettingsButton("保存") {}
+                        SettingsButton("保存", isLoading: true, loadingTitle: "保存中…") {}
+                            .disabled(true)
+                    }
+                }
+                .padding(24)
+            }
+        }
+        func allButtons(in view: NSView) -> [NSButton] {
+            var result: [NSButton] = []
+            if let button = view as? NSButton { result.append(button) }
+            for child in view.subviews { result += allButtons(in: child) }
+            return result
+        }
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 140),
+                              styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        let host = NSHostingView(rootView: HarnessView())
+        window.contentView = host
+        window.center()
+        for (name, appearance) in [("light", NSAppearance.Name.aqua), ("dark", NSAppearance.Name.darkAqua)] {
+            window.appearance = NSAppearance(named: appearance)
+            window.makeKeyAndOrderFront(nil)
+            try await Task.sleep(for: .milliseconds(300))
+            host.layoutSubtreeIfNeeded()
+            let buttons = allButtons(in: host)
+            precondition(buttons.count == 6, "expected 6 settings buttons, found \(buttons.count)")
+            let normal = buttons[0], checking = buttons[1], complete = buttons[2], spinner = buttons[3]
+            let shortNormal = buttons[4], shortSaving = buttons[5]
+            precondition(normal.title == "保存并检查")
+            precondition(checking.title == "检查中…", "loading button must replace native title, got '\(checking.title)'")
+            precondition(checking.image == nil)
+            precondition(checking.bounds.width >= normal.bounds.width - 1.0,
+                         "loading button width \(checking.bounds.width) shrank below base \(normal.bounds.width)")
+            precondition(complete.title.isEmpty && complete.image == nil,
+                         "complete button must clear native title/image to avoid overlay overlap")
+            precondition(abs(complete.bounds.width - normal.bounds.width) <= 1.0,
+                         "complete button width \(complete.bounds.width) must match base \(normal.bounds.width)")
+            precondition(spinner.title.isEmpty && spinner.image == nil,
+                         "icon loading button must clear native image to avoid spinner overlap")
+            precondition(shortSaving.title == "保存中…")
+            precondition(shortSaving.bounds.width >= shortNormal.bounds.width - 0.5)
+            guard let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { fatalError("capture") }
+            host.cacheDisplay(in: host.bounds, to: bitmap)
+            try bitmap.representation(using: .png, properties: [:])!
+                .write(to: URL(filePath: "build/settings-button-states-\(name).png"))
+        }
+        window.close()
     }
 }

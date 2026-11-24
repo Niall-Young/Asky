@@ -305,26 +305,41 @@ struct SettingsButton: View {
         self.isBordered = isBordered
     }
     var body: some View {
-        SettingsPushButton(title: title, role: role, systemImage: systemImage, assetImage: assetImage,
-                           hidesTitle: isLoading || isComplete, isBordered: isBordered, action: action)
+        let activeLoadingTitle = (!isComplete && isLoading) ? loadingTitle : nil
+        let hidesContent = isComplete || (isLoading && loadingTitle == nil)
+        SettingsPushButton(title: title,
+                           displayedTitle: hidesContent ? nil : (activeLoadingTitle ?? title),
+                           role: role,
+                           systemImage: hidesContent || activeLoadingTitle != nil ? nil : systemImage,
+                           assetImage: hidesContent || activeLoadingTitle != nil ? nil : assetImage,
+                           baseSystemImage: systemImage,
+                           baseAssetImage: assetImage,
+                           preservesBaseSize: isLoading || isComplete,
+                           isBordered: isBordered,
+                           action: action)
             .controlSize(.large)
             .fixedSize()
             .overlay {
-                if isComplete { Image(mingCute: "checkmark").accessibilityHidden(true) }
-                else if isLoading {
-                    if let loadingTitle { Text(loadingTitle).font(.system(size: 14)) }
-                    else { ProgressView().controlSize(.small) }
+                Group {
+                    if isComplete { Image(mingCute: "checkmark").accessibilityHidden(true) }
+                    else if isLoading, loadingTitle == nil {
+                        ProgressView().controlSize(.small)
+                    }
                 }
+                .allowsHitTesting(false)
             }
     }
 }
 
 private struct SettingsPushButton: NSViewRepresentable {
     let title: String
+    let displayedTitle: String?
     let role: ButtonRole?
     let systemImage: String?
     let assetImage: String?
-    let hidesTitle: Bool
+    let baseSystemImage: String?
+    let baseAssetImage: String?
+    let preservesBaseSize: Bool
     let isBordered: Bool
     let action: () -> Void
     @Environment(\.isEnabled) private var enabled
@@ -340,6 +355,26 @@ private struct SettingsPushButton: NSViewRepresentable {
         return button
     }
     func updateNSView(_ button: NSButton, context: Context) {
+        applyChrome(to: button)
+        applyContent(to: button, title: displayedTitle, systemImage: systemImage, assetImage: assetImage)
+        button.isEnabled = enabled
+        context.coordinator.action = action
+    }
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSButton, context: Context) -> CGSize? {
+        let current = nsView.intrinsicContentSize
+        var width = current.width
+        var height = current.height
+        if preservesBaseSize {
+            let sizingButton = context.coordinator.sizingButton
+            applyChrome(to: sizingButton)
+            applyContent(to: sizingButton, title: title, systemImage: baseSystemImage, assetImage: baseAssetImage)
+            let base = sizingButton.intrinsicContentSize
+            width = max(width, base.width)
+            height = max(height, base.height)
+        }
+        return CGSize(width: width, height: isBordered ? 28 : height)
+    }
+    private func applyChrome(to button: NSButton) {
         if #available(macOS 26, *), !SurfaceCompatibility.useLegacyMaterial,
            isBordered, !reduceTransparency, contrast != .increased {
             button.bezelStyle = .glass
@@ -348,31 +383,38 @@ private struct SettingsPushButton: NSViewRepresentable {
             button.bezelStyle = .rounded
             if #available(macOS 26, *) { button.borderShape = .automatic }
         }
-        button.title = title
-        button.attributedTitle = NSAttributedString(string: title, attributes: [
-            .font: NSFont.systemFont(ofSize: 14),
-            .foregroundColor: hidesTitle ? NSColor.clear : role == .destructive ? NSColor.systemRed :
-                enabled ? NSColor.controlTextColor : NSColor.disabledControlTextColor
-        ])
         button.controlSize = isBordered || controlSize == .large || controlSize == .extraLarge ? .large : .regular
-        button.image = systemImage.map { MingCute.image($0, size: title.isEmpty ? 12 : 14) }
+        button.contentTintColor = role == .destructive ? .systemRed : nil
+        button.isBordered = isBordered
+    }
+    private func applyContent(to button: NSButton, title: String?, systemImage: String?, assetImage: String?) {
+        let text = title ?? ""
+        button.title = text
+        if text.isEmpty {
+            button.attributedTitle = NSAttributedString()
+        } else {
+            button.attributedTitle = NSAttributedString(string: text, attributes: [
+                .font: NSFont.systemFont(ofSize: 14),
+                .foregroundColor: role == .destructive ? NSColor.systemRed :
+                    enabled ? NSColor.controlTextColor : NSColor.disabledControlTextColor
+            ])
+        }
+        button.image = systemImage.map { MingCute.image($0, size: text.isEmpty ? 12 : 14) }
         if let assetImage, let image = NSImage(named: assetImage)?.copy() as? NSImage {
             image.size = NSSize(width: 14, height: 14)
             image.isTemplate = true
             button.image = image
         }
-        button.imagePosition = button.image == nil ? .noImage : title.isEmpty ? .imageOnly : .imageLeading
-        button.contentTintColor = role == .destructive ? .systemRed : nil
-        button.isBordered = isBordered
-        button.isEnabled = enabled
-        context.coordinator.action = action
+        button.imagePosition = button.image == nil ? .noImage : text.isEmpty ? .imageOnly : .imageLeading
     }
-    func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSButton, context: Context) -> CGSize? {
-        let ideal = nsView.intrinsicContentSize
-        return CGSize(width: ideal.width, height: isBordered ? 28 : ideal.height)
-    }
+    @MainActor
     final class Coordinator: NSObject {
         var action: () -> Void
+        lazy var sizingButton: NSButton = {
+            let button = NSButton(title: "", target: nil, action: nil)
+            button.font = .systemFont(ofSize: 14)
+            return button
+        }()
         init(action: @escaping () -> Void) { self.action = action }
         @objc func press() { action() }
     }
