@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 36 36">
+  <defs>
+    <linearGradient id="surface" gradientUnits="userSpaceOnUse" x1="5" y1="1" x2="28" y2="36">
+      <stop stop-color="#F3F8FF"/>
+      <stop offset=".56" stop-color="#D7E6FF"/>
+      <stop offset="1" stop-color="#AFCAED"/>
+    </linearGradient>
+    <linearGradient id="rim" gradientUnits="userSpaceOnUse" x1="9" y1="0" x2="25" y2="36">
+      <stop stop-color="#FFFFFF" stop-opacity=".85"/>
+      <stop offset=".45" stop-color="#AFCAED" stop-opacity=".5"/>
+      <stop offset="1" stop-color="#477DBB" stop-opacity=".44"/>
+    </linearGradient>
+    <linearGradient id="ink" gradientUnits="userSpaceOnUse" x1="12" y1="7" x2="23" y2="28">
+      <stop stop-color="#82B1E8"/>
+      <stop offset=".52" stop-color="#477DBB"/>
+      <stop offset="1" stop-color="#325687"/>
+    </linearGradient>
+  </defs>
+  <path d="M18 0.75C25.35 0.75 29.35 0.75 32.3 3.7C35.25 6.65 35.25 10.65 35.25 18C35.25 25.35 35.25 29.35 32.3 32.3C29.35 35.25 25.35 35.25 18 35.25C10.65 35.25 6.65 35.25 3.7 32.3C0.75 29.35 0.75 25.35 0.75 18C0.75 10.65 0.75 6.65 3.7 3.7C6.65 0.75 10.65 0.75 18 0.75Z" fill="url(#surface)" stroke="url(#rim)" stroke-width=".8"/>
+  <circle cx="18" cy="10" r="2.65" fill="url(#ink)"/>
+  <path d="M9.45 13.45C9.71 12.62 10.5 12.2 11.35 12.47C13.85 13.3 15.91 13.73 18 13.73C20.09 13.73 22.15 13.3 24.65 12.47C25.5 12.2 26.29 12.62 26.55 13.45C26.82 14.27 26.36 15.08 25.56 15.4L21.6 16.87C20.7 17.21 20.42 17.78 20.42 18.66C20.42 20.62 21.37 23.06 23.24 26.42C23.68 27.19 23.46 27.99 22.74 28.43C21.97 28.87 21.12 28.65 20.65 27.87L18 23.34L15.35 27.87C14.88 28.65 14.03 28.87 13.26 28.43C12.54 27.99 12.32 27.19 12.76 26.42C14.63 23.06 15.58 20.62 15.58 18.66C15.58 17.78 15.3 17.21 14.4 16.87L10.44 15.4C9.64 15.08 9.18 14.27 9.45 13.45Z" fill="url(#ink)"/>
+</svg>
