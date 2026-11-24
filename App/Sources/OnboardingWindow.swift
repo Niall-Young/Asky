@@ -1,3 +1,4 @@
+#if DEBUG
 import AppKit
 import Carbon.HIToolbox
 import Combine
@@ -1065,3 +1066,4 @@ struct OnboardingView: View {
         }
     }
 }
+#endif
