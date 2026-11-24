@@ -21,4 +21,4 @@
    - 验证用户消息回复引用添加、跨页 `revealReply` 定位以及 `transcript-reply-<id>` 锚点存在。
    - 验证亮暗两种模式分享卡片渲染：`Share card light: 1200x872 (1486617 bytes)`、`Share card dark: 1200x872 (1442033 bytes)`。
 4. 视觉核查 `build/share-card-light.png`、`build/share-card-dark.png`、`build/share-preview-window.png` 与 `build/share-preview-long.png`
-   - 结果：通过。亮暗两版科技感背景与卡片内对齐的高斯模糊磨砂玻璃、亮暗文字对比度、左上角 Asky logo 与文字、Markdown 列表/引用/代码块排版均清晰准确；分享预览窗口顶部为 `SettingsSegmentedControl` 胶囊分段控件、底部为 `SettingsButton`，预览区固定高度不滚动，常规回复居中完整展示，长图回复顶部对齐并在底部通过平滑透明渐变融合到窗口背景（导出 PNG 仍保持完整长图）。
+   - 结果：通过。亮暗两版科技感背景与卡片内对齐的高斯模糊磨砂玻璃、亮暗文字对比度、左上角 Asky logo 与文字、Markdown 列表/引用/代码块排版均清晰准确；分享弹窗收紧为 `420 × 472` 无边框大圆角玻璃弹窗，顶部为左标题 + 右圆形关闭按钮，中部为居中缩略卡片（长图在 `286 pt` 处通过底部平滑渐变融合进背景），底部为居中统一的四枚圆形图标操作栏（复制图片、保存图片、系统分享、浅色/深色切换）。

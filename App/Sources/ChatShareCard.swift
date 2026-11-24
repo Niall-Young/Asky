@@ -378,7 +378,7 @@ enum ChatShareCardRenderer {
 final class ChatShareWindowController: NSWindowController, NSWindowDelegate {
     static let shared = ChatShareWindowController()
 
-    private static let cornerRadius: CGFloat = 16
+    private static let cornerRadius: CGFloat = 24
     private let presentation = WindowPresentation()
 
     private init() { super.init(window: nil) }
@@ -401,6 +401,9 @@ final class ChatShareWindowController: NSWindowController, NSWindowDelegate {
         host.sizingOptions = []
         host.frame = NSRect(origin: .zero, size: window.contentRect(forFrameRect: window.frame).size)
         window.contentView = WindowSurface.glassContentView(host, cornerRadius: Self.cornerRadius)
+        if let surface = window.contentView {
+            WindowSurface.updateCorners(of: surface, radius: Self.cornerRadius, circular: true)
+        }
         presentation.show(window, level: level)
     }
 
@@ -410,8 +413,8 @@ final class ChatShareWindowController: NSWindowController, NSWindowDelegate {
 
     private func makeWindow() -> NSWindow {
         let window = ChatShareWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 648, height: 604),
-            styleMask: [.titled, .closable, .fullSizeContentView],
+            contentRect: NSRect(x: 0, y: 0, width: 420, height: 472),
+            styleMask: [.borderless, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
@@ -422,6 +425,7 @@ final class ChatShareWindowController: NSWindowController, NSWindowDelegate {
         window.isOpaque = false
         window.backgroundColor = .clear
         window.hasShadow = true
+        window.isMovableByWindowBackground = false
         window.center()
         self.window = window
         return window
@@ -429,14 +433,19 @@ final class ChatShareWindowController: NSWindowController, NSWindowDelegate {
 }
 
 private final class ChatShareWindow: NSWindow {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
+
     override func cancelOperation(_ sender: Any?) {
         close()
     }
 }
 
 private struct ChatSharePreviewSheet: View {
-    private static let maxPreviewHeight: CGFloat = 468
-    private static let bottomFadeHeight: CGFloat = 128
+    private static let previewWidth: CGFloat = 312
+    private static let previewScale: CGFloat = previewWidth / ChatShareCardView.canvasWidth
+    private static let maxPreviewHeight: CGFloat = 286
+    private static let bottomFadeHeight: CGFloat = 88
 
     let text: String
     let windowProvider: () -> NSWindow?
@@ -456,32 +465,37 @@ private struct ChatSharePreviewSheet: View {
         _appearance = State(initialValue: initialAppearance)
     }
 
-    private var isOverflowing: Bool { cardHeight > Self.maxPreviewHeight }
+    private var scaledCardHeight: CGFloat { cardHeight * Self.previewScale }
+    private var isOverflowing: Bool { scaledCardHeight > Self.maxPreviewHeight }
     private var visiblePreviewHeight: CGFloat {
-        cardHeight > 0 ? min(cardHeight, Self.maxPreviewHeight) : Self.maxPreviewHeight
+        scaledCardHeight > 0 ? min(scaledCardHeight, Self.maxPreviewHeight) : Self.maxPreviewHeight
     }
 
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
-                Color.clear.frame(width: 68, height: 1)
+                Text(NSLocalizedString("分享回复", comment: ""))
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(ThemeColor.kText)
                 Spacer(minLength: 0)
-                SettingsSegmentedControl(
-                    selection: $appearance,
-                    options: ShareCardAppearance.allCases.map { ($0, $0.title) },
-                    identifier: "share-card-appearance",
-                    accessibilityLabel: NSLocalizedString("分享回复", comment: "")
-                )
-                Spacer(minLength: 0)
-                Color.clear.frame(width: 68, height: 1)
+                Button(action: close) {
+                    Image(mingCute: "xmark", size: 13)
+                        .foregroundStyle(ThemeColor.kTextSubtle)
+                        .frame(width: 28, height: 28)
+                        .background(ThemeColor.kBackgroundNeutral, in: Circle())
+                }
+                .buttonStyle(ShareCloseButtonStyle())
+                .accessibilityLabel(NSLocalizedString("关闭", comment: ""))
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 14)
+            .padding(.horizontal, 20)
+            .padding(.top, 18)
             .padding(.bottom, 12)
+            .background(WindowDragArea())
 
             ChatShareCardView(text: text, appearance: appearance)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { cardHeight = $0 }
-                .frame(width: ChatShareCardView.canvasWidth, height: visiblePreviewHeight, alignment: .top)
+                .scaleEffect(Self.previewScale, anchor: .top)
+                .frame(width: Self.previewWidth, height: visiblePreviewHeight, alignment: .top)
                 .clipShape(
                     UnevenRoundedRectangle(
                         topLeadingRadius: 16,
@@ -498,8 +512,8 @@ private struct ChatSharePreviewSheet: View {
                             LinearGradient(
                                 stops: [
                                     .init(color: .black, location: 0.0),
-                                    .init(color: .black.opacity(0.68), location: 0.38),
-                                    .init(color: .black.opacity(0.22), location: 0.74),
+                                    .init(color: .black.opacity(0.65), location: 0.36),
+                                    .init(color: .black.opacity(0.20), location: 0.72),
                                     .init(color: .clear, location: 1.0)
                                 ],
                                 startPoint: .top,
@@ -509,35 +523,36 @@ private struct ChatSharePreviewSheet: View {
                         }
                     }
                 }
-                .shadow(color: .black.opacity(isOverflowing ? 0 : 0.16), radius: 16, x: 0, y: 6)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: isOverflowing ? .top : .center)
-                .padding(.horizontal, 24)
-                .padding(.top, 6)
+                .shadow(color: .black.opacity(isOverflowing ? 0 : 0.22), radius: 18, x: 0, y: 8)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
 
-            HStack(spacing: 10) {
-                SettingsButton(NSLocalizedString("系统分享", comment: ""), assetImage: "ChatShare") {
-                    presentSystemShare()
-                }
+            HStack(spacing: 26) {
+                ShareCircleActionButton(
+                    title: copied ? NSLocalizedString("已复制", comment: "") : NSLocalizedString("复制图片", comment: ""),
+                    mingCute: copied ? "checkmark" : "doc.on.clipboard",
+                    action: copyImage
+                )
+                ShareCircleActionButton(
+                    title: saved ? NSLocalizedString("已保存图片", comment: "") : NSLocalizedString("保存图片", comment: ""),
+                    mingCute: saved ? "checkmark" : "arrow.down.to.line",
+                    action: saveImage
+                )
+                ShareCircleActionButton(
+                    title: NSLocalizedString("系统分享", comment: ""),
+                    assetImage: "ChatShare",
+                    action: presentSystemShare
+                )
                 .background(ShareAnchorReader(box: shareAnchor).allowsHitTesting(false))
-                Spacer(minLength: 0)
-                SettingsButton(
-                    NSLocalizedString("保存图片", comment: ""),
-                    systemImage: "arrow.down.to.line",
-                    isComplete: saved
-                ) {
-                    saveImage()
-                }
-                SettingsButton(
-                    NSLocalizedString("复制图片", comment: ""),
-                    systemImage: "doc.on.clipboard",
-                    isComplete: copied
-                ) {
-                    copyImage()
-                }
-                .compatibleGlassButtonStyle(prominent: true)
+                ShareCircleActionButton(
+                    title: appearance.title,
+                    assetImage: "ChatThemeToggle",
+                    action: {
+                        appearance = appearance == .dark ? .light : .dark
+                    }
+                )
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 14)
+            .padding(.top, 16)
+            .padding(.bottom, 22)
         }
         .appDialog(
             NSLocalizedString("分享失败", comment: ""),
@@ -591,6 +606,70 @@ private struct ChatSharePreviewSheet: View {
                 errorMessage = error.localizedDescription
             }
         }
+    }
+}
+
+private struct ShareCloseButtonStyle: ButtonStyle {
+    @State private var hovering = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .overlay {
+                if hovering || configuration.isPressed {
+                    Circle().fill(ThemeColor.kInteractionHover)
+                }
+            }
+            .contentShape(Circle())
+            .onHover { hovering = $0 }
+            .glassPointerFeedback(pressed: configuration.isPressed, in: Circle(), illumination: false)
+    }
+}
+
+private struct ShareCircleActionButton: View {
+    let title: String
+    var mingCute: String? = nil
+    var assetImage: String? = nil
+    let action: () -> Void
+
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 8) {
+                Group {
+                    if let mingCute {
+                        Image(mingCute: mingCute, size: 19)
+                    } else if let assetImage {
+                        Image(assetImage)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 19, height: 19)
+                    }
+                }
+                .foregroundStyle(ThemeColor.kText)
+                .frame(width: 48, height: 48)
+                .background(ThemeColor.kBackgroundNeutral, in: Circle())
+                .overlay {
+                    if hovering {
+                        Circle().fill(ThemeColor.kInteractionHover)
+                    }
+                }
+                Text(title)
+                    .font(.system(size: 12))
+                    .foregroundStyle(ThemeColor.kTextSubtle)
+                    .lineLimit(1)
+            }
+        }
+        .buttonStyle(ShareCircleButtonStyle())
+        .onHover { hovering = $0 }
+    }
+}
+
+private struct ShareCircleButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.95 : 1.0)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
 }
 
