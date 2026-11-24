@@ -14,6 +14,15 @@ enum SettingsPalette {
     static func surface(_ scheme: ColorScheme, opaque: Bool = false) -> Color {
         ThemeColor.kBackground.color(for: scheme, opaque: true).opacity(opaque ? 1 : 0.7)
     }
+    /// Monochrome control accent so switches, focus rings, and prominent controls stay black-and-white.
+    static func monochromeTint(_ scheme: ColorScheme) -> Color {
+        scheme == .dark
+            ? Color(.sRGB, red: 0.46, green: 0.47, blue: 0.51, opacity: 1)
+            : Color(.sRGB, red: 0.11, green: 0.115, blue: 0.13, opacity: 1)
+    }
+    static func focusBorder(_ scheme: ColorScheme) -> Color {
+        scheme == .dark ? Color.white.opacity(0.62) : Color.black.opacity(0.55)
+    }
 }
 
 /// Shared template for every settings page: section headings and quiet inset cards.
@@ -187,8 +196,8 @@ private struct SettingsInputChrome: ViewModifier {
         content.background(fill ?? (scheme == .dark ? ThemeColor.kBackgroundNeutral.color(for: scheme)
                             : SettingsPalette.surface(scheme, opaque: true).opacity(0.45)), in: shape)
             .overlay {
-                shape.strokeBorder(focused ? Color.accentColor : border,
-                                   lineWidth: focused ? 2 : 1)
+                shape.strokeBorder(focused ? SettingsPalette.focusBorder(scheme) : border,
+                                   lineWidth: focused ? 1.5 : 1)
                     .allowsHitTesting(false)
             }
     }
@@ -331,6 +340,21 @@ struct SettingsButton: View {
     }
 }
 
+private extension NSImage {
+    /// Adds transparent trailing space so a leading template image does not sit flush
+    /// against the button title; the artwork itself keeps its size and baseline.
+    func paddedForTitleGap(_ gap: CGFloat) -> NSImage {
+        let contentSize = size
+        let padded = NSImage(size: NSSize(width: contentSize.width + gap, height: contentSize.height),
+                             flipped: false) { _ in
+            self.draw(in: NSRect(origin: .zero, size: contentSize))
+            return true
+        }
+        padded.isTemplate = isTemplate
+        return padded
+    }
+}
+
 private struct SettingsPushButton: NSViewRepresentable {
     let title: String
     let displayedTitle: String?
@@ -399,12 +423,16 @@ private struct SettingsPushButton: NSViewRepresentable {
                     enabled ? NSColor.controlTextColor : NSColor.disabledControlTextColor
             ])
         }
-        button.image = systemImage.map { MingCute.image($0, size: text.isEmpty ? 12 : 14) }
+        var leadingImage = systemImage.map { MingCute.image($0, size: text.isEmpty ? 12 : 14) }
         if let assetImage, let image = NSImage(named: assetImage)?.copy() as? NSImage {
             image.size = NSSize(width: 14, height: 14)
             image.isTemplate = true
-            button.image = image
+            leadingImage = image
         }
+        // The native gap is only about 2.5 pt, so artwork that fills its canvas reads as
+        // touching the title. Pad the image instead of the title to keep labels, tests and
+        // accessibility names exact.
+        button.image = text.isEmpty ? leadingImage : leadingImage.map { $0.paddedForTitleGap(4) }
         button.imagePosition = button.image == nil ? .noImage : text.isEmpty ? .imageOnly : .imageLeading
     }
     @MainActor

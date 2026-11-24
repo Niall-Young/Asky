@@ -12,6 +12,7 @@ import ToolService
 
 struct SettingsView: View {
     @Bindable var app: AppModel
+    @Environment(\.colorScheme) private var scheme
     var body: some View {
         Group {
             switch SettingsPage.resolve(app.settingsTab) {
@@ -41,6 +42,7 @@ struct SettingsView: View {
             }
         }
         .toggleStyle(.switch)
+        .tint(SettingsPalette.monochromeTint(scheme))
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
@@ -283,10 +285,14 @@ final class HotKeyRecorderField: NSView {
         let pillRect = bounds.insetBy(dx: inset, dy: inset)
         let cornerRadius: CGFloat = 8
 
+        let ink = isDark
+            ? NSColor(srgbRed: 0.95, green: 0.95, blue: 0.97, alpha: 1)
+            : NSColor(srgbRed: 0.09, green: 0.095, blue: 0.11, alpha: 1)
+
         // Outer soft focus ring when recording
         if recording {
             let haloRect = pillRect.insetBy(dx: -1.5, dy: -1.5)
-            let haloColor = (rejected ? NSColor.systemRed : NSColor.controlAccentColor).withAlphaComponent(0.32)
+            let haloColor = (rejected ? NSColor.systemRed : ink).withAlphaComponent(isDark ? 0.22 : 0.14)
             haloColor.setStroke()
             let haloPath = NSBezierPath(roundedRect: haloRect, xRadius: cornerRadius + 1.5, yRadius: cornerRadius + 1.5)
             haloPath.lineWidth = 3
@@ -303,7 +309,7 @@ final class HotKeyRecorderField: NSView {
 
         // Pill border
         let borderColor: NSColor = recording
-            ? (rejected ? .systemRed : .controlAccentColor)
+            ? (rejected ? .systemRed : ink.withAlphaComponent(isDark ? 0.72 : 0.65))
             : (isDark ? NSColor.white.withAlphaComponent(0.15) : NSColor.black.withAlphaComponent(0.13))
         borderColor.setStroke()
         path.lineWidth = recording ? 1.5 : 1
@@ -314,7 +320,7 @@ final class HotKeyRecorderField: NSView {
         let activeFlags: NSEvent.ModifierFlags = recording ? liveFlags : parsed.flags
         let keyText: String = recording ? "" : parsed.key
 
-        let accent = NSColor.controlAccentColor
+        let accent = ink
         let muted = isDark
             ? NSColor.white.withAlphaComponent(0.26)
             : NSColor.black.withAlphaComponent(0.26)

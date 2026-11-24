@@ -7,10 +7,11 @@ import SwiftUI
 import Theme
 import ToolService
 
-/// First-launch welcome and setup window: spacious, quiet, native macOS Liquid Glass.
+/// First-launch welcome and setup window: monochrome ink, diffused ambient light,
+/// large-radius light-neumorphic liquid-glass surfaces, and restrained typography.
 @MainActor
 enum OnboardingWindow {
-    static let size = NSSize(width: 600, height: 460)
+    static let size = NSSize(width: 600, height: 472)
 
     static func make(app: AppModel, onFinish: @escaping () -> Void, onDismiss: @escaping () -> Void) -> NSWindow {
         let controller = OnboardingContainerController(app: app, onFinish: onFinish, onDismiss: onDismiss)
@@ -85,7 +86,7 @@ private final class OnboardingContainerController: NSViewController, NSWindowDel
     }
 }
 
-// MARK: - Window Backdrop (Matches Native Window Corner Radius)
+// MARK: - Window Backdrop & Diffused Ambient Mesh
 
 private struct OnboardingBackdrop: View {
     @Environment(\.colorScheme) private var scheme
@@ -96,12 +97,26 @@ private struct OnboardingBackdrop: View {
 
     var body: some View {
         if opaque {
-            Rectangle().fill(SettingsPalette.surface(scheme, opaque: true))
+            Rectangle().fill(
+                scheme == .dark
+                    ? Color(.sRGB, red: 0.085, green: 0.09, blue: 0.105, opacity: 1)
+                    : Color(.sRGB, red: 0.955, green: 0.96, blue: 0.975, opacity: 1)
+            )
         } else if #available(macOS 26, *), !SurfaceCompatibility.useLegacyMaterial {
             OnboardingRegularGlass(scheme: scheme)
-                .overlay(ThemeColor.kBackgroundNeutral.color(for: scheme))
+                .overlay(
+                    scheme == .dark
+                        ? Color(.sRGB, red: 0.075, green: 0.08, blue: 0.098, opacity: 0.72)
+                        : Color(.sRGB, red: 0.95, green: 0.956, blue: 0.974, opacity: 0.74)
+                )
         } else {
-            Color.clear.nativeGlassBackground(in: Rectangle())
+            Color.clear
+                .nativeGlassBackground(in: Rectangle())
+                .overlay(
+                    scheme == .dark
+                        ? Color(.sRGB, red: 0.075, green: 0.08, blue: 0.098, opacity: 0.64)
+                        : Color(.sRGB, red: 0.95, green: 0.956, blue: 0.974, opacity: 0.68)
+                )
         }
     }
 }
@@ -118,41 +133,102 @@ private struct OnboardingRegularGlass: NSViewRepresentable {
     }
 
     func updateNSView(_ view: NSGlassEffectView, context: Context) {
-        view.tintColor = NSColor(SettingsPalette.surface(scheme, opaque: true)).withAlphaComponent(0.25)
+        view.tintColor = NSColor(SettingsPalette.surface(scheme, opaque: true)).withAlphaComponent(0.20)
     }
 }
 
-// MARK: - Subtle Ambient Glow
-
-private struct OnboardingAmbientGlow: View {
+/// Multi-orb atmospheric diffused light behind the frosted glass trays.
+private struct OnboardingDiffusedGlow: View {
     let step: OnboardingStep
     @Environment(\.colorScheme) private var scheme
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorSchemeContrast) private var contrast
 
-    private var centerX: CGFloat {
+    private var coolCenter: UnitPoint {
         switch step {
-        case .welcome: 0.50
-        case .permissions: 0.32
-        case .shortcuts: 0.52
-        case .ai: 0.68
+        case .welcome: UnitPoint(x: 0.24, y: 0.14)
+        case .permissions: UnitPoint(x: 0.16, y: 0.22)
+        case .shortcuts: UnitPoint(x: 0.36, y: 0.16)
+        case .ai: UnitPoint(x: 0.76, y: 0.18)
+        }
+    }
+
+    private var warmCenter: UnitPoint {
+        switch step {
+        case .welcome: UnitPoint(x: 0.80, y: 0.26)
+        case .permissions: UnitPoint(x: 0.82, y: 0.42)
+        case .shortcuts: UnitPoint(x: 0.78, y: 0.62)
+        case .ai: UnitPoint(x: 0.22, y: 0.56)
+        }
+    }
+
+    private var mistCenter: UnitPoint {
+        switch step {
+        case .welcome: UnitPoint(x: 0.50, y: 0.86)
+        case .permissions: UnitPoint(x: 0.46, y: 0.84)
+        case .shortcuts: UnitPoint(x: 0.26, y: 0.82)
+        case .ai: UnitPoint(x: 0.64, y: 0.84)
         }
     }
 
     var body: some View {
         if !reduceTransparency && contrast != .increased {
-            RadialGradient(
-                colors: [
-                    Color.accentColor.opacity(scheme == .dark ? 0.12 : 0.08),
-                    Color.accentColor.opacity(scheme == .dark ? 0.03 : 0.015),
-                    .clear,
-                ],
-                center: UnitPoint(x: centerX, y: step == .welcome ? 0.18 : 0.05),
-                startRadius: 12,
-                endRadius: 320
-            )
-            .animation(reduceMotion ? nil : .spring(response: 0.65, dampingFraction: 0.96), value: step)
+            ZStack {
+                // Soft icy-lavender mist
+                RadialGradient(
+                    colors: scheme == .dark
+                        ? [
+                            Color(.sRGB, red: 0.24, green: 0.30, blue: 0.48, opacity: 0.40),
+                            Color(.sRGB, red: 0.18, green: 0.22, blue: 0.36, opacity: 0.14),
+                            .clear,
+                        ]
+                        : [
+                            Color(.sRGB, red: 0.77, green: 0.84, blue: 1.00, opacity: 0.58),
+                            Color(.sRGB, red: 0.86, green: 0.89, blue: 1.00, opacity: 0.24),
+                            .clear,
+                        ],
+                    center: coolCenter,
+                    startRadius: 10,
+                    endRadius: 310
+                )
+
+                // Soft warm-pearl / peach whisper
+                RadialGradient(
+                    colors: scheme == .dark
+                        ? [
+                            Color(.sRGB, red: 0.38, green: 0.26, blue: 0.28, opacity: 0.32),
+                            Color(.sRGB, red: 0.26, green: 0.20, blue: 0.24, opacity: 0.10),
+                            .clear,
+                        ]
+                        : [
+                            Color(.sRGB, red: 0.99, green: 0.87, blue: 0.82, opacity: 0.52),
+                            Color(.sRGB, red: 0.97, green: 0.90, blue: 0.88, opacity: 0.20),
+                            .clear,
+                        ],
+                    center: warmCenter,
+                    startRadius: 10,
+                    endRadius: 290
+                )
+
+                // Subtle lilac-silver lower diffusion
+                RadialGradient(
+                    colors: scheme == .dark
+                        ? [
+                            Color(.sRGB, red: 0.22, green: 0.24, blue: 0.36, opacity: 0.30),
+                            .clear,
+                        ]
+                        : [
+                            Color(.sRGB, red: 0.86, green: 0.84, blue: 0.99, opacity: 0.42),
+                            Color(.sRGB, red: 0.91, green: 0.91, blue: 0.99, opacity: 0.12),
+                            .clear,
+                        ],
+                    center: mistCenter,
+                    startRadius: 12,
+                    endRadius: 280
+                )
+            }
+            .animation(reduceMotion ? nil : .spring(response: 0.72, dampingFraction: 0.94), value: step)
             .ignoresSafeArea()
             .allowsHitTesting(false)
             .accessibilityHidden(true)
@@ -160,12 +236,171 @@ private struct OnboardingAmbientGlow: View {
     }
 }
 
-// MARK: - Unified Controls & Surfaces
+// MARK: - Monochrome & Light-Neumorphic Liquid Glass Surfaces
 
+private enum OnboardingInk {
+    static func solidFill(_ scheme: ColorScheme, hovered: Bool = false) -> Color {
+        if scheme == .dark {
+            return hovered
+                ? Color(.sRGB, red: 0.99, green: 0.99, blue: 1.00, opacity: 1)
+                : Color(.sRGB, red: 0.94, green: 0.945, blue: 0.96, opacity: 1)
+        }
+        return hovered
+            ? Color(.sRGB, red: 0.16, green: 0.17, blue: 0.20, opacity: 1)
+            : Color(.sRGB, red: 0.085, green: 0.09, blue: 0.11, opacity: 1)
+    }
+
+    static func solidForeground(_ scheme: ColorScheme) -> Color {
+        scheme == .dark
+            ? Color(.sRGB, red: 0.075, green: 0.08, blue: 0.095, opacity: 1)
+            : Color.white
+    }
+}
+
+/// Large-radius frosted glass container (24pt) that frames inner light-neumorphic tiles.
+private struct OnboardingGlassTray<Content: View>: View {
+    var padding: CGFloat = 10
+    @ViewBuilder var content: Content
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    private var opaque: Bool { reduceTransparency || contrast == .increased }
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 24, style: .continuous)
+        content
+            .padding(padding)
+            .background {
+                if opaque {
+                    shape.fill(
+                        scheme == .dark
+                            ? Color(.sRGB, red: 0.13, green: 0.135, blue: 0.15, opacity: 1)
+                            : Color(.sRGB, red: 0.93, green: 0.935, blue: 0.95, opacity: 1)
+                    )
+                } else {
+                    shape.fill(
+                        LinearGradient(
+                            colors: scheme == .dark
+                                ? [Color.white.opacity(0.068), Color.white.opacity(0.032)]
+                                : [Color.white.opacity(0.56), Color.white.opacity(0.30)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                }
+            }
+            .overlay {
+                shape.strokeBorder(
+                    LinearGradient(
+                        colors: scheme == .dark
+                            ? [
+                                Color.white.opacity(opaque ? 0.26 : 0.20),
+                                Color.white.opacity(opaque ? 0.14 : 0.05),
+                            ]
+                            : [
+                                Color.white.opacity(opaque ? 0.85 : 0.92),
+                                Color.white.opacity(opaque ? 0.45 : 0.32),
+                                Color.black.opacity(opaque ? 0.14 : 0.04),
+                            ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 1
+                )
+                .allowsHitTesting(false)
+            }
+            .shadow(
+                color: Color.black.opacity(scheme == .dark ? 0.30 : 0.045),
+                radius: 20,
+                y: 10
+            )
+            .shadow(
+                color: Color.black.opacity(scheme == .dark ? 0.14 : 0.022),
+                radius: 3,
+                y: 1
+            )
+    }
+}
+
+/// Inner liquid-glass list item tile (16pt continuous radius, concentric with the 24pt tray).
+private struct OnboardingGlassTile<Content: View>: View {
+    var verticalPadding: CGFloat = 11
+    var horizontalPadding: CGFloat = 14
+    @ViewBuilder var content: Content
+    @State private var hovered = false
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    private var opaque: Bool { reduceTransparency || contrast == .increased }
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
+        content
+            .padding(.horizontal, horizontalPadding)
+            .padding(.vertical, verticalPadding)
+            .background {
+                if opaque {
+                    shape.fill(
+                        scheme == .dark
+                            ? Color(.sRGB, red: 0.175, green: 0.18, blue: 0.20, opacity: 1)
+                            : Color.white
+                    )
+                } else {
+                    shape.fill(
+                        LinearGradient(
+                            colors: scheme == .dark
+                                ? [
+                                    Color.white.opacity(hovered ? 0.115 : 0.085),
+                                    Color.white.opacity(hovered ? 0.068 : 0.048),
+                                ]
+                                : [
+                                    Color.white.opacity(hovered ? 0.92 : 0.84),
+                                    Color.white.opacity(hovered ? 0.78 : 0.66),
+                                ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                }
+            }
+            .overlay {
+                shape.strokeBorder(
+                    LinearGradient(
+                        colors: scheme == .dark
+                            ? [
+                                Color.white.opacity(hovered ? 0.24 : 0.17),
+                                Color.white.opacity(0.04),
+                            ]
+                            : [
+                                Color.white.opacity(0.96),
+                                Color.white.opacity(0.50),
+                                Color.black.opacity(0.045),
+                            ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 1
+                )
+                .allowsHitTesting(false)
+            }
+            .shadow(
+                color: Color.black.opacity(scheme == .dark ? 0.22 : (hovered ? 0.055 : 0.036)),
+                radius: hovered ? 10 : 7,
+                y: hovered ? 4 : 2.5
+            )
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: hovered)
+            .onHover { hovered = $0 }
+    }
+}
+
+/// Monochrome pill CTA button: solid ink in primary mode, frosted glass-neumorphic in secondary mode.
 private struct OnboardingActionButtonStyle: ButtonStyle {
     var prominent: Bool
-    var minWidth: CGFloat = 104
-    var height: CGFloat = 38
+    var minWidth: CGFloat = 96
+    var height: CGFloat = 35
     @State private var hovered = false
     @Environment(\.colorScheme) private var scheme
     @Environment(\.isEnabled) private var isEnabled
@@ -173,59 +408,220 @@ private struct OnboardingActionButtonStyle: ButtonStyle {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorSchemeContrast) private var contrast
 
-    private var useNativeGlass: Bool {
-        if #available(macOS 26, *), !SurfaceCompatibility.useLegacyMaterial,
-           !reduceTransparency, contrast != .increased {
-            return true
-        }
-        return false
-    }
+    private var opaque: Bool { reduceTransparency || contrast == .increased }
 
     func makeBody(configuration: Configuration) -> some View {
-        let base = configuration.label
-            .font(.system(size: 14, weight: .medium))
-            .foregroundStyle(prominent ? Color.white : ThemeColor.kText.color(for: scheme))
-            .padding(.horizontal, 22)
+        configuration.label
+            .font(.system(size: 13, weight: .medium))
+            .foregroundStyle(
+                prominent
+                    ? OnboardingInk.solidForeground(scheme)
+                    : ThemeColor.kText.color(for: scheme)
+            )
+            .padding(.horizontal, 20)
             .frame(minWidth: minWidth, minHeight: height)
             .contentShape(Capsule())
-
-        Group {
-            if #available(macOS 26, *), useNativeGlass {
-                base
-                    .glassEffect(
-                        prominent ? .regular.tint(.accentColor).interactive() : .regular.interactive(),
-                        in: Capsule()
+            .background {
+                if prominent {
+                    Capsule()
+                        .fill(OnboardingInk.solidFill(scheme, hovered: hovered))
+                } else if opaque {
+                    Capsule()
+                        .fill(
+                            scheme == .dark
+                                ? Color(.sRGB, red: 0.19, green: 0.195, blue: 0.215, opacity: 1)
+                                : Color.white
+                        )
+                } else {
+                    Capsule()
+                        .fill(
+                            LinearGradient(
+                                colors: scheme == .dark
+                                    ? [
+                                        Color.white.opacity(hovered ? 0.16 : 0.115),
+                                        Color.white.opacity(hovered ? 0.095 : 0.065),
+                                    ]
+                                    : [
+                                        Color.white.opacity(hovered ? 0.92 : 0.80),
+                                        Color.white.opacity(hovered ? 0.74 : 0.60),
+                                    ],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                }
+            }
+            .overlay {
+                Capsule()
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: prominent
+                                ? [
+                                    Color.white.opacity(scheme == .dark ? 0.35 : 0.22),
+                                    Color.white.opacity(0.02),
+                                ]
+                                : (scheme == .dark
+                                    ? [Color.white.opacity(0.22), Color.white.opacity(0.06)]
+                                    : [Color.white.opacity(0.96), Color.black.opacity(0.06)]),
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1
                     )
-            } else {
-                base
-                    .background {
-                        if prominent {
-                            Capsule()
-                                .fill(Color.accentColor.opacity(hovered ? 0.92 : 1))
-                        } else {
-                            Capsule()
-                                .fill(
-                                    scheme == .dark
-                                        ? Color.white.opacity(hovered ? 0.13 : 0.08)
-                                        : Color.black.opacity(hovered ? 0.07 : 0.045)
-                                )
-                        }
+                    .allowsHitTesting(false)
+            }
+            .shadow(
+                color: Color.black.opacity(
+                    prominent
+                        ? (scheme == .dark ? 0.32 : 0.14)
+                        : (scheme == .dark ? 0.22 : 0.045)
+                ),
+                radius: prominent ? 12 : 8,
+                y: prominent ? 4 : 2.5
+            )
+            .scaleEffect(!reduceMotion && configuration.isPressed ? 0.97 : 1)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: configuration.isPressed)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.14), value: hovered)
+            .opacity(isEnabled ? 1 : 0.36)
+            .onHover { hovered = $0 }
+    }
+}
+
+/// Compact inline frosted-pill action button used inside Onboarding rows.
+private struct OnboardingRowPillButton: View {
+    let title: String
+    var prominent: Bool = false
+    var isLoading: Bool = false
+    var isComplete: Bool = false
+    var loadingTitle: String? = nil
+    let action: () -> Void
+
+    @State private var hovered = false
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                if isComplete {
+                    Image(mingCute: "checkmark", size: 11)
+                } else if isLoading {
+                    ProgressView()
+                        .controlSize(.mini)
+                    if let loadingTitle {
+                        Text(loadingTitle)
                     }
+                } else {
+                    Text(title)
+                }
+            }
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(
+                prominent
+                    ? OnboardingInk.solidForeground(scheme)
+                    : ThemeColor.kText.color(for: scheme)
+            )
+            .padding(.horizontal, 13)
+            .frame(height: 28)
+            .contentShape(Capsule())
+            .background {
+                if prominent {
+                    Capsule().fill(OnboardingInk.solidFill(scheme, hovered: hovered))
+                } else {
+                    Capsule().fill(
+                        LinearGradient(
+                            colors: scheme == .dark
+                                ? [
+                                    Color.white.opacity(hovered ? 0.16 : 0.11),
+                                    Color.white.opacity(hovered ? 0.09 : 0.06),
+                                ]
+                                : [
+                                    Color.white.opacity(hovered ? 0.98 : 0.90),
+                                    Color.white.opacity(hovered ? 0.86 : 0.72),
+                                ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                }
+            }
+            .overlay {
+                Capsule()
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: prominent
+                                ? [Color.white.opacity(0.18), Color.clear]
+                                : (scheme == .dark
+                                    ? [Color.white.opacity(0.20), Color.white.opacity(0.05)]
+                                    : [Color.white.opacity(0.95), Color.black.opacity(0.07)]),
+                            startPoint: .top,
+                            endPoint: .bottom
+                        ),
+                        lineWidth: 1
+                    )
+                    .allowsHitTesting(false)
+            }
+            .shadow(
+                color: Color.black.opacity(scheme == .dark ? 0.22 : (prominent ? 0.12 : 0.04)),
+                radius: 5,
+                y: 2
+            )
+        }
+        .buttonStyle(.plain)
+        .opacity(isEnabled ? 1 : 0.42)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.14), value: hovered)
+        .onHover { hovered = $0 }
+    }
+}
+
+/// Tactile monochrome pill switch for Onboarding (zero macOS blue).
+private struct OnboardingMonochromeSwitchStyle: ToggleStyle {
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func makeBody(configuration: Configuration) -> some View {
+        let on = configuration.isOn
+        Button {
+            if reduceMotion {
+                configuration.isOn.toggle()
+            } else {
+                withAnimation(.spring(response: 0.24, dampingFraction: 0.82)) {
+                    configuration.isOn.toggle()
+                }
+            }
+        } label: {
+            ZStack(alignment: on ? .trailing : .leading) {
+                Capsule()
+                    .fill(
+                        on
+                            ? OnboardingInk.solidFill(scheme)
+                            : (scheme == .dark ? Color.white.opacity(0.15) : Color.black.opacity(0.11))
+                    )
                     .overlay {
                         Capsule()
                             .strokeBorder(
-                                prominent
-                                    ? Color.white.opacity(scheme == .dark ? 0.16 : 0.22)
-                                    : ThemeColor.kBorder.color(for: scheme),
+                                scheme == .dark ? Color.white.opacity(0.12) : Color.black.opacity(on ? 0 : 0.06),
                                 lineWidth: 1
                             )
                     }
-                    .scaleEffect(!reduceMotion && configuration.isPressed ? 0.975 : 1)
-                    .animation(reduceMotion ? nil : .easeOut(duration: 0.11), value: configuration.isPressed)
+                    .frame(width: 36, height: 21)
+
+                Circle()
+                    .fill(
+                        on && scheme == .dark
+                            ? Color(.sRGB, red: 0.09, green: 0.095, blue: 0.11, opacity: 1)
+                            : Color.white
+                    )
+                    .frame(width: 15, height: 15)
+                    .shadow(color: Color.black.opacity(0.18), radius: 2, y: 1)
+                    .padding(3)
             }
+            .contentShape(Capsule())
         }
-        .opacity(isEnabled ? 1 : 0.35)
-        .onHover { hovered = $0 }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityValue(on ? NSLocalizedString("已开启", comment: "") : NSLocalizedString("未开启", comment: ""))
     }
 }
 
@@ -233,107 +629,142 @@ private struct OnboardingStatusBadge: View {
     @Environment(\.colorScheme) private var scheme
     @Environment(\.colorSchemeContrast) private var contrast
 
-    private var tint: Color {
+    private var dotColor: Color {
         scheme == .dark
-            ? Color(.sRGB, red: 0.28, green: 0.80, blue: 0.50, opacity: 1)
-            : Color(.sRGB, red: 0.14, green: 0.58, blue: 0.34, opacity: 1)
+            ? Color(.sRGB, red: 0.30, green: 0.82, blue: 0.52, opacity: 1)
+            : Color(.sRGB, red: 0.16, green: 0.62, blue: 0.36, opacity: 1)
     }
 
     var body: some View {
         HStack(spacing: 6) {
-            ZStack {
-                Circle()
-                    .fill(tint)
-                    .frame(width: 15, height: 15)
-                Image(mingCute: "checkmark", size: 9)
-                    .foregroundStyle(Color.white)
-            }
-            .accessibilityHidden(true)
+            Circle()
+                .fill(dotColor)
+                .frame(width: 6, height: 6)
+                .accessibilityHidden(true)
 
             Text(NSLocalizedString("已开启", comment: ""))
-                .font(.system(size: 12.5, weight: .medium))
-                .foregroundStyle(tint)
+                .font(.system(size: 11.5, weight: .medium))
+                .foregroundStyle(ThemeColor.kTextSubtle)
         }
-        .padding(.leading, 7)
-        .padding(.trailing, 11)
-        .frame(height: 28)
-        .background(tint.opacity(scheme == .dark ? 0.14 : 0.10), in: Capsule())
+        .padding(.horizontal, 11)
+        .frame(height: 26)
+        .background(
+            scheme == .dark ? Color.white.opacity(0.08) : Color.white.opacity(0.76),
+            in: Capsule()
+        )
         .overlay {
             Capsule()
-                .strokeBorder(tint.opacity(contrast == .increased ? 0.45 : 0.22), lineWidth: 1)
+                .strokeBorder(
+                    scheme == .dark
+                        ? Color.white.opacity(contrast == .increased ? 0.30 : 0.14)
+                        : Color.black.opacity(contrast == .increased ? 0.22 : 0.06),
+                    lineWidth: 1
+                )
                 .allowsHitTesting(false)
         }
         .accessibilityElement(children: .combine)
     }
 }
 
-private struct OnboardingCard<Content: View>: View {
-    @ViewBuilder var content: Content
-    @Environment(\.colorScheme) private var scheme
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    @Environment(\.colorSchemeContrast) private var contrast
-
-    private var fillColor: Color {
-        if reduceTransparency || contrast == .increased {
-            return scheme == .dark
-                ? Color(.sRGB, red: 0.16, green: 0.165, blue: 0.18, opacity: 1)
-                : Color.white
-        }
-        return scheme == .dark
-            ? Color.white.opacity(0.055)
-            : Color.white.opacity(0.58)
-    }
-
-    var body: some View {
-        let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
-        content
-            .background(fillColor, in: shape)
-            .overlay {
-                shape.strokeBorder(
-                    scheme == .dark
-                        ? Color.white.opacity(contrast == .increased ? 0.24 : 0.085)
-                        : Color.black.opacity(contrast == .increased ? 0.22 : 0.06),
-                    lineWidth: 1
-                )
-                .allowsHitTesting(false)
-            }
-    }
-}
-
-private struct OnboardingIconBadge: View {
+/// Soft monochrome light-neumorphic icon well (34×34pt, 11pt continuous radius).
+private struct OnboardingIconWell: View {
     enum Icon {
-        case mingCute(String, Color)
+        case mingCute(String)
         case agentBrand
     }
 
     let icon: Icon
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        Group {
+        let shape = RoundedRectangle(cornerRadius: 11, style: .continuous)
+        ZStack {
+            shape
+                .fill(
+                    LinearGradient(
+                        colors: scheme == .dark
+                            ? [Color.white.opacity(0.11), Color.white.opacity(0.055)]
+                            : [Color.white.opacity(0.95), Color(.sRGB, red: 0.94, green: 0.948, blue: 0.97, opacity: 0.85)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+            shape
+                .strokeBorder(
+                    LinearGradient(
+                        colors: scheme == .dark
+                            ? [Color.white.opacity(0.20), Color.white.opacity(0.05)]
+                            : [Color.white, Color.black.opacity(0.06)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 1
+                )
+
             switch icon {
-            case let .mingCute(symbol, tint):
-                ZStack {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(tint)
-                    Image(mingCute: symbol, size: 17)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 17, height: 17)
-                        .foregroundStyle(.white)
-                }
-                .frame(width: 32, height: 32)
-                .fixedSize()
-                .drawingGroup()
+            case let .mingCute(symbol):
+                Image(mingCute: symbol, size: 15)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 15, height: 15)
+                    .foregroundStyle(ThemeColor.kText.color(for: scheme))
             case .agentBrand:
                 Image("Agent")
                     .renderingMode(.original)
                     .resizable()
                     .scaledToFit()
-                    .frame(width: 32, height: 32)
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .frame(width: 21, height: 21)
+                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
             }
         }
+        .frame(width: 34, height: 34)
+        .shadow(color: Color.black.opacity(scheme == .dark ? 0.22 : 0.045), radius: 5, y: 2)
         .accessibilityHidden(true)
+    }
+}
+
+/// Small frosted feature chip on the welcome screen.
+private struct OnboardingFeatureChip: View {
+    let symbol: String
+    let title: String
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(mingCute: symbol, size: 12)
+                .foregroundStyle(ThemeColor.kTextSubtle)
+            Text(title)
+                .font(.system(size: 11.5, weight: .medium))
+                .foregroundStyle(ThemeColor.kTextSubtle)
+        }
+        .padding(.horizontal, 11)
+        .frame(height: 26)
+        .background {
+            Capsule().fill(
+                LinearGradient(
+                    colors: scheme == .dark
+                        ? [Color.white.opacity(0.10), Color.white.opacity(0.05)]
+                        : [Color.white.opacity(0.82), Color.white.opacity(0.58)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            )
+        }
+        .overlay {
+            Capsule()
+                .strokeBorder(
+                    LinearGradient(
+                        colors: scheme == .dark
+                            ? [Color.white.opacity(0.18), Color.white.opacity(0.04)]
+                            : [Color.white.opacity(0.95), Color.black.opacity(0.05)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 1
+                )
+                .allowsHitTesting(false)
+        }
+        .shadow(color: Color.black.opacity(scheme == .dark ? 0.20 : 0.035), radius: 5, y: 2)
     }
 }
 
@@ -379,11 +810,11 @@ struct OnboardingView: View {
 
     var body: some View {
         ZStack {
-            OnboardingAmbientGlow(step: step)
+            OnboardingDiffusedGlow(step: step)
 
             VStack(spacing: 0) {
                 Color.clear
-                    .frame(height: 44)
+                    .frame(height: 36)
                     .compatibleWindowDrag()
 
                 ZStack {
@@ -399,7 +830,7 @@ struct OnboardingView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding(.horizontal, 48)
+                .padding(.horizontal, 40)
 
                 if step != .welcome {
                     footerBar
@@ -408,8 +839,9 @@ struct OnboardingView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .font(.system(size: 14))
+        .font(.system(size: 13))
         .foregroundStyle(ThemeColor.kText)
+        .tint(SettingsPalette.monochromeTint(scheme))
         .onAppear {
             loadModelDraft()
             loginStatus = ToolService.launchAtLoginStatus
@@ -441,8 +873,8 @@ struct OnboardingView: View {
 
     private var stepTransition: AnyTransition {
         if reduceMotion { return .opacity }
-        let enterX: CGFloat = transitionForward ? 20 : -20
-        let exitX: CGFloat = transitionForward ? -16 : 16
+        let enterX: CGFloat = transitionForward ? 18 : -18
+        let exitX: CGFloat = transitionForward ? -14 : 14
         return .asymmetric(
             insertion: .opacity.combined(with: .offset(x: enterX)),
             removal: .opacity.combined(with: .offset(x: exitX))
@@ -461,7 +893,7 @@ struct OnboardingView: View {
     }
 
     private func entranceAnimation(delay: Double) -> Animation? {
-        reduceMotion ? nil : .spring(response: 0.52, dampingFraction: 0.92).delay(delay)
+        reduceMotion ? nil : .spring(response: 0.50, dampingFraction: 0.90).delay(delay)
     }
 
     // MARK: - Step 1: Welcome
@@ -470,114 +902,138 @@ struct OnboardingView: View {
         VStack(spacing: 0) {
             Spacer()
 
+            // Light-neumorphic liquid-glass icon pedestal
             ZStack {
-                Circle()
+                let pedestal = RoundedRectangle(cornerRadius: 24, style: .continuous)
+                pedestal
                     .fill(
-                        RadialGradient(
-                            colors: [
-                                Color.accentColor.opacity(scheme == .dark ? 0.24 : 0.14),
-                                .clear,
-                            ],
-                            center: .center,
-                            startRadius: 10,
-                            endRadius: 68
+                        LinearGradient(
+                            colors: scheme == .dark
+                                ? [Color.white.opacity(0.11), Color.white.opacity(0.045)]
+                                : [Color.white.opacity(0.86), Color.white.opacity(0.56)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
                         )
                     )
-                    .frame(width: 136, height: 136)
-                    .allowsHitTesting(false)
+                    .overlay {
+                        pedestal.strokeBorder(
+                            LinearGradient(
+                                colors: scheme == .dark
+                                    ? [Color.white.opacity(0.24), Color.white.opacity(0.05)]
+                                    : [Color.white, Color.white.opacity(0.45), Color.black.opacity(0.05)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 1
+                        )
+                    }
+                    .frame(width: 80, height: 80)
+                    .shadow(color: Color.black.opacity(scheme == .dark ? 0.34 : 0.065), radius: 22, y: 10)
+                    .shadow(color: Color.black.opacity(scheme == .dark ? 0.16 : 0.03), radius: 4, y: 1.5)
 
                 Image(nsImage: NSApp.applicationIconImage)
                     .resizable()
                     .interpolation(.high)
                     .scaledToFit()
-                    .frame(width: 92, height: 92)
-                    .shadow(color: Color.black.opacity(scheme == .dark ? 0.36 : 0.12), radius: 18, y: 8)
-                    .shadow(color: Color.black.opacity(scheme == .dark ? 0.18 : 0.05), radius: 4, y: 1)
+                    .frame(width: 56, height: 56)
+                    .shadow(color: Color.black.opacity(scheme == .dark ? 0.30 : 0.10), radius: 8, y: 4)
             }
-            .frame(height: 100)
-            .scaleEffect(entered || reduceMotion ? 1 : 0.94)
+            .scaleEffect(entered || reduceMotion ? 1 : 0.93)
             .opacity(entered ? 1 : 0)
             .animation(entranceAnimation(delay: 0.0), value: entered)
             .accessibilityHidden(true)
 
-            Spacer().frame(height: 22)
+            Spacer().frame(height: 20)
 
             Text(NSLocalizedString("你好，欢迎使用 Asky", comment: ""))
-                .font(.system(size: 27, weight: .semibold))
-                .tracking(-0.5)
+                .font(.system(size: 20, weight: .semibold))
+                .tracking(-0.35)
                 .foregroundStyle(ThemeColor.kText)
                 .opacity(entered ? 1 : 0)
-                .offset(y: entered || reduceMotion ? 0 : 8)
-                .animation(entranceAnimation(delay: 0.07), value: entered)
+                .offset(y: entered || reduceMotion ? 0 : 7)
+                .animation(entranceAnimation(delay: 0.06), value: entered)
 
-            Spacer().frame(height: 10)
+            Spacer().frame(height: 7)
 
             Text(NSLocalizedString("搜索、剪贴板与 AI，一个快捷键呼出", comment: ""))
-                .font(.system(size: 14.5))
+                .font(.system(size: 13))
                 .foregroundStyle(ThemeColor.kTextSubtle)
                 .opacity(entered ? 1 : 0)
-                .offset(y: entered || reduceMotion ? 0 : 8)
-                .animation(entranceAnimation(delay: 0.13), value: entered)
+                .offset(y: entered || reduceMotion ? 0 : 7)
+                .animation(entranceAnimation(delay: 0.11), value: entered)
+
+            Spacer().frame(height: 18)
+
+            HStack(spacing: 8) {
+                OnboardingFeatureChip(symbol: "magnifyingglass", title: NSLocalizedString("快速搜索", comment: ""))
+                OnboardingFeatureChip(symbol: "doc.on.clipboard", title: NSLocalizedString("剪贴板", comment: ""))
+                OnboardingFeatureChip(symbol: "sparkles", title: "AI")
+            }
+            .opacity(entered ? 1 : 0)
+            .offset(y: entered || reduceMotion ? 0 : 7)
+            .animation(entranceAnimation(delay: 0.15), value: entered)
 
             Spacer()
 
-            HStack(spacing: 14) {
+            HStack(spacing: 12) {
                 Button(NSLocalizedString("跳过", comment: "")) {
                     app.preferences.hasCompletedOnboarding = true
                     onSkip()
                 }
-                .buttonStyle(OnboardingActionButtonStyle(prominent: false, minWidth: 112, height: 40))
+                .buttonStyle(OnboardingActionButtonStyle(prominent: false, minWidth: 96, height: 36))
 
                 Button(NSLocalizedString("开始设置", comment: "")) {
                     navigate(to: .permissions)
                 }
-                .buttonStyle(OnboardingActionButtonStyle(prominent: true, minWidth: 156, height: 40))
+                .buttonStyle(OnboardingActionButtonStyle(prominent: true, minWidth: 132, height: 36))
                 .keyboardShortcut(.defaultAction)
             }
             .opacity(entered ? 1 : 0)
-            .offset(y: entered || reduceMotion ? 0 : 8)
-            .animation(entranceAnimation(delay: 0.19), value: entered)
+            .offset(y: entered || reduceMotion ? 0 : 7)
+            .animation(entranceAnimation(delay: 0.20), value: entered)
 
-            Spacer().frame(height: 44)
+            Spacer().frame(height: 40)
         }
     }
 
     // MARK: - Step 2: Permissions
 
     private var permissionsStep: some View {
-        VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: 16) {
             stepHeader(
                 title: NSLocalizedString("开启常用权限", comment: ""),
                 subtitle: NSLocalizedString("按需开启，随时可在设置中调整", comment: "")
             )
 
-            OnboardingCard {
-                VStack(spacing: 0) {
+            OnboardingGlassTray {
+                VStack(spacing: 8) {
                     permissionRow(
-                        icon: .mingCute("accessibility", ToolIconPalette.blue),
+                        icon: .mingCute("accessibility"),
                         title: NSLocalizedString("辅助功能", comment: ""),
                         description: NSLocalizedString("自动粘贴与窗口切换", comment: "")
                     ) {
                         if permissionModel.states[.accessibility] == .authorized {
                             OnboardingStatusBadge()
                         } else {
-                            SettingsButton(NSLocalizedString("去授权", comment: "")) {
+                            OnboardingRowPillButton(title: NSLocalizedString("去授权", comment: "")) {
                                 PermissionAuthorizationWindow.shared.show(.accessibility, colorScheme: scheme)
                             }
                         }
                     }
 
-                    rowDivider
-
                     permissionRow(
-                        icon: .mingCute("bookmark", ToolIconPalette.orange),
+                        icon: .mingCute("bookmark"),
                         title: NSLocalizedString("Chrome 书签", comment: ""),
                         description: NSLocalizedString("快速搜索本地书签", comment: "")
                     ) {
                         if app.chromeBookmarkAccessState == .authorized {
                             OnboardingStatusBadge()
                         } else {
-                            SettingsButton(NSLocalizedString(requestingChrome ? "正在请求…" : "去授权", comment: "")) {
+                            OnboardingRowPillButton(
+                                title: NSLocalizedString("去授权", comment: ""),
+                                isLoading: requestingChrome,
+                                loadingTitle: NSLocalizedString("正在请求…", comment: "")
+                            ) {
                                 requestingChrome = true
                                 Task {
                                     await app.authorizeChromeBookmarkFolder()
@@ -589,10 +1045,8 @@ struct OnboardingView: View {
                         }
                     }
 
-                    rowDivider
-
                     permissionRow(
-                        icon: .mingCute("power", ToolIconPalette.green),
+                        icon: .mingCute("power"),
                         title: NSLocalizedString("登录时启动", comment: ""),
                         description: NSLocalizedString("开机自动在菜单栏就绪", comment: "")
                     ) {
@@ -604,8 +1058,7 @@ struct OnboardingView: View {
                             }
                         ))
                         .labelsHidden()
-                        .toggleStyle(.switch)
-                        .controlSize(.small)
+                        .toggleStyle(OnboardingMonochromeSwitchStyle())
                     }
                 }
             }
@@ -615,57 +1068,55 @@ struct OnboardingView: View {
     }
 
     private func permissionRow<Trailing: View>(
-        icon: OnboardingIconBadge.Icon,
+        icon: OnboardingIconWell.Icon,
         title: String,
         description: String,
         @ViewBuilder trailing: () -> Trailing
     ) -> some View {
-        HStack(spacing: 14) {
-            OnboardingIconBadge(icon: icon)
+        OnboardingGlassTile(verticalPadding: 11, horizontalPadding: 14) {
+            HStack(spacing: 12) {
+                OnboardingIconWell(icon: icon)
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(ThemeColor.kText)
-                Text(description)
-                    .font(.system(size: 12.5))
-                    .foregroundStyle(ThemeColor.kTextSubtle)
-                    .lineLimit(1)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(ThemeColor.kText)
+                    Text(description)
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(ThemeColor.kTextSubtle)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 12)
+                trailing()
             }
-            Spacer(minLength: 16)
-            trailing()
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 15)
     }
 
     // MARK: - Step 3: Shortcuts
 
     private var shortcutsStep: some View {
-        VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: 16) {
             stepHeader(
                 title: NSLocalizedString("设置快捷键", comment: ""),
                 subtitle: NSLocalizedString("点击按钮即可录制新组合键，或直接保留默认设置", comment: "")
             )
 
-            OnboardingCard {
-                VStack(spacing: 0) {
+            OnboardingGlassTray {
+                VStack(spacing: 8) {
                     shortcutRow(
-                        icon: .mingCute("magnifyingglass", ToolIconPalette.blue),
+                        icon: .mingCute("magnifyingglass"),
                         title: NSLocalizedString("唤起启动器", comment: ""),
                         label: app.preferences.hotKeyLabel,
                         status: app.hotKeyStatus,
                         apply: setLauncherHotKey
                     )
-                    rowDivider
                     shortcutRow(
-                        icon: .mingCute("doc.on.clipboard", ToolIconPalette.teal),
+                        icon: .mingCute("doc.on.clipboard"),
                         title: NSLocalizedString("打开剪贴板历史", comment: ""),
                         label: app.preferences.clipboardHotKeyLabel,
                         status: app.clipboardHotKeyStatus,
                         apply: setClipboardHotKey
                     )
-                    rowDivider
                     shortcutRow(
                         icon: .agentBrand,
                         title: NSLocalizedString("打开 AI 对话", comment: ""),
@@ -681,91 +1132,88 @@ struct OnboardingView: View {
     }
 
     private func shortcutRow(
-        icon: OnboardingIconBadge.Icon,
+        icon: OnboardingIconWell.Icon,
         title: String,
         label: String,
         status: String,
         apply: @escaping (UInt32, UInt32, String) -> Bool
     ) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 14) {
-                OnboardingIconBadge(icon: icon)
+        OnboardingGlassTile(verticalPadding: 11, horizontalPadding: 14) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 12) {
+                    OnboardingIconWell(icon: icon)
 
-                Text(title)
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(ThemeColor.kText)
+                    Text(title)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(ThemeColor.kText)
 
-                Spacer(minLength: 16)
+                    Spacer(minLength: 12)
 
-                HotKeyRecorder(label: label, allowsPlainKey: false, apply: apply)
-                    .frame(width: 172, height: 30)
-            }
-            if !status.isEmpty, status != NSLocalizedString("已注册", comment: "") {
-                Text(status)
-                    .font(.system(size: 12))
-                    .foregroundStyle(ThemeColor.kTextNegative)
-                    .padding(.leading, 46)
+                    HotKeyRecorder(label: label, allowsPlainKey: false, apply: apply)
+                        .frame(width: 170, height: 30)
+                }
+                if !status.isEmpty, status != NSLocalizedString("已注册", comment: "") {
+                    Text(status)
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(ThemeColor.kTextNegative)
+                        .padding(.leading, 46)
+                }
             }
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 15)
     }
 
     // MARK: - Step 4: Optional AI Setup
 
     private var aiStep: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 14) {
             stepHeader(
                 title: NSLocalizedString("配置 AI 助手", comment: ""),
                 subtitle: NSLocalizedString("不配置模型也能畅用搜索、剪贴板与预览", comment: "")
             )
 
-            OnboardingCard {
-                VStack(spacing: 0) {
-                    HStack {
-                        Text(NSLocalizedString("供应商", comment: ""))
-                            .foregroundStyle(ThemeColor.kText)
-                        Spacer()
-                        SettingsChoice(selection: Binding(get: { draft.provider }, set: { value in
-                            draft.select(value)
-                            apiKey = ""
-                            modelMessage = nil
-                            modelSaved = false
-                        }), options: ModelProviderPreset.all.map { ($0.id, NSLocalizedString($0.name, comment: "")) } + [
-                            ("custom", NSLocalizedString("完全自定义（OpenAI 兼容）", comment: ""))
-                        ])
-                    }
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 11)
-                    rowDivider
-
-                    if let preset = ModelProviderPreset.find(draft.provider) {
+            OnboardingGlassTray(padding: 9) {
+                VStack(spacing: 7) {
+                    OnboardingGlassTile(verticalPadding: 8, horizontalPadding: 14) {
                         HStack {
-                            Text(NSLocalizedString("模型", comment: ""))
+                            Text(NSLocalizedString("供应商", comment: ""))
+                                .font(.system(size: 13, weight: .medium))
                                 .foregroundStyle(ThemeColor.kText)
                             Spacer()
-                            SettingsChoice(selection: $draft.model, options: preset.models.map { ($0, $0) })
+                            SettingsChoice(selection: Binding(get: { draft.provider }, set: { value in
+                                draft.select(value)
+                                apiKey = ""
+                                modelMessage = nil
+                                modelSaved = false
+                            }), options: ModelProviderPreset.all.map { ($0.id, NSLocalizedString($0.name, comment: "")) } + [
+                                ("custom", NSLocalizedString("完全自定义（OpenAI 兼容）", comment: ""))
+                            ])
                         }
-                        .padding(.horizontal, 18)
-                        .padding(.vertical, 11)
-                        rowDivider
-                    } else {
-                        SettingsTextField(NSLocalizedString("API 地址", comment: ""), text: $draft.baseURL,
-                                          prompt: Text("https://api.example.com/v1"))
-                            .padding(.horizontal, 18)
-                            .padding(.vertical, 9)
-                        rowDivider
-                        SettingsTextField(NSLocalizedString("模型名", comment: ""), text: $draft.model)
-                            .padding(.horizontal, 18)
-                            .padding(.vertical, 9)
-                        rowDivider
                     }
 
-                    SettingsSecureField(NSLocalizedString("API Key", comment: ""), text: $apiKey,
-                                        prompt: Text(NSLocalizedString(canReuseKey ? "已保存，留空不变" : "输入 API Key", comment: "")))
-                        .padding(.horizontal, 18)
-                        .padding(.vertical, 10)
-                    rowDivider
+                    if let preset = ModelProviderPreset.find(draft.provider) {
+                        OnboardingGlassTile(verticalPadding: 8, horizontalPadding: 14) {
+                            HStack {
+                                Text(NSLocalizedString("模型", comment: ""))
+                                    .font(.system(size: 13, weight: .medium))
+                                    .foregroundStyle(ThemeColor.kText)
+                                Spacer()
+                                SettingsChoice(selection: $draft.model, options: preset.models.map { ($0, $0) })
+                            }
+                        }
+                    } else {
+                        OnboardingGlassTile(verticalPadding: 7, horizontalPadding: 14) {
+                            SettingsTextField(NSLocalizedString("API 地址", comment: ""), text: $draft.baseURL,
+                                              prompt: Text("https://api.example.com/v1"))
+                        }
+                        OnboardingGlassTile(verticalPadding: 7, horizontalPadding: 14) {
+                            SettingsTextField(NSLocalizedString("模型名", comment: ""), text: $draft.model)
+                        }
+                    }
+
+                    OnboardingGlassTile(verticalPadding: 8, horizontalPadding: 14) {
+                        SettingsSecureField(NSLocalizedString("API Key", comment: ""), text: $apiKey,
+                                            prompt: Text(NSLocalizedString(canReuseKey ? "已保存，留空不变" : "输入 API Key", comment: "")))
+                    }
 
                     HStack {
                         if let preset = ModelProviderPreset.find(draft.provider) {
@@ -774,35 +1222,38 @@ struct OnboardingView: View {
                             } label: {
                                 HStack(spacing: 4) {
                                     Text(NSLocalizedString("获取 API Key", comment: ""))
-                                    Image(mingCute: "arrow.up.right", size: 12)
+                                    Image(mingCute: "arrow.up.right", size: 11)
                                 }
-                                .font(.system(size: 12.5))
+                                .font(.system(size: 12))
                                 .foregroundStyle(hoverKeyLink ? ThemeColor.kText.color(for: scheme) : ThemeColor.kTextSubtle.color(for: scheme))
                             }
                             .buttonStyle(.plain)
                             .onHover { hoverKeyLink = $0 }
                         }
                         Spacer()
-                        SettingsButton(NSLocalizedString("保存并检查", comment: ""),
-                                       isLoading: savingModel || checkingModel,
-                                       isComplete: modelSaved,
-                                       loadingTitle: NSLocalizedString(savingModel ? "保存中…" : "检查中…", comment: "")) {
+                        OnboardingRowPillButton(
+                            title: NSLocalizedString("保存并检查", comment: ""),
+                            prominent: true,
+                            isLoading: savingModel || checkingModel,
+                            isComplete: modelSaved,
+                            loadingTitle: NSLocalizedString(savingModel ? "保存中…" : "检查中…", comment: "")
+                        ) {
                             Task { await saveAndCheckModel() }
                         }
                         .disabled(savingModel || checkingModel || modelSaved)
                     }
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 11)
+                    .padding(.horizontal, 6)
+                    .padding(.top, 2)
                 }
                 .disabled(savingModel || checkingModel)
             }
 
             if let modelMessage {
                 Text(modelMessage)
-                    .font(.system(size: 12))
+                    .font(.system(size: 11.5))
                     .foregroundStyle(ThemeColor.kTextNegative)
                     .lineLimit(2)
-                    .padding(.horizontal, 4)
+                    .padding(.horizontal, 6)
             }
 
             Spacer(minLength: 0)
@@ -812,28 +1263,29 @@ struct OnboardingView: View {
     // MARK: - Shared Header & Footer
 
     private func stepHeader(title: String, subtitle: String) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
+        VStack(alignment: .leading, spacing: 4) {
             Text(title)
-                .font(.system(size: 22, weight: .semibold))
-                .tracking(-0.3)
+                .font(.system(size: 17, weight: .semibold))
+                .tracking(-0.25)
                 .foregroundStyle(ThemeColor.kText)
             Text(subtitle)
-                .font(.system(size: 13.5))
+                .font(.system(size: 12.5))
                 .foregroundStyle(ThemeColor.kTextSubtle)
         }
-        .padding(.top, 10)
+        .padding(.horizontal, 4)
+        .padding(.top, 4)
     }
 
     private var footerBar: some View {
         ZStack {
-            HStack(spacing: 7) {
+            HStack(spacing: 6) {
                 ForEach(OnboardingStep.setupSteps) { item in
                     Button { navigate(to: item) } label: {
                         Capsule()
                             .fill(item == step
-                                  ? ThemeColor.kText.color(for: scheme).opacity(0.65)
-                                  : ThemeColor.kTextSubtlest.color(for: scheme).opacity(0.45))
-                            .frame(width: item == step ? 18 : 6, height: 6)
+                                  ? OnboardingInk.solidFill(scheme)
+                                  : ThemeColor.kTextSubtlest.color(for: scheme).opacity(0.36))
+                            .frame(width: item == step ? 18 : 5, height: 5)
                             .padding(.vertical, 8)
                             .contentShape(Rectangle())
                     }
@@ -841,7 +1293,7 @@ struct OnboardingView: View {
                     .accessibilityLabel("\(item.rawValue)")
                 }
             }
-            .animation(reduceMotion ? nil : .spring(response: 0.34, dampingFraction: 0.90), value: step)
+            .animation(reduceMotion ? nil : .spring(response: 0.32, dampingFraction: 0.88), value: step)
 
             HStack {
                 Button(NSLocalizedString("上一步", comment: "")) {
@@ -849,7 +1301,7 @@ struct OnboardingView: View {
                         navigate(to: previous)
                     }
                 }
-                .buttonStyle(OnboardingActionButtonStyle(prominent: false, minWidth: 96, height: 38))
+                .buttonStyle(OnboardingActionButtonStyle(prominent: false, minWidth: 86, height: 34))
 
                 Spacer()
 
@@ -858,7 +1310,7 @@ struct OnboardingView: View {
                         app.preferences.hasCompletedOnboarding = true
                         onFinish()
                     }
-                    .buttonStyle(OnboardingActionButtonStyle(prominent: true, minWidth: 112, height: 38))
+                    .buttonStyle(OnboardingActionButtonStyle(prominent: true, minWidth: 102, height: 34))
                     .keyboardShortcut(.defaultAction)
                 } else {
                     Button(NSLocalizedString("继续", comment: "")) {
@@ -866,24 +1318,17 @@ struct OnboardingView: View {
                             navigate(to: next)
                         }
                     }
-                    .buttonStyle(OnboardingActionButtonStyle(prominent: true, minWidth: 104, height: 38))
+                    .buttonStyle(OnboardingActionButtonStyle(prominent: true, minWidth: 92, height: 34))
                     .keyboardShortcut(.defaultAction)
                 }
             }
         }
-        .padding(.horizontal, 48)
+        .padding(.horizontal, 40)
         .padding(.top, 10)
-        .padding(.bottom, 28)
+        .padding(.bottom, 24)
     }
 
     // MARK: - Helpers
-
-    private var rowDivider: some View {
-        Rectangle()
-            .fill(SettingsPalette.separator(scheme))
-            .frame(height: 1)
-            .padding(.horizontal, 18)
-    }
 
     private func navigate(to target: OnboardingStep) {
         guard target != step else { return }
@@ -894,7 +1339,7 @@ struct OnboardingView: View {
         if reduceMotion {
             step = target
         } else {
-            withAnimation(.spring(response: 0.34, dampingFraction: 0.95)) {
+            withAnimation(.spring(response: 0.34, dampingFraction: 0.94)) {
                 step = target
             }
         }
