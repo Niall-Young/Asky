@@ -3648,6 +3648,21 @@ enum AgentReplyRegression {
             try png.write(to: URL(filePath: "build/share-card-\(appearance.rawValue).png"))
             print("Share card \(appearance.rawValue): \(rep.pixelsWide)x\(rep.pixelsHigh) (\(png.count) bytes)")
         }
+
+        // 3. Open the actual share preview window and capture it for visual inspection.
+        ChatShareWindowController.shared.show(text: sampleReply, colorScheme: .dark)
+        try await Task.sleep(for: .milliseconds(500))
+        if let shareWindow = ChatShareWindowController.shared.window,
+           let surface = shareWindow.contentView {
+            surface.layoutSubtreeIfNeeded()
+            if let rep = surface.bitmapImageRepForCachingDisplay(in: surface.bounds) {
+                surface.cacheDisplay(in: surface.bounds, to: rep)
+                if let png = rep.representation(using: .png, properties: [:]) {
+                    try png.write(to: URL(filePath: "build/share-preview-window.png"))
+                }
+            }
+            shareWindow.close()
+        }
         print("Share card and user reply regression passed")
     }
 

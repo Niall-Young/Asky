@@ -444,6 +444,7 @@ private struct ChatSharePreviewSheet: View {
     @State private var copied = false
     @State private var saved = false
     @State private var errorMessage: String?
+    @State private var shareAnchor = ShareAnchorBox()
 
     init(text: String, initialAppearance: ShareCardAppearance, windowProvider: @escaping () -> NSWindow?, close: @escaping () -> Void) {
         self.text = text
@@ -457,14 +458,12 @@ private struct ChatSharePreviewSheet: View {
             HStack(spacing: 12) {
                 Color.clear.frame(width: 68, height: 1)
                 Spacer(minLength: 0)
-                Picker("", selection: $appearance) {
-                    ForEach(ShareCardAppearance.allCases) { option in
-                        Text(option.title).tag(option)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(width: 140)
+                SettingsSegmentedControl(
+                    selection: $appearance,
+                    options: ShareCardAppearance.allCases.map { ($0, $0.title) },
+                    identifier: "share-card-appearance",
+                    accessibilityLabel: NSLocalizedString("分享回复", comment: "")
+                )
                 Spacer(minLength: 0)
                 Color.clear.frame(width: 68, height: 1)
             }
@@ -483,45 +482,26 @@ private struct ChatSharePreviewSheet: View {
             .scrollIndicators(.hidden)
 
             HStack(spacing: 10) {
-                SharePickerButton(
-                    title: NSLocalizedString("系统分享", comment: ""),
-                    makeItems: {
-                        guard let png = ChatShareCardRenderer.renderPNG(text: text, appearance: appearance),
-                              let url = try? ShareImageService.writeTemporarySharePNG(png) else {
-                            errorMessage = NSLocalizedString("生成分享图片失败", comment: "")
-                            return []
-                        }
-                        return [url]
-                    }
-                )
+                SettingsButton(NSLocalizedString("系统分享", comment: ""), assetImage: "ChatShare") {
+                    presentSystemShare()
+                }
+                .background(ShareAnchorReader(box: shareAnchor).allowsHitTesting(false))
                 Spacer(minLength: 0)
-                Button {
+                SettingsButton(
+                    NSLocalizedString("保存图片", comment: ""),
+                    systemImage: "arrow.down.to.line",
+                    isComplete: saved
+                ) {
                     saveImage()
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(mingCute: saved ? "checkmark" : "arrow.down.to.line", size: 14)
-                        Text(saved ? NSLocalizedString("已保存图片", comment: "") : NSLocalizedString("保存图片", comment: ""))
-                    }
-                    .font(.system(size: 13, weight: .medium))
-                    .padding(.horizontal, 14)
-                    .frame(height: 32)
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.regular)
-
-                Button {
+                SettingsButton(
+                    NSLocalizedString("复制图片", comment: ""),
+                    systemImage: "doc.on.clipboard",
+                    isComplete: copied
+                ) {
                     copyImage()
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(mingCute: copied ? "checkmark" : "doc.on.clipboard", size: 14)
-                        Text(copied ? NSLocalizedString("已复制图片", comment: "") : NSLocalizedString("复制图片", comment: ""))
-                    }
-                    .font(.system(size: 13, weight: .medium))
-                    .padding(.horizontal, 14)
-                    .frame(height: 32)
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.regular)
+                .compatibleGlassButtonStyle(prominent: true)
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 14)
@@ -542,6 +522,17 @@ private struct ChatSharePreviewSheet: View {
             try? await Task.sleep(for: .milliseconds(1600))
             saved = false
         }
+    }
+
+    private func presentSystemShare() {
+        guard let anchor = shareAnchor.view,
+              let png = ChatShareCardRenderer.renderPNG(text: text, appearance: appearance),
+              let url = try? ShareImageService.writeTemporarySharePNG(png) else {
+            errorMessage = NSLocalizedString("生成分享图片失败", comment: "")
+            return
+        }
+        let picker = NSSharingServicePicker(items: [url])
+        picker.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .minY)
     }
 
     private func copyImage() {
@@ -570,38 +561,19 @@ private struct ChatSharePreviewSheet: View {
     }
 }
 
-private struct SharePickerButton: NSViewRepresentable {
-    let title: String
-    let makeItems: () -> [Any]
+@MainActor
+private final class ShareAnchorBox {
+    weak var view: NSView?
+}
 
-    func makeCoordinator() -> Coordinator { Coordinator(self) }
-
-    func makeNSView(context: Context) -> NSButton {
-        let button = NSButton(title: title, target: context.coordinator, action: #selector(Coordinator.presentPicker(_:)))
-        button.bezelStyle = .rounded
-        button.controlSize = .regular
-        button.image = NSImage(named: "ChatShare")
-        button.image?.size = NSSize(width: 14, height: 14)
-        button.image?.isTemplate = true
-        button.imagePosition = .imageLeading
-        return button
+private struct ShareAnchorReader: NSViewRepresentable {
+    let box: ShareAnchorBox
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        box.view = view
+        return view
     }
-
-    func updateNSView(_ button: NSButton, context: Context) {
-        context.coordinator.parent = self
-        button.title = title
-    }
-
-    @MainActor
-    final class Coordinator: NSObject {
-        var parent: SharePickerButton
-        init(_ parent: SharePickerButton) { self.parent = parent }
-
-        @objc func presentPicker(_ sender: NSButton) {
-            let items = parent.makeItems()
-            guard !items.isEmpty else { return }
-            let picker = NSSharingServicePicker(items: items)
-            picker.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
-        }
+    func updateNSView(_ view: NSView, context: Context) {
+        box.view = view
     }
 }
