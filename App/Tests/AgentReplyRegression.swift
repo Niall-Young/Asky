@@ -3264,6 +3264,10 @@ enum AgentReplyRegression {
             try await replyNavigationRegression(app: app)
             return
         }
+        if CommandLine.arguments.contains("--share-and-user-reply") {
+            try await shareAndUserReplyRegression(app: app)
+            return
+        }
         if CommandLine.arguments.contains("--paging") {
             try pagingRegression(app: app)
             return
@@ -3586,6 +3590,67 @@ enum AgentReplyRegression {
             runPreview(controller, application: application)
         }
     }
+    static func shareAndUserReplyRegression(app: AppModel) async throws {
+        // 1. Verify replying to a user message works both for quoting and cross-page revealReply navigation.
+        let store = ConversationStore(app.store)
+        let sourceCID = try store.create(title: "User reply source")
+        let userSource = try store.append(conversationID: sourceCID, role: "user", text: "帮我整理一下下周的产品评审议程，重点放性能优化")
+        let cid = try store.create(title: "User reply history")
+        for index in 0..<120 {
+            try store.append(conversationID: cid, role: index.isMultiple(of: 2) ? "user" : "assistant", text: "历史记录 \(index)")
+        }
+        let followUp = try store.append(conversationID: cid, role: "user", text: "补充一下，还要加上启动耗时的对比数据", presentation:
+            MessagePresentation(quotes: [MessageQuote(sourceMessageID: userSource.id, text: userSource.text, kind: .reply)]))
+        let model = AgentModel(app: app)
+        let controller = AgentWindowController(model: model, presentation: WindowPresentation())
+        controller.show()
+        let window = NSApplication.shared.windows.first { $0.title == "Asky AI" }!
+        defer { window.orderOut(nil) }
+        try await Task.sleep(for: .milliseconds(800))
+
+        model.addQuote(userSource.text, sourceMessageID: userSource.id, kind: .reply)
+        precondition(model.quotes.contains(where: { $0.sourceMessageID == userSource.id && $0.kind == .reply }),
+                     "User message reply must add a reply quote")
+        precondition(model.revealReply(userSource.id), "revealReply must succeed for user messages")
+        precondition(model.replyNavigation?.messageID == userSource.id)
+        try await Task.sleep(for: .milliseconds(900))
+
+        func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
+        let userMarker = descendants(window.contentView!).first { $0.identifier?.rawValue == "transcript-reply-" + userSource.id }
+        precondition(userMarker != nil, "User bubble must expose TranscriptReplyPosition marker for reply navigation")
+        precondition(followUp.presentation?.quotes?.first?.sourceMessageID == userSource.id)
+
+        // 2. Verify AI reply share card rendering in both light and dark appearances.
+        let sampleReply = """
+        ### 本周性能优化建议
+
+        把首屏渲染与异步数据加载拆开后，整体响应会明显更轻快：
+
+        1. **首屏优先**：先呈现骨架与缓存结果，后台增量刷新远程数据
+        2. **减少主线程解码**：将图片缩放与高斯模糊放到独立渲染管线
+        3. **按需预加载**：列表只维护视口前后一屏的原生视图
+
+        > 建议先用 Instruments 采样 30 秒，优先解决耗时占比最高的前两个热点。
+
+        ```swift
+        let png = ChatShareCardRenderer.renderPNG(text: reply, appearance: .dark)
+        ```
+        """
+        for appearance in ShareCardAppearance.allCases {
+            guard let png = ChatShareCardRenderer.renderPNG(text: sampleReply, appearance: appearance) else {
+                preconditionFailure("Expected non-nil share card PNG for \(appearance.rawValue)")
+            }
+            guard let rep = NSBitmapImageRep(data: png) else {
+                preconditionFailure("Expected decodable PNG for \(appearance.rawValue)")
+            }
+            precondition(rep.pixelsWide >= 1190 && rep.pixelsHigh >= 600,
+                         "Expected Retina share card dimensions for \(appearance.rawValue), got \(rep.pixelsWide)x\(rep.pixelsHigh)")
+            try png.write(to: URL(filePath: "build/share-card-\(appearance.rawValue).png"))
+            print("Share card \(appearance.rawValue): \(rep.pixelsWide)x\(rep.pixelsHigh) (\(png.count) bytes)")
+        }
+        print("Share card and user reply regression passed")
+    }
+
     private static func runPreview(_ controller: AgentWindowController, application: NSApplication) {
         withExtendedLifetime(controller) { application.run() }
     }

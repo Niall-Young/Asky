@@ -34,7 +34,7 @@ Asky 是用 SwiftUI 与 AppKit 构建的 macOS 原生效率入口。搜索与剪
 
 - **快速搜索**：查找应用、本地文件、Chrome 标签页与书签、应用窗口；支持分类过滤、文件夹浏览、计算与换算、屏幕取色、网页搜索和终端命令。
 - **剪贴板历史**：记录文本、富文本、图片与文件，按关键词或来源应用检索；支持颜色预览、自动粘贴、拖拽和自定义保留期限。
-- **AI 助手**：Swift 原生 Agent，支持兼容 OpenAI 的模型服务、联网检索、本地 Markdown 记忆和持续对话；可发送附件、引用消息，并在对话中填写原生表单。
+- **AI 助手**：Swift 原生 Agent，支持兼容 OpenAI 的模型服务、联网检索、本地 Markdown 记忆和持续对话；可发送附件、回复与引用消息、生成磨砂玻璃分享卡片，并在对话中填写原生表单。
 - **系统与扩展**：按授权访问日历、提醒事项、备忘录、通讯录和地图；短信以草稿交给用户发送。支持 MCP 与 GitHub 插件，包括[飞书](https://github.com/Niall-Young/asky-plugin-lark)和 [Orca](https://github.com/Niall-Young/asky-plugin-orca)。
 - **原生体验与隐私**：适配系统外观和“减少动态效果”，macOS 26+ 支持液态玻璃；不向作者服务器上传用户数据，API Key 存于系统钥匙串。使用模型或外部工具时的数据处理见[隐私政策](PRIVACY.md)。
 
@@ -139,7 +139,7 @@ Asky is a native macOS launcher built with SwiftUI and AppKit. Search and clipbo
 
 - **Quick search**: Find apps, local files, Chrome tabs and bookmarks, and app windows. Includes category filters, folder browsing, calculations and conversions, a color picker, web search, and terminal commands.
 - **Clipboard history**: Save text, rich text, images, and files. Search by keyword or source app, preview colors, paste or drag items, and choose a retention period.
-- **AI assistant**: A native Swift Agent with OpenAI-compatible model support, web search, local Markdown memory, and continuous conversation. Send attachments, quote messages, and fill out native forms in chat.
+- **AI assistant**: A native Swift Agent with OpenAI-compatible model support, web search, local Markdown memory, and continuous conversation. Send attachments, reply to or quote messages, export frosted-glass share cards, and fill out native forms in chat.
 - **System integration and extensions**: Authorized access to Calendar, Reminders, Notes, Contacts, and Maps. Messages are handed off as drafts for the user to send. Supports MCP and GitHub plugins, including [Feishu](https://github.com/Niall-Young/asky-plugin-lark) and [Orca](https://github.com/Niall-Young/asky-plugin-orca).
 - **Native experience and privacy**: Supports system appearance and Reduce Motion, with Liquid Glass on macOS 26+. No user data is uploaded to author servers; API keys stay in Keychain. See the [Privacy Policy](PRIVACY.md) for data handling when using models or external tools.
 

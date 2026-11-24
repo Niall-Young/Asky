@@ -1062,13 +1062,27 @@ struct ChatResponseGroup: Identifiable {
         items.filter { if case .tool = $0.kind { return true }; return $0.kind == .toolNarration }
     }
     var content: [ChatItem] {
-        items.filter {
-            switch $0.kind {
-            case .tool, .toolNarration: false
-            case .assistant: !isRunning
-            default: true
+        var primary: [ChatItem] = []
+        var cards: [ChatItem] = []
+        for item in items {
+            switch item.kind {
+            case .tool:
+                if !isRunning, item.resultCard != nil {
+                    cards.append(item)
+                }
+            case .toolNarration:
+                if !item.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    primary.append(item)
+                }
+            case .assistant:
+                if !isRunning {
+                    primary.append(item)
+                }
+            default:
+                primary.append(item)
             }
         }
+        return primary + cards
     }
     var workSeconds: Int? { items.compactMap(\.workSeconds).last }
     var showsThinkingIndicator: Bool { isRunning }
@@ -1262,19 +1276,54 @@ private struct AssistantCopyButton: View {
     }
 }
 
-private struct UserCopyActionRow: View {
-    let text: String
-    let hoverState: UserMessageHoverState
-    @State private var copyHovering = false
-    @State private var copyFeedbackID: UUID?
-    @FocusState private var copyFocused: Bool
+private struct ChatReplyButton: View {
+    let action: () -> Void
 
     var body: some View {
-        ChatCopyButton(text: text, copyFeedbackID: $copyFeedbackID)
-            .focused($copyFocused)
-            .onHover { copyHovering = $0 }
-            .opacity(hoverState.bubbleHovered || copyHovering || copyFocused || copyFeedbackID != nil ? 1 : 0)
-            .frame(maxWidth: .infinity, alignment: .trailing)
+        Button(action: action) {
+            Image(mingCute: "arrow.turn.down.left", size: 14)
+                .frame(width: 16, height: 16).padding(6)
+        }
+        .buttonStyle(AgentIconButtonStyle())
+        .foregroundStyle(ThemeColor("iconSubtlest"))
+        .accessibilityLabel(NSLocalizedString("回复消息", comment: ""))
+        .help(NSLocalizedString("回复消息", comment: ""))
+    }
+}
+
+private struct ChatShareButton: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image("ChatShare").resizable().scaledToFit().frame(width: 14, height: 14)
+                .frame(width: 16, height: 16).padding(6)
+        }
+        .buttonStyle(AgentIconButtonStyle())
+        .foregroundStyle(ThemeColor("iconSubtlest"))
+        .accessibilityLabel(NSLocalizedString("分享回复", comment: ""))
+        .help(NSLocalizedString("分享回复", comment: ""))
+    }
+}
+
+private struct UserMessageActionRow: View {
+    let text: String
+    let hoverState: UserMessageHoverState
+    let onReply: () -> Void
+    @State private var rowHovering = false
+    @State private var copyFeedbackID: UUID?
+    @FocusState private var actionFocused: Bool
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ChatCopyButton(text: text, copyFeedbackID: $copyFeedbackID)
+                .focused($actionFocused)
+            ChatReplyButton(action: onReply)
+                .focused($actionFocused)
+        }
+        .onHover { rowHovering = $0 }
+        .opacity(hoverState.bubbleHovered || rowHovering || actionFocused || copyFeedbackID != nil ? 1 : 0)
+        .frame(maxWidth: .infinity, alignment: .trailing)
     }
 }
 
@@ -1324,7 +1373,11 @@ private struct ChatBubble: View {
                     }
                 }
                 VStack(alignment: .trailing, spacing: 4) {
-                    HStack { Spacer(minLength: 40); bubble.padding(.horizontal, AgentLayout.messageHorizontalInset).padding(.vertical, AgentLayout.userMessageVerticalInset)
+                    HStack { Spacer(minLength: 40); bubble
+                        .background {
+                            TranscriptReplyPosition(id: item.id)
+                        }
+                        .padding(.horizontal, AgentLayout.messageHorizontalInset).padding(.vertical, AgentLayout.userMessageVerticalInset)
                         .background {
                             RoundedRectangle(cornerRadius: 16).fill(ThemeColor.kBackgroundNeutral)
                                 .overlay {
@@ -1351,7 +1404,9 @@ private struct ChatBubble: View {
                             }
                         }
                     }
-                    UserCopyActionRow(text: item.copyableText, hoverState: hoverState)
+                    UserMessageActionRow(text: item.copyableText, hoverState: hoverState) {
+                        model.addQuote(item.copyableText, sourceMessageID: item.id, kind: .reply)
+                    }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
@@ -1384,7 +1439,12 @@ private struct ChatBubble: View {
                     HStack(spacing: 16) {
                         HStack(spacing: 0) {
                             AssistantCopyButton(text: item.text)
-                            replyButton
+                            ChatReplyButton {
+                                model.addQuote(item.text, sourceMessageID: item.id, kind: .reply)
+                            }
+                            ChatShareButton {
+                                ChatShareWindowController.shared.show(text: item.text, colorScheme: scheme)
+                            }
                         }
                         if let completed = item.completedAt {
                             TimelineView(CompletionTimeSchedule(completedAt: completed)) { context in
@@ -1400,8 +1460,31 @@ private struct ChatBubble: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.trailing, 40)
-        case .tool, .toolNarration:
-            EmptyView()
+        case .toolNarration:
+            VStack(alignment: .leading, spacing: 6) {
+                ChatMarkdownView(text: item.text).equatable()
+                    .environment(\.chatSelectionColor, model.avatarColor.tint)
+                    .environment(\.chatQuoteAction, { model.addQuote($0, sourceMessageID: item.id) })
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, AgentLayout.messageHorizontalInset)
+                    .padding(.vertical, AgentLayout.messageVerticalInset)
+                    .background {
+                        RoundedRectangle(cornerRadius: 16).fill(ThemeColor.kBackgroundNeutral)
+                    }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.trailing, 40)
+        case .tool:
+            if let card = item.resultCard {
+                ToolResultCardView(card: card) { action in
+                    model.performCardAction(action)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.trailing, 40)
+            } else {
+                EmptyView()
+            }
         case .notice:
             Text(item.text).textStyle(.secondary).foregroundStyle(ThemeColor.kTextSubtle)
                 .padding(12).background(ThemeColor.kBackgroundNeutral, in: .rect(cornerRadius: 16))
@@ -1433,19 +1516,6 @@ private struct ChatBubble: View {
             }
         }
         .fixedSize(horizontal: true, vertical: false)
-    }
-
-    private var replyButton: some View {
-        Button {
-            model.addQuote(item.text, sourceMessageID: item.id, kind: .reply)
-        } label: {
-            Image(mingCute: "arrow.turn.down.left", size: 14)
-                .frame(width: 16, height: 16).padding(6)
-        }
-        .buttonStyle(AgentIconButtonStyle())
-        .foregroundStyle(ThemeColor("iconSubtlest"))
-        .accessibilityLabel(NSLocalizedString("回复消息", comment: ""))
-        .help(NSLocalizedString("回复消息", comment: ""))
     }
 
     private var bubble: some View {

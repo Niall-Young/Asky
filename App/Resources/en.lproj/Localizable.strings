@@ -1047,3 +1047,11 @@
 "请填写有效的 https 地址与模型名" = "Enter a valid https URL and model name";
 "请填写此服务商的 API Key；切换 API 地址后不能沿用原来的 Key" = "Enter an API key for this provider; switching URLs cannot reuse the previous key";
 "请先保存 API Key" = "Save your API key first";
+"分享回复" = "Share reply";
+"复制图片" = "Copy image";
+"已复制图片" = "Image copied";
+"保存图片" = "Save image";
+"已保存图片" = "Image saved";
+"系统分享" = "Share";
+"生成分享图片失败" = "Failed to generate share image";
+"分享失败" = "Share failed";

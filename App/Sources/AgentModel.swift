@@ -25,6 +25,7 @@ struct ChatItem: Identifiable, Hashable {
     var pastedTexts: [MessagePastedText] = []
     var segments: [MessageSegment]? = nil
     var agentReaction: String? = nil
+    var resultCard: ToolResultCard? = nil
 
     var storedRole: String {
         switch kind {
@@ -54,7 +55,8 @@ struct ChatItem: Identifiable, Hashable {
             quotes: quotes.isEmpty ? nil : quotes,
             pastedTexts: pastedTexts.isEmpty ? nil : pastedTexts,
             segments: segments,
-            agentReaction: agentReaction)
+            agentReaction: agentReaction,
+            resultCard: resultCard)
     }
 
     var toolSource: DataSourceID? {
@@ -127,6 +129,7 @@ final class AgentModel {
     private(set) var taskStartedAt: Date?
     private var responseStartIndex = 0
     private var reactionTargetID: String?
+    @ObservationIgnored private var pendingToolRequests: [String: ActionRequest] = [:]
     private(set) var state: AgentTaskState?
     private(set) var hasNewer = false
     private(set) var hasOlder = false
@@ -161,8 +164,9 @@ final class AgentModel {
     /// Load a bounded neighborhood without changing the active conversation or draft.
     @discardableResult
     func revealReply(_ id: String) -> Bool {
-        if !items.contains(where: { $0.id == id && $0.kind == .assistant }) {
-            guard !isRunning, let source = store.message(id), source.role == "assistant",
+        if !items.contains(where: { $0.id == id && ($0.kind == .assistant || $0.kind == .user) }) {
+            guard !isRunning, let source = store.message(id),
+                  source.role == "assistant" || source.role == "user",
                   timelineMode || source.conversationID == conversationID else { return false }
             let older = timelineMode
                 ? store.timeline(limit: Self.firstPage, before: source)
@@ -465,7 +469,8 @@ final class AgentModel {
             responseID: p?.responseID ?? (m.role == "assistant" ? m.id : nil), attachments: m.attachments,
             conversationID: m.conversationID, submittedFormValues: p?.submittedFormValues, quotes: p?.quotes ?? [],
             pastedTexts: p?.pastedTexts ?? [], segments: p?.segments,
-            agentReaction: p?.agentReaction.flatMap { AgentReactionReply.isEmoji($0) ? $0 : nil })
+            agentReaction: p?.agentReaction.flatMap { AgentReactionReply.isEmoji($0) ? $0 : nil },
+            resultCard: p?.resultCard)
     }
 
     private func pruneFormValues() {
@@ -661,12 +666,17 @@ final class AgentModel {
         Task { await agent.cancel(taskID: id) }
     }
 
+    func performCardAction(_ action: ToolResultCard.Action) {
+        ToolService.performCardAction(action, memoryRoot: app.memory.root)
+    }
+
     func beginResponse(taskID: String, now: Date = Date()) {
         self.taskID = taskID
         if let conversationID { app.activeConversationIDs.insert(conversationID) }
         taskStartedAt = now
         responseStartIndex = items.count
         reactionTargetID = items.last(where: { $0.kind == .user && $0.conversationID == conversationID })?.id
+        pendingToolRequests.removeAll()
         state = .starting
         pendingReply = nil
         streaming = ""
@@ -692,9 +702,12 @@ final class AgentModel {
             // Never attach a reaction from an interrupted turn or to a different user message.
             body = reply.text.isEmpty ? emoji : reply.text
         }
-        guard !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        let item = ChatItem(id: UUID().uuidString, kind: .assistant, text: body)
-        appendTrimmed(item)
+        let bubbles = AgentMessageSplit.split(body)
+        guard !bubbles.isEmpty else { return }
+        for bubble in bubbles {
+            let item = ChatItem(id: UUID().uuidString, kind: .assistant, text: bubble)
+            appendTrimmed(item)
+        }
     }
 
     private func savePresentation(_ item: ChatItem, conversationID: String) {
@@ -711,31 +724,41 @@ final class AgentModel {
             pendingReply = text
             streaming = text
         case .toolCall(_, let req):
-            // Retain text already shown to the user as part of the tool timeline.
-            // Dropping it here makes pre-tool narration flash and then disappear.
-            if !streaming.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                appendTrimmed(ChatItem(id: UUID().uuidString, kind: .toolNarration, text: streaming))
+            // Retain text already shown to the user as a visible pre-tool bubble.
+            let narration = AgentMessageSplit.strippingMarkers(streaming)
+            if !narration.isEmpty {
+                appendTrimmed(ChatItem(id: UUID().uuidString, kind: .toolNarration, text: narration))
             }
             pendingReply = nil
             streaming = ""
+            pendingToolRequests[req.requestID] = req
             appendTrimmed(ChatItem(id: req.requestID, kind: .tool(nil), text: String(format: NSLocalizedString("调用 %@…", comment: ""), req.tool), toolName: req.tool))
         case .toolResult(_, let r):
+            let request = pendingToolRequests.removeValue(forKey: r.requestID)
             if let i = items.lastIndex(where: { $0.id == r.requestID }) {
+                let toolName = request?.tool ?? items[i].toolName ?? ""
+                let card = ToolResultCard.from(tool: toolName, arguments: request?.arguments, result: r)
                 items[i].needsPermissionSettings = r.error?.code == .permissionDenied || r.error?.code == .sourceDisabled
                 items[i].kind = .tool(r.status)
                 items[i].text = items[i].text.replacingOccurrences(of: "…", with: "")
                 items[i].toolError = r.error?.message
+                items[i].resultCard = card
                 savePresentation(items[i], conversationID: cid)
             } else if let saved = store.message(r.requestID, conversationID: cid) {
                 // A long response may have evicted the original call from the visible window.
                 var item = Self.item(saved)
+                let toolName = request?.tool ?? item.toolName ?? ""
+                let card = ToolResultCard.from(tool: toolName, arguments: request?.arguments, result: r)
                 item.kind = .tool(r.status)
                 item.text = item.text.replacingOccurrences(of: "…", with: "")
                 item.needsPermissionSettings = r.error?.code == .permissionDenied || r.error?.code == .sourceDisabled
                 item.toolError = r.error?.message
+                item.resultCard = card
                 savePresentation(item, conversationID: cid)
             } else {
-                appendTrimmed(ChatItem(id: r.requestID, kind: .tool(r.status), text: NSLocalizedString("工具调用", comment: ""), needsPermissionSettings: r.error?.code == .permissionDenied || r.error?.code == .sourceDisabled, toolError: r.error?.message))
+                let toolName = request?.tool ?? ""
+                let card = ToolResultCard.from(tool: toolName, arguments: request?.arguments, result: r)
+                appendTrimmed(ChatItem(id: r.requestID, kind: .tool(r.status), text: NSLocalizedString("工具调用", comment: ""), needsPermissionSettings: r.error?.code == .permissionDenied || r.error?.code == .sourceDisabled, toolName: toolName.isEmpty ? nil : toolName, toolError: r.error?.message, resultCard: card))
             }
         case .clarification(_, let q):
             pendingReply = q
@@ -778,6 +801,7 @@ final class AgentModel {
             savePresentation(item, conversationID: cid)
         }
         app.activeConversationIDs.remove(cid)
+        pendingToolRequests.removeAll()
         reactionTargetID = nil
         taskStartedAt = nil
         taskID = nil
