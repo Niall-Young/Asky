@@ -1036,3 +1036,14 @@
 "随时按快捷键呼出" = "Summon Asky anytime with a shortcut";
 "设置快捷键" = "Set Shortcuts";
 "配置 AI 助手" = "Set Up AI Assistant";
+"应用、文件、窗口、书签与计算，离线也能用" = "Apps, files, windows, bookmarks, and math offline";
+"剪贴板历史" = "Clipboard History";
+"自动记录文字、图片与文件，随时检索粘贴" = "Save text, images, and files with instant search and paste";
+"原生 AI 助手" = "Native AI Assistant";
+"按需唤起对话与系统工具，自带 API Key 即用" = "On-demand chat and system tools with your own API key";
+"搜索应用、文件与指令" = "Search apps, files, and commands";
+"浏览并粘贴最近复制的内容" = "Browse and paste recent items";
+"随时呼出对话窗口" = "Summon the chat window anytime";
+"请填写有效的 https 地址与模型名" = "Enter a valid https URL and model name";
+"请填写此服务商的 API Key；切换 API 地址后不能沿用原来的 Key" = "Enter an API key for this provider; switching URLs cannot reuse the previous key";
+"请先保存 API Key" = "Save your API key first";
