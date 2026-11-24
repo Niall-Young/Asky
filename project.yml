@@ -45,6 +45,7 @@ targets:
         CFBundleVersion: "1"
         LSUIElement: true
         LSMinimumSystemVersion: "14.0"
+        NSAutoFillRequiresTextContentTypeForOneTimeCodeOnMac: true
         NSHumanReadableCopyright: ""
         NSCalendarsFullAccessUsageDescription: Asky 在你明确要求时读取或创建日历事件，并用于冲突检查。
         NSRemindersFullAccessUsageDescription: Asky 在你明确要求时读取或创建提醒事项。
