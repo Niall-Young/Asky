@@ -352,15 +352,33 @@ struct AgentView: View {
             showingApprovalMenu: $showingApprovalMenu,
             headerHeight: AgentLayout.headerHeight
         ))
+        .modifier(ChatDeleteConfirmPresentation(
+            isPresented: model.pendingDeleteMessage != nil,
+            confirmDisabled: model.isRunning || model.isCleaningHistory,
+            onCancel: { model.cancelPendingDeleteMessage() },
+            onConfirm: { model.commitPendingDeleteMessage() }
+        ))
+        .onChange(of: model.pendingDeleteMessage != nil) { _, presented in
+            if presented {
+                showingApprovalMenu = false
+                bubblePopover.dismiss()
+            }
+        }
         .foregroundStyle(ThemeColor.kText.color(for: colorScheme))
         .windowSurfaceBackground(in: shape)
         .modifier(FallbackClipShape(active: !WindowSurface.usesNativeGlass, shape: shape))
         .ignoresSafeArea()
         .background {
-            Button("", action: close)
-                .keyboardShortcut(model.shortcutPreferences.shortcut(.agentEscape).keyEquivalent,
-                                  modifiers: model.shortcutPreferences.shortcut(.agentEscape).eventModifiers)
-                .hidden().accessibilityHidden(true)
+            Button("") {
+                if model.pendingDeleteMessage != nil {
+                    model.cancelPendingDeleteMessage()
+                } else {
+                    close()
+                }
+            }
+            .keyboardShortcut(model.shortcutPreferences.shortcut(.agentEscape).keyEquivalent,
+                              modifiers: model.shortcutPreferences.shortcut(.agentEscape).eventModifiers)
+            .hidden().accessibilityHidden(true)
         }
         .background {
             Button("") { model.openSettings() }

@@ -138,6 +138,7 @@ final class AgentModel {
     private(set) var hasOlder = false
     private(set) var newConversationRevision = 0
     private var startingNewConversation = false
+    private(set) var pendingDeleteMessage: ChatItem?
     var formValues: [String: [String: [String]]] = [:]
     var draft = ""
     var draftSegments: [MessageSegment] = []
@@ -343,6 +344,7 @@ final class AgentModel {
 
     func resumeTimeline() {
         guard !isRunning else { return }
+        pendingDeleteMessage = nil
         timelineMode = true
         hasNewer = false
         let page = store.timeline(limit: Self.firstPage)
@@ -355,6 +357,7 @@ final class AgentModel {
 
     func open(_ id: String?) {
         guard !isRunning else { return }
+        pendingDeleteMessage = nil
         timelineMode = false
         conversationID = id
         items = []
@@ -499,21 +502,26 @@ final class AgentModel {
 
     func confirmAndDeleteUserMessage(_ item: ChatItem) {
         guard item.kind == .user, !isRunning, !app.isCleaningConversationHistory else { return }
+        pendingDeleteMessage = item
+    }
+
+    func cancelPendingDeleteMessage() {
+        pendingDeleteMessage = nil
+    }
+
+    func commitPendingDeleteMessage() {
+        guard let item = pendingDeleteMessage else { return }
+        pendingDeleteMessage = nil
         Task { @MainActor in
-            let alert = AppDialog.make()
-            alert.messageText = NSLocalizedString("删除这条消息？", comment: "")
-            alert.informativeText = NSLocalizedString("这会永久删除你的消息。此操作无法撤销", comment: "")
-            let deleteButton = alert.addButton(withTitle: NSLocalizedString("删除", comment: ""))
-            deleteButton.hasDestructiveAction = true
-            let cancelButton = alert.addButton(withTitle: NSLocalizedString("取消", comment: ""))
-            cancelButton.keyEquivalent = "\u{1b}"
-            guard await AppDialog.present(alert) == .alertFirstButtonReturn else { return }
             _ = await deleteUserMessage(item.id)
         }
     }
 
     @discardableResult
     func deleteUserMessage(_ id: String) async -> Bool {
+        if pendingDeleteMessage?.id == id {
+            pendingDeleteMessage = nil
+        }
         guard !isRunning, !app.isCleaningConversationHistory,
               let item = items.first(where: { $0.id == id && $0.kind == .user }) else { return false }
         if let stored = storedMessage(item) ?? store.message(id) {

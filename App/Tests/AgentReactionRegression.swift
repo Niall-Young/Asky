@@ -487,4 +487,137 @@ extension AgentReplyRegression {
         }
         print("Reaction swap preview passed in light and dark")
     }
+
+    static func deleteDialogPreviewRegression() async throws {
+        func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
+
+        let root = FileManager.default.temporaryDirectory.appending(path: "Asky-delete-dialog-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let app = try AppModel(root: root)
+        let store = ConversationStore(app.store)
+        let cid = try store.create(title: "删除确认弹窗")
+        try store.append(conversationID: cid, role: "user", text: "帮我整理一下最近的产品节奏和优先级")
+        let longReply = """
+        时间要对齐：8 月是组织重组加外部唱衰，10 月才出新版本节奏。至于“清理没啥用的人”这个说法，我倾向于先看核心链路与产出，而不是简单做减法。
+
+        前面聊的几个方向里，最值得优先推进的是第一项：把高频交互的视觉层次与动效统一起来，这正是提升整体完成度的关键。
+        """
+        let reply = try store.append(conversationID: cid, role: "assistant", text: longReply)
+        let targetUser = try store.append(conversationID: cid, role: "user", text: "帮我给我妈发一个短信，说我给她买的牛排明天到")
+
+        let model = AgentModel(app: app)
+        model.open(cid)
+        model.avatarColor = .blue
+
+        let controller = AgentWindowController(model: model, presentation: WindowPresentation())
+        controller.show()
+        let window = NSApp.windows.first { $0.title == "Asky AI" && $0.isVisible }!
+        defer { window.orderOut(nil) }
+        if let screen = NSScreen.screens.first {
+            let origin = NSPoint(
+                x: max(screen.visibleFrame.minX + 24, screen.visibleFrame.maxX - window.frame.width - 24),
+                y: max(screen.visibleFrame.minY + 24, screen.visibleFrame.midY - window.frame.height / 2)
+            )
+            window.setFrameOrigin(origin)
+        }
+        window.level = .floating
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+
+        let backing = NSWindow(contentRect: window.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        backing.level = .floating
+        backing.order(.below, relativeTo: window.windowNumber)
+        defer { backing.orderOut(nil) }
+
+        func capture(_ name: String) throws {
+            let path = "build/delete-dialog-\(name).png"
+            let capture = Process()
+            capture.executableURL = URL(filePath: "/usr/sbin/screencapture")
+            let rect = window.frame
+            capture.arguments = ["-x", "-R", "\(Int(rect.minX)),\(Int(NSScreen.screens[0].frame.maxY - rect.maxY)),\(Int(rect.width)),\(Int(rect.height))", path]
+            try capture.run()
+            capture.waitUntilExit()
+            precondition(capture.terminationStatus == 0)
+        }
+
+        // Wait for initial window presentation and activation before opening the dialog.
+        try await Task.sleep(for: .milliseconds(450))
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        try await Task.sleep(for: .milliseconds(250))
+
+        let targetItem = model.items.first { $0.id == targetUser.id }!
+        model.confirmAndDeleteUserMessage(targetItem)
+        precondition(model.pendingDeleteMessage?.id == targetUser.id)
+
+        for (name, appearance) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
+            window.appearance = NSAppearance(named: appearance)
+            backing.backgroundColor = name == "light" ? NSColor(white: 0.90, alpha: 1) : NSColor(white: 0.14, alpha: 1)
+            backing.order(.below, relativeTo: window.windowNumber)
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            try await Task.sleep(for: .milliseconds(550))
+            window.contentView?.layoutSubtreeIfNeeded()
+            precondition(!(window.firstResponder is NSTextView),
+                         "Composer text view must not keep focus while delete dialog is open in \(name) mode")
+
+            let surface = window.contentView!
+            let buttons = descendants(surface).compactMap { $0 as? NSButton }
+            let cancelButton = buttons.first { $0.accessibilityIdentifier() == "chat-delete-confirm-cancel" }
+            let deleteButton = buttons.first { $0.accessibilityIdentifier() == "chat-delete-confirm-delete" }
+            let closeButton = buttons.first { $0.accessibilityIdentifier() == "chat-delete-confirm-close" }
+            precondition(cancelButton != nil && deleteButton != nil && closeButton != nil,
+                         "Delete confirmation dialog buttons must be present in \(name) mode")
+            let cancelFrame = cancelButton!.convert(cancelButton!.bounds, to: surface)
+            let deleteFrame = deleteButton!.convert(deleteButton!.bounds, to: surface)
+            let pairMidX = (cancelFrame.minX + deleteFrame.maxX) / 2
+            precondition(abs(pairMidX - surface.bounds.midX) < 3,
+                         "Delete confirmation dialog must stay horizontally centered (pairMidX=\(pairMidX), midX=\(surface.bounds.midX))")
+            precondition(abs(cancelFrame.width - deleteFrame.width) < 1.5,
+                         "Cancel and Delete buttons must share equal width (\(cancelFrame.width) vs \(deleteFrame.width))")
+            try capture(name)
+        }
+
+        // Escape cancels ONLY the dialog, keeping the Agent window visible and preserving the message.
+        let escEvent = NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber, context: nil, characters: "\u{1b}",
+            charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 53
+        )!
+        NSApp.sendEvent(escEvent)
+        try await Task.sleep(for: .milliseconds(220))
+        precondition(model.pendingDeleteMessage == nil, "Escape must dismiss the delete dialog")
+        precondition(window.isVisible, "Escape on delete dialog must not close the Agent window")
+        precondition(model.items.contains { $0.id == targetUser.id }, "Cancelling must preserve the user message")
+
+        // Clicking outside cancels without deleting.
+        model.confirmAndDeleteUserMessage(targetItem)
+        try await Task.sleep(for: .milliseconds(260))
+        precondition(model.pendingDeleteMessage?.id == targetUser.id)
+        let outsideClick = NSEvent.mouseEvent(
+            with: .leftMouseDown, location: NSPoint(x: 24, y: 24), modifierFlags: [],
+            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+            context: nil, eventNumber: 0, clickCount: 1, pressure: 1
+        )!
+        NSApp.sendEvent(outsideClick)
+        try await Task.sleep(for: .milliseconds(220))
+        precondition(model.pendingDeleteMessage == nil, "Clicking outside must dismiss the delete dialog")
+        precondition(model.items.contains { $0.id == targetUser.id }, "Outside click must preserve the user message")
+
+        // Re-open and confirm via the Delete button removes only the targeted user message.
+        model.confirmAndDeleteUserMessage(targetItem)
+        try await Task.sleep(for: .milliseconds(300))
+        let surface = window.contentView!
+        let deleteButton = descendants(surface).compactMap { $0 as? NSButton }
+            .first { $0.accessibilityIdentifier() == "chat-delete-confirm-delete" }!
+        deleteButton.performClick(nil)
+        for _ in 0..<40 where model.items.contains(where: { $0.id == targetUser.id }) {
+            try await Task.sleep(for: .milliseconds(30))
+        }
+        precondition(model.pendingDeleteMessage == nil, "Confirming must dismiss the delete dialog")
+        precondition(!model.items.contains { $0.id == targetUser.id }, "Confirming must delete the targeted user message")
+        precondition(model.items.contains { $0.id == reply.id }, "Confirming must preserve sibling AI replies")
+        precondition(store.message(targetUser.id, conversationID: cid) == nil, "Deleted message must be removed from store")
+        print("Delete confirmation dialog regression passed in light and dark")
+    }
 }
