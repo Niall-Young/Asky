@@ -279,10 +279,17 @@ private struct SettingsSidebar: View {
                                 in: RoundedRectangle(cornerRadius: 8))
                     .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(SettingsSidebarButtonStyle())
                 .accessibilityLabel(page.title)
                 .accessibilityAddTraits(app.settingsTab == page.rawValue ? .isSelected : [])
             }
         }
+    }
+}
+
+/// PlainButtonStyle dims its label while pressed on macOS; keep sidebar items static on click.
+private struct SettingsSidebarButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
     }
 }
