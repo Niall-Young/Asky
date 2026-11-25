@@ -45,6 +45,33 @@ public enum WebPageImageService {
         return url
     }
 
+    private static let trackerHostSuffixes = [
+        "scorecardresearch.com",
+        "doubleclick.net",
+        "google-analytics.com",
+        "googletagmanager.com",
+        "googlesyndication.com",
+        "adservice.google.com",
+        "quantserve.com",
+        "chartbeat.net",
+        "omtrdc.net"
+    ]
+
+    public static func isLikelyTrackerOrNoise(_ url: URL) -> Bool {
+        let host = (url.host ?? "").lowercased()
+        if trackerHostSuffixes.contains(where: { host == $0 || host.hasSuffix("." + $0) }) {
+            return true
+        }
+        if host.hasPrefix("pixel.") || host.hasPrefix("beacon.") || host.hasPrefix("metrics.") {
+            return true
+        }
+        let path = url.path.lowercased()
+        if (host == "www.facebook.com" || host == "facebook.com") && path == "/tr" {
+            return true
+        }
+        return false
+    }
+
     static func candidates(in html: String, sourceURL: URL) -> [Candidate] {
         // Match only image metadata/attributes; never execute scripts or render the page.
         let content = html.replacingOccurrences(of: #"(?is)<!--.*?-->|<(script|style)\b[^>]*>.*?</\1\s*>"#,
@@ -53,6 +80,7 @@ public enum WebPageImageService {
         let attributes = try! NSRegularExpression(pattern: #"(?is)([a-z_:][a-z0-9_:.-]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#)
         let ns = content as NSString
         var photos: [Candidate] = [], social: [Candidate] = []
+        var pageTitle: String?
         for match in tags.matches(in: content, range: NSRange(location: 0, length: ns.length)) {
             let tag = ns.substring(with: match.range) as NSString
             var values: [String: String] = [:]
@@ -65,7 +93,13 @@ public enum WebPageImageService {
             let isMeta = ns.substring(with: match.range(at: 1)).lowercased() == "meta"
             let raw: String?
             if isMeta {
-                guard ["og:image", "og:image:url", "twitter:image", "twitter:image:src"].contains((values["property"] ?? values["name"] ?? "").lowercased()) else { continue }
+                let metaKey = (values["property"] ?? values["name"] ?? "").lowercased()
+                if pageTitle == nil, ["og:title", "twitter:title"].contains(metaKey),
+                   let title = values["content"]?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty {
+                    pageTitle = String(title.prefix(160))
+                    continue
+                }
+                guard ["og:image", "og:image:url", "twitter:image", "twitter:image:src"].contains(metaKey) else { continue }
                 raw = values["content"]
             } else {
                 if ["width", "height"].contains(where: { key in
@@ -75,14 +109,26 @@ public enum WebPageImageService {
             }
             guard let raw, let url = URL(string: raw, relativeTo: sourceURL)?.absoluteURL,
                   publicURL(url.absoluteString) != nil,
-                  !["svg", "ico"].contains(url.pathExtension.lowercased()) else { continue }
-            let candidate = Candidate(url: url.absoluteString, alt: String((values["alt"] ?? "").prefix(300)), sourceURL: sourceURL.absoluteString)
+                  !["svg", "ico"].contains(url.pathExtension.lowercased()),
+                  !isLikelyTrackerOrNoise(url) else { continue }
+            let rawAlt = String((values["alt"] ?? "").prefix(300))
+            let candidate = Candidate(url: url.absoluteString, alt: rawAlt, sourceURL: sourceURL.absoluteString)
             if isMeta { social.append(candidate) } else { photos.append(candidate) }
             if social.count + photos.count >= 32 { break }
         }
-        // In-page captions are stronger evidence of subject identity than social previews.
+        // In-page captions are stronger evidence of subject identity than social previews,
+        // while keeping the primary og:image available when a page has many sidebar/body images.
+        let titledSocial = social.map { candidate in
+            guard candidate.alt.isEmpty, let pageTitle else { return candidate }
+            return Candidate(url: candidate.url, alt: pageTitle, sourceURL: candidate.sourceURL)
+        }
         var seen = Set<String>()
-        return Array((photos + social).filter { seen.insert($0.url).inserted }.prefix(8))
+        let uniquePhotos = photos.filter { seen.insert($0.url).inserted }
+        let uniqueSocial = titledSocial.filter { seen.insert($0.url).inserted }
+        if uniquePhotos.count >= 8, let primarySocial = uniqueSocial.first {
+            return Array(uniquePhotos.prefix(7)) + [primarySocial]
+        }
+        return Array((uniquePhotos + uniqueSocial).prefix(8))
     }
 
     private static func decodeEntities(_ text: String) -> String {

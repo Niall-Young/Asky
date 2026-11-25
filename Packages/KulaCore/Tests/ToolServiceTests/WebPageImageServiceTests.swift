@@ -31,4 +31,21 @@ import Testing
             #expect(WebPageImageService.publicURL(value) == nil)
         }
     }
+
+    @Test func filtersTrackerPixelsAndPreservesTitledSocialCoverWhenManyBodyImagesExist() throws {
+        let bodyImages = (0..<10).map { "<img src='/sidebar-\($0).jpg'>" }.joined()
+        let html = """
+        <meta property="og:title" content="演员吴磊简介">
+        <meta property="og:image" content="/cover-wulei.jpg">
+        <img src="https://sb.scorecardresearch.com/p?c1=2&amp;c2=17813110">
+        <img src="https://pixel.example.com/track.png">
+        \(bodyImages)
+        """
+        let base = try #require(URL(string: "https://example.com/person"))
+        let images = WebPageImageService.candidates(in: html, sourceURL: base)
+        #expect(images.count == 8)
+        #expect(!images.contains { $0.url.contains("scorecardresearch") || $0.url.contains("pixel.example.com") })
+        #expect(images.last?.url == "https://example.com/cover-wulei.jpg")
+        #expect(images.last?.alt == "演员吴磊简介")
+    }
 }

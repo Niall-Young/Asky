@@ -53,6 +53,7 @@ import ToolService
         ![凭据](https://user:pass@example.com/a.jpg)
         ![图标](https://example.com/icon.svg)
         ![内嵌](data:image/png;base64,AA)
+        ![追踪](https://sb.scorecardresearch.com/p?c1=2&c2=17813110)
         """
         let images = WebPageImages.candidates(in: markdown, sourceURL: "https://example.com/articles/animals")
         #expect(images.compactMap { $0["url"]?.stringValue } == [

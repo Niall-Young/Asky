@@ -1,5 +1,6 @@
 import Foundation
 import Contracts
+import ToolService
 
 /// Preserve image references from provider Markdown, including reference-style images.
 /// Candidates are source metadata, not proof that an image depicts the requested subject.
@@ -16,6 +17,7 @@ enum WebPageImages {
                   url.absoluteString.count <= 4096,
                   FreeWebMCP.publicURL(url.absoluteString) != nil,
                   !["svg", "ico"].contains(url.pathExtension.lowercased()),
+                  !WebPageImageService.isLikelyTrackerOrNoise(url),
                   seen.insert(url.absoluteString).inserted else { continue }
             images.append(["url": .string(url.absoluteString),
                 "alt": .string(String(String(content[run.range].characters).prefix(300))),

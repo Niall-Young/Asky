@@ -4549,6 +4549,16 @@ enum AgentReplyRegression {
                      "Expected share window to open cleanly with full-turn scope toggle")
         ChatShareWindowController.shared.dismiss()
 
+        // 6. Short follow-up replies must not trigger old relevant-history search when recent dialogue exists.
+        precondition(!AgentModel.shouldSearchRelevantHistory(for: "明星", hasRecentHistory: true),
+                     "Short follow-up like '明星' must stay anchored to recent dialogue")
+        precondition(!AgentModel.shouldSearchRelevantHistory(for: "继续！", hasRecentHistory: true),
+                     "Short follow-up with punctuation must not search old relevant history")
+        precondition(AgentModel.shouldSearchRelevantHistory(for: "明星", hasRecentHistory: false),
+                     "Without recent dialogue, short queries may still search relevant history")
+        precondition(AgentModel.shouldSearchRelevantHistory(for: "之前聊过的千岛湖照片", hasRecentHistory: true),
+                     "Specific longer queries should still search relevant history")
+
         print("Share card and user reply regression passed")
     }
 

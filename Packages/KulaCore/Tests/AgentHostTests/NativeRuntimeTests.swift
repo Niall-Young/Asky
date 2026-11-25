@@ -725,7 +725,7 @@ server.serve_forever()
         #expect(customAssembled.contains("LaTeX 公式："))
     }
 
-    @Test func multiBubbleAndStructuredReadabilityGuidanceStaysLayered() {
+    @Test func multiBubbleAndStructuredReadabilityGuidanceStaysLayered() throws {
         #expect(NativeAgentPrompt.runtimeProtocolPrompt.contains("分条气泡发送"))
         #expect(NativeAgentPrompt.runtimeProtocolPrompt.contains("<asky-split/>"))
         #expect(NativeAgentPrompt.runtimeProtocolPrompt.contains("按事项或话轮停顿分条，不按自然段硬拆"))
@@ -733,9 +733,13 @@ server.serve_forever()
         #expect(NativeAgentPrompt.defaultSystemPrompt.contains("默认简洁直接"))
         #expect(NativeAgentPrompt.defaultSystemPrompt.contains("简短的 ### 主题小标题"))
         #expect(NativeAgentPrompt.defaultSystemPrompt.contains("不写一句一行"))
+        #expect(NativeAgentPrompt.defaultSystemPrompt.contains("介绍人物、景点、动植物或外观视觉差异时，记得配上真实照片"))
         #expect(!NativeAgentPrompt.defaultSystemPrompt.contains("250–450"))
         #expect(!NativeAgentPrompt.defaultSystemPrompt.contains("80–130"))
         #expect(!NativeAgentPrompt.defaultSystemPrompt.contains("<asky-split/>"))
+        let imageCaps = try #require(NativeAgentPrompt.imageCapabilities(hasPageReader: true))
+        #expect(imageCaps.contains("即使你凭已有知识就能回答或存在同名歧义"))
+        #expect(imageCaps.contains("优先选维基百科、百度百科"))
     }
 
     @Test func midRunFollowUpInjectsInitialSystemGuidanceOnlyOnce() async throws {
