@@ -254,6 +254,12 @@ private struct AliasRowStyle: LabeledContentStyle {
 private struct AliasKindPicker: View {
     @Binding var selection: String
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.displayScale) private var displayScale
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    private var borderWidth: CGFloat {
+        contrast == .increased ? 1 : max(0.5, 1 / displayScale)
+    }
 
     var body: some View {
         HStack(spacing: 2) {
@@ -264,7 +270,7 @@ private struct AliasKindPicker: View {
         .background(scheme == .dark ? ThemeColor.kBackgroundNeutral.color(for: scheme) : SettingsPalette.surface(scheme),
                     in: RoundedRectangle(cornerRadius: 8))
         .overlay {
-            RoundedRectangle(cornerRadius: 8).strokeBorder(ThemeColor.kBorder.color(for: scheme), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 8).strokeBorder(ThemeColor.kBorder.color(for: scheme), lineWidth: borderWidth)
                 .allowsHitTesting(false)
         }
         .accessibilityElement(children: .contain)
@@ -276,7 +282,7 @@ private struct AliasKindPicker: View {
         return Button { selection = value } label: {
             Text(title).font(.system(size: 13))
                 .foregroundStyle(selected ? ThemeColor.kText : ThemeColor.kTextSubtle)
-                .padding(.horizontal, 12).frame(height: 22)
+                .padding(.horizontal, 12).frame(height: 25)
                 .background(selected ? ThemeColor.kBackgroundSelected.color(for: scheme) : .clear,
                             in: RoundedRectangle(cornerRadius: 6))
                 .contentShape(Rectangle())

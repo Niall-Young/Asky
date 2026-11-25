@@ -113,7 +113,7 @@ private struct HotKeySettings: View {
             HStack {
                 Text(NSLocalizedString(title, comment: ""))
                 Spacer()
-                HotKeyRecorder(label: label, allowsPlainKey: allowsPlainKey, apply: apply).frame(width: 180, height: 30)
+                HotKeyRecorder(label: label, allowsPlainKey: allowsPlainKey, apply: apply).frame(width: 180, height: 33)
                 SettingsButton(NSLocalizedString("恢复默认", comment: "")) { _ = reset() }
             }
             if !status.isEmpty, status != NSLocalizedString("已注册", comment: "") {
@@ -193,7 +193,7 @@ final class HotKeyRecorderField: NSView {
 
     override var acceptsFirstResponder: Bool { true }
     override var isFlipped: Bool { true }
-    override var intrinsicContentSize: NSSize { NSSize(width: 172, height: 30) }
+    override var intrinsicContentSize: NSSize { NSSize(width: 172, height: 33) }
 
     init(label: String, allowsPlainKey: Bool, apply: @escaping (UInt32, UInt32, String) -> Bool) {
         self.label = label

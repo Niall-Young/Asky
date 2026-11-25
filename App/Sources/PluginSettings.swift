@@ -95,7 +95,6 @@ struct PluginSettings: View {
             HStack(spacing: 24) {
                 SettingsSearchField(query: $query, focus: $searchFocused,
                                     placeholder: "搜索插件或命令", identifier: "plugin-search")
-                    .frame(height: 28)
                 SettingsSegmentedControl(selection: $selectedCategory,
                                          options: PluginSettingsCategory.allCases.map { ($0, $0.title) },
                                          identifier: "plugin-tabs", accessibilityLabel: label("插件"))

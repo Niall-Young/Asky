@@ -37,7 +37,6 @@ struct CommandSettings: View {
                 HStack(spacing: 24) {
                     SettingsSearchField(query: $query, focus: $searchFocused,
                                        placeholder: "搜索指令或名称", identifier: "command-search")
-                        .frame(height: 28)
                     SettingsSegmentedControl(selection: $selectedTab, options: [
                         ("search", NSLocalizedString("搜索指令", comment: "")),
                         ("builtIn", NSLocalizedString("内置指令", comment: "")),

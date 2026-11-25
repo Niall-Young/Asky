@@ -167,8 +167,10 @@ extension View {
     }
 
     /// Translucent field fill with a focus ring, shared by fields of any height.
-    func settingsInputChrome(scheme: ColorScheme, focused: Bool, cornerRadius: CGFloat = 14) -> some View {
-        modifier(SettingsInputChrome(scheme: scheme, focused: focused, cornerRadius: cornerRadius))
+    func settingsInputChrome(scheme: ColorScheme, focused: Bool, cornerRadius: CGFloat = 14.5,
+                             borderWidth: CGFloat = 1) -> some View {
+        modifier(SettingsInputChrome(scheme: scheme, focused: focused, cornerRadius: cornerRadius,
+                                     borderWidth: borderWidth))
     }
 }
 
@@ -177,12 +179,23 @@ private struct SettingsInputSurface: ViewModifier {
     let focused: Bool
     @Environment(\.settingsInputHeight) private var height
     @Environment(\.settingsInputCornerRadius) private var cornerRadius
+    @Environment(\.displayScale) private var displayScale
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    private var borderWidth: CGFloat {
+        // Capsule Settings fields use a 1px hairline border so their 28pt bright interior
+        // matches NSSegmentedControl (.large) while their 29pt outer edge matches NSButton (.glass, .large).
+        let isCapsule = cornerRadius >= height / 2 - 0.5
+        guard isCapsule, contrast != .increased else { return 1 }
+        return max(0.5, 1 / displayScale)
+    }
 
     func body(content: Content) -> some View {
         content
             .padding(.horizontal, 12)
             .frame(height: height)
-            .settingsInputChrome(scheme: scheme, focused: focused, cornerRadius: cornerRadius)
+            .settingsInputChrome(scheme: scheme, focused: focused, cornerRadius: cornerRadius,
+                                 borderWidth: borderWidth)
             .alignmentGuide(.settingsInput) { $0[VerticalAlignment.center] }
     }
 }
@@ -192,11 +205,11 @@ private struct SettingsInputFillKey: EnvironmentKey {
 }
 
 private struct SettingsInputHeightKey: EnvironmentKey {
-    static let defaultValue: CGFloat = 28
+    static let defaultValue: CGFloat = 29
 }
 
 private struct SettingsInputCornerRadiusKey: EnvironmentKey {
-    static let defaultValue: CGFloat = 14
+    static let defaultValue: CGFloat = 14.5
 }
 
 extension EnvironmentValues {
@@ -218,6 +231,7 @@ private struct SettingsInputChrome: ViewModifier {
     let scheme: ColorScheme
     let focused: Bool
     let cornerRadius: CGFloat
+    let borderWidth: CGFloat
     @Environment(\.settingsInputFill) private var fill
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius)
@@ -226,7 +240,7 @@ private struct SettingsInputChrome: ViewModifier {
                             : SettingsPalette.surface(scheme, opaque: true).opacity(0.45)), in: shape)
             .overlay {
                 shape.strokeBorder(focused ? SettingsPalette.focusBorder(scheme) : border,
-                                   lineWidth: focused ? 1.5 : 1)
+                                   lineWidth: focused ? 1.5 : borderWidth)
                     .allowsHitTesting(false)
             }
     }
