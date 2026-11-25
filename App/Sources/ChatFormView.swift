@@ -63,7 +63,7 @@ struct ChatFormView: View {
                     .font(.system(size: 12))
                     .foregroundStyle(ThemeColor.kTextSubtle)
             } else {
-                SettingsButton(NSLocalizedString("提交回复", comment: ""), action: submit)
+                ChatFormSubmitButton(NSLocalizedString("提交回复", comment: ""), action: submit)
                     .disabled(!active || !form.accepts(values))
                     .padding(.top, 2)
             }
@@ -80,16 +80,6 @@ struct ChatFormView: View {
         case .text:
             SettingsInputField(field.label, text: scalar(field.id))
                 .disabled(!active)
-        case .select:
-            if field.allowsCustomAnswer {
-                ChatCustomChoice(field: field, answer: scalar(field.id), active: active)
-            } else {
-                SettingsChoice(selection: scalar(field.id), options:
-                    [("", NSLocalizedString("请选择", comment: ""))] + (field.options ?? []).map { ($0, $0) })
-                    .accessibilityLabel(field.label)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .disabled(!active)
-            }
         case .radio:
             if field.allowsCustomAnswer {
                 ChatCustomChoice(field: field, answer: scalar(field.id), active: active)
@@ -98,6 +88,17 @@ struct ChatFormView: View {
             }
         case .multi:
             ChatFormMultiGroup(label: field.label, options: field.options ?? [], selection: multiBinding(field.id), active: active)
+        case .datetime:
+            if !active, values[field.id] == nil {
+                Text(verbatim: "—").foregroundStyle(ThemeColor.kTextSubtle)
+            } else {
+                ChatFormDateTimeField(field: field, value: scalar(field.id), active: active)
+                    .onChange(of: active, initial: true) {
+                        if active, values[field.id] == nil {
+                            values[field.id] = [field.initialDateTime()]
+                        }
+                    }
+            }
         case .time, .duration:
             if !active, values[field.id] == nil {
                 Text(verbatim: "—").foregroundStyle(ThemeColor.kTextSubtle)
@@ -215,41 +216,52 @@ private struct ChatFormOptionRow: View {
     }
 
     private var backgroundFill: Color {
+        if !active {
+            if selected {
+                return scheme == .dark ? Color.white.opacity(0.04) : Color.white.opacity(0.28)
+            }
+            return scheme == .dark ? Color.white.opacity(0.015) : Color.white.opacity(0.14)
+        }
         if selected {
-            return scheme == .dark ? Color.white.opacity(0.08) : Color.white.opacity(0.72)
+            return scheme == .dark ? Color.white.opacity(0.065) : Color.white.opacity(0.46)
         }
-        if hovered && active {
-            return scheme == .dark ? Color.white.opacity(0.05) : Color.white.opacity(0.48)
+        if hovered {
+            return scheme == .dark ? Color.white.opacity(0.045) : Color.white.opacity(0.36)
         }
-        return scheme == .dark ? Color.white.opacity(0.02) : Color.white.opacity(0.24)
+        return scheme == .dark ? Color.white.opacity(0.02) : Color.white.opacity(0.20)
     }
 
     private var selectedBorderColor: Color {
-        let boost: Double = contrast == .increased ? 0.12 : 0
-        return scheme == .dark
-            ? Color.white.opacity(min(1, 0.84 + boost))
-            : Color.black.opacity(min(1, 0.76 + boost))
+        let boost: Double = contrast == .increased ? 0.16 : 0
+        if !active {
+            let base: Double = scheme == .dark ? 0.16 : 0.14
+            return (scheme == .dark ? Color.white : Color.black).opacity(min(1, base + boost))
+        }
+        let base: Double = scheme == .dark ? 0.34 : 0.28
+        return (scheme == .dark ? Color.white : Color.black).opacity(min(1, base + boost))
     }
 
     private var unselectedBorderColor: Color {
         let boost: Double = contrast == .increased ? 0.16 : 0
         let base: Double
         if hovered && active {
-            base = scheme == .dark ? 0.28 : 0.26
+            base = scheme == .dark ? 0.24 : 0.22
         } else if dimmed || !active {
-            base = scheme == .dark ? 0.11 : 0.10
+            base = scheme == .dark ? 0.10 : 0.09
         } else {
-            base = scheme == .dark ? 0.17 : 0.16
+            base = scheme == .dark ? 0.15 : 0.14
         }
         return (scheme == .dark ? Color.white : Color.black).opacity(min(1, base + boost))
     }
 
     private var textColor: Color {
-        if selected || (hovered && active) {
-            return ThemeColor.kText.color(for: scheme)
-        }
         if !active {
-            return ThemeColor("textDisabled").color(for: scheme)
+            return selected
+                ? ThemeColor.kTextSubtle.color(for: scheme)
+                : ThemeColor("textDisabled").color(for: scheme)
+        }
+        if selected || hovered {
+            return ThemeColor.kText.color(for: scheme)
         }
         if dimmed {
             return ThemeColor.kTextSubtle.color(for: scheme)
@@ -257,11 +269,18 @@ private struct ChatFormOptionRow: View {
         return ThemeColor.kText.color(for: scheme)
     }
 
+    private var selectedBadgeFill: Color {
+        if !active {
+            return (scheme == .dark ? Color.white : Color.black).opacity(0.32)
+        }
+        return ThemeColor.kBackgroundPrimary.color(for: scheme)
+    }
+
     var body: some View {
         Button(action: action) {
             HStack(alignment: .center, spacing: 12) {
                 Text(title)
-                    .font(.system(size: 14, weight: selected ? .medium : .regular))
+                    .font(.system(size: 14, weight: .regular))
                     .foregroundStyle(textColor)
                     .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
@@ -276,7 +295,7 @@ private struct ChatFormOptionRow: View {
             .background(backgroundFill, in: shape)
             .overlay {
                 if selected {
-                    shape.strokeBorder(selectedBorderColor, lineWidth: 1.5)
+                    shape.strokeBorder(selectedBorderColor, lineWidth: 1)
                         .allowsHitTesting(false)
                 } else {
                     shape.strokeBorder(unselectedBorderColor, style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
@@ -287,7 +306,7 @@ private struct ChatFormOptionRow: View {
         }
         .buttonStyle(ChatFormOptionButtonStyle(active: active, reduceMotion: reduceMotion))
         .disabled(!active)
-        .opacity(!active && !selected ? 0.58 : 1)
+        .opacity(!active && !selected ? 0.62 : 1)
         .onHover { hovered = $0 }
         .background(ChatFormControlMarker(id: "chat-form-option-" + title))
         .actionArrowCursor(enabled: active)
@@ -302,27 +321,27 @@ private struct ChatFormOptionRow: View {
     private var trailingIndicator: some View {
         switch mode {
         case .single:
-            if selected {
+            ZStack {
+                Color.clear
                 ZStack {
-                    Circle().fill(ThemeColor.kBackgroundPrimary.color(for: scheme))
+                    Circle().fill(selectedBadgeFill)
                     Image(mingCute: "checkmark", size: 10)
                         .foregroundStyle(ThemeColor("textInverted").color(for: scheme))
                 }
-                .transition(reduceMotion ? .opacity : .scale(scale: 0.82).combined(with: .opacity))
-            } else {
-                Color.clear
+                .scaleEffect(selected || reduceMotion ? 1 : 0.82)
+                .opacity(selected ? 1 : 0)
             }
         case .multiple:
             let box = RoundedRectangle(cornerRadius: 5, style: .continuous)
             ZStack {
                 if selected {
-                    box.fill(ThemeColor.kBackgroundPrimary.color(for: scheme))
+                    box.fill(selectedBadgeFill)
                     Image(mingCute: "checkmark", size: 10.5)
                         .foregroundStyle(ThemeColor("textInverted").color(for: scheme))
                 } else {
-                    box.fill(scheme == .dark ? Color.white.opacity(0.03) : Color.white.opacity(0.55))
+                    box.fill(scheme == .dark ? Color.white.opacity(0.03) : Color.white.opacity(0.45))
                     box.strokeBorder(
-                        (scheme == .dark ? Color.white : Color.black).opacity(hovered && active ? 0.48 : 0.26),
+                        (scheme == .dark ? Color.white : Color.black).opacity(hovered && active ? 0.42 : 0.22),
                         lineWidth: 1.25
                     )
                 }
@@ -344,7 +363,7 @@ private struct ChatFormOptionButtonStyle: ButtonStyle {
     }
 }
 
-// MARK: - Custom Choice (Radio / Select with allowCustom)
+// MARK: - Custom Choice (Radio with allowCustom)
 
 /// Keeps the custom draft while switching choices; only the active answer is submitted.
 private struct ChatCustomChoice: View {
@@ -378,15 +397,7 @@ private struct ChatCustomChoice: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if field.type == .radio {
-                ChatFormRadioGroup(label: field.label, options: (field.options ?? []) + [customOption], selection: selection, active: active)
-            } else {
-                SettingsChoice(selection: selection, options:
-                    [("", NSLocalizedString("请选择", comment: ""))] + ((field.options ?? []) + [customOption]).map { ($0, $0) })
-                    .accessibilityLabel(field.label)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .disabled(!active)
-            }
+            ChatFormRadioGroup(label: field.label, options: (field.options ?? []) + [customOption], selection: selection, active: active)
             if usingCustom {
                 SettingsInputField(NSLocalizedString("输入你的回答", comment: ""), text: Binding(get: { customDraft }, set: {
                     customDraft = String($0.prefix(4000))
@@ -395,6 +406,190 @@ private struct ChatCustomChoice: View {
                 .disabled(!active)
             }
         }
+    }
+}
+
+// MARK: - Combined Date & Time Field (Input + Side-by-Side Calendar & Time Popover)
+
+private struct ChatFormDateTimeField: View {
+    let field: ChatForm.Field
+    @Binding var value: String
+    let active: Bool
+
+    @State private var draftText: String
+    @State private var showingPopover = false
+    @FocusState private var inputFocused: Bool
+    @Environment(\.colorScheme) private var scheme
+
+    init(field: ChatForm.Field, value: Binding<String>, active: Bool) {
+        self.field = field
+        _value = value
+        self.active = active
+        let initial = value.wrappedValue.isEmpty ? field.initialDateTime() : value.wrappedValue
+        _draftText = State(initialValue: initial)
+    }
+
+    private var currentComponents: (date: Date, time: [Int]) {
+        field.dateTimeComponents(value) ?? (Date(), field.initialTemporalValues())
+    }
+
+    private var dateBinding: Binding<Date> {
+        Binding(
+            get: { currentComponents.date },
+            set: { newDate in
+                let formatted = field.dateTimeString(date: newDate, time: currentComponents.time)
+                value = formatted
+                draftText = formatted
+            }
+        )
+    }
+
+    private var timeBinding: Binding<[Int]> {
+        Binding(
+            get: { currentComponents.time },
+            set: { newTime in
+                let formatted = field.dateTimeString(date: currentComponents.date, time: newTime)
+                value = formatted
+                draftText = formatted
+            }
+        )
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            TextField(field.dateTimePlaceholder, text: $draftText,
+                      prompt: Text(verbatim: field.dateTimePlaceholder).foregroundStyle(ThemeColor.kTextSubtlest))
+                .labelsHidden()
+                .textFieldStyle(.plain)
+                .font(.system(size: 14).monospacedDigit())
+                .focused($inputFocused)
+                .disabled(!active)
+                .onSubmit { commitDraft() }
+                .onChange(of: inputFocused) { _, focused in
+                    if !focused { commitDraft() }
+                }
+                .onChange(of: draftText) { _, newValue in
+                    guard active, let parsed = field.parseDateTimeInput(newValue) else { return }
+                    let formatted = field.dateTimeString(date: parsed.date, time: parsed.time)
+                    if value != formatted { value = formatted }
+                }
+                .onChange(of: value) { _, newValue in
+                    let parsedDraft = field.parseDateTimeInput(draftText).map {
+                        field.dateTimeString(date: $0.date, time: $0.time)
+                    }
+                    if !newValue.isEmpty, (!inputFocused || parsedDraft != newValue) {
+                        draftText = newValue
+                    }
+                }
+                .onChange(of: active) { _, isActive in
+                    if !isActive { showingPopover = false }
+                }
+                .settingsInputSurface(scheme: scheme, focused: inputFocused)
+                .background(ChatFormControlMarker(id: "chat-form-field-" + field.id))
+                .accessibilityLabel(field.label)
+                .accessibilityIdentifier("chat-form-field-" + field.id)
+
+            ChatFormPickerTriggerButton(
+                isOpen: showingPopover,
+                enabled: active,
+                accessibilityLabel: NSLocalizedString("选择日期与时间", comment: ""),
+                accessibilityIdentifier: "chat-form-picker-" + field.id
+            ) {
+                commitDraft()
+                inputFocused = false
+                showingPopover.toggle()
+            } icon: {
+                ChatFormClockGlyph(size: 15)
+            }
+            .popover(isPresented: $showingPopover, arrowEdge: .bottom) {
+                ChatFormDateTimePopover(
+                    field: field,
+                    date: dateBinding,
+                    timeValues: timeBinding,
+                    dismiss: { showingPopover = false }
+                )
+            }
+        }
+    }
+
+    private func commitDraft() {
+        if let parsed = field.parseDateTimeInput(draftText) {
+            let formatted = field.dateTimeString(date: parsed.date, time: parsed.time)
+            value = formatted
+            draftText = formatted
+        } else {
+            draftText = value.isEmpty ? field.initialDateTime() : value
+        }
+    }
+}
+
+struct ChatFormDateTimePopover: View {
+    let field: ChatForm.Field
+    @Binding var date: Date
+    @Binding var timeValues: [Int]
+    let dismiss: () -> Void
+    @Environment(\.colorScheme) private var scheme
+
+    private var timeColumnsWidth: CGFloat {
+        switch field.timeUnits.count {
+        case 1: 68
+        case 2: 128
+        default: 192
+        }
+    }
+
+    private var normalizedTime: [Int] {
+        timeValues.count == field.timeUnits.count ? timeValues : field.initialTemporalValues()
+    }
+
+    var body: some View {
+        VStack(spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                CalendarMonthPicker(selection: $date, monochrome: true)
+                    .frame(width: 248)
+
+                Rectangle()
+                    .fill(ThemeColor.kBorder.color(for: scheme))
+                    .frame(width: 1)
+
+                HStack(alignment: .top, spacing: 6) {
+                    ForEach(Array(field.timeUnits.enumerated()), id: \.element) { index, unit in
+                        ChatFormTimeColumn(
+                            unit: unit,
+                            range: 0...field.maximum(at: index),
+                            selected: normalizedTime[index],
+                            columnHeight: 260
+                        ) { picked in
+                            var updated = normalizedTime
+                            updated[index] = picked
+                            timeValues = updated
+                        }
+                    }
+                }
+                .frame(width: timeColumnsWidth)
+            }
+            .fixedSize(horizontal: false, vertical: true)
+
+            Rectangle()
+                .fill(ThemeColor.kBorder.color(for: scheme))
+                .frame(height: 1)
+
+            HStack(spacing: 8) {
+                Text(field.dateTimeString(date: date, time: normalizedTime))
+                    .font(.system(size: 13.5, weight: .semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(ThemeColor.kText)
+                Spacer(minLength: 0)
+                ChatFormPopoverGhostButton(title: NSLocalizedString("现在", comment: "")) {
+                    let now = Date()
+                    date = now
+                    timeValues = field.initialTemporalValues(now: now)
+                }
+                ChatFormPopoverPrimaryButton(title: NSLocalizedString("完成", comment: ""), action: dismiss)
+            }
+        }
+        .padding(14)
+        .fixedSize()
     }
 }
 
@@ -686,6 +881,7 @@ private struct ChatFormTimeColumn: View {
     let unit: ChatForm.TimeUnit
     let range: ClosedRange<Int>
     let selected: Int
+    var columnHeight: CGFloat = 184
     let onSelect: (Int) -> Void
 
     @Environment(\.colorScheme) private var scheme
@@ -723,7 +919,7 @@ private struct ChatFormTimeColumn: View {
                     .padding(.vertical, 6)
                 }
                 .scrollIndicators(.hidden)
-                .frame(height: 184)
+                .frame(height: columnHeight)
                 .mask {
                     VStack(spacing: 0) {
                         LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom)
@@ -790,7 +986,59 @@ private struct ChatFormTimeCell: View {
     }
 }
 
-// MARK: - Shared Form Trigger & Popover Controls
+// MARK: - Shared Form Trigger, Submit & Popover Controls
+
+/// Prominent monochrome brand submit button matching Asky's primary controls (black-on-white / white-on-black).
+private struct ChatFormSubmitButton: View {
+    let title: String
+    let action: () -> Void
+    @State private var hovered = false
+    @Environment(\.isEnabled) private var enabled
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    init(_ title: String, action: @escaping () -> Void) {
+        self.title = title
+        self.action = action
+    }
+
+    private var shape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: ChatFormMetrics.controlCornerRadius, style: .continuous)
+    }
+
+    private var backgroundFill: Color {
+        if !enabled {
+            return (scheme == .dark ? Color.white : Color.black).opacity(0.09)
+        }
+        return ThemeColor.kBackgroundPrimary.color(for: scheme).opacity(hovered ? 0.86 : 1)
+    }
+
+    private var foregroundColor: Color {
+        if !enabled {
+            return ThemeColor("textDisabled").color(for: scheme)
+        }
+        return ThemeColor("textInverted").color(for: scheme)
+    }
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(foregroundColor)
+                .padding(.horizontal, 18)
+                .frame(height: ChatFormMetrics.controlHeight)
+                .background(backgroundFill, in: shape)
+                .contentShape(shape)
+        }
+        .buttonStyle(ChatFormOptionButtonStyle(active: enabled, reduceMotion: reduceMotion))
+        .onHover { hovered = $0 }
+        .background(ChatFormControlMarker(id: "chat-form-submit"))
+        .actionArrowCursor(enabled: enabled)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.10), value: hovered)
+        .accessibilityLabel(title)
+        .accessibilityIdentifier("chat-form-submit")
+    }
+}
 
 struct ChatFormPickerTriggerButton<Icon: View>: View {
     let isOpen: Bool

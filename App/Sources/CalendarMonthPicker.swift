@@ -54,6 +54,11 @@ struct CalendarMonthPicker: View {
                             selection = date
                         }
                     }
+                    .background {
+                        if monochrome && currentMonth {
+                            ChatFormControlMarker(id: "chat-form-day-" + ChatForm.dateString(day))
+                        }
+                    }
                     .accessibilityLabel(Text(day, format: .dateTime.year().month().day().weekday(.wide)))
                     .accessibilityAddTraits(selected ? .isSelected : [])
                 }

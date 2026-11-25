@@ -14,7 +14,23 @@ struct ChatForm: Equatable {
     }
 
     struct Field: Decodable, Equatable, Identifiable {
-        enum Kind: String, Decodable { case text, select, radio, multi, date, time, duration }
+        enum Kind: String, Decodable {
+            case text, radio, multi, date, time, datetime, duration
+
+            init(from decoder: Decoder) throws {
+                let container = try decoder.singleValueContainer()
+                let raw = try container.decode(String.self)
+                // Historical or legacy "select" fields render and validate as radio choices.
+                if raw == "select" {
+                    self = .radio
+                    return
+                }
+                guard let kind = Kind(rawValue: raw) else {
+                    throw DecodingError.dataCorruptedError(in: container, debugDescription: "Unsupported field type: \(raw)")
+                }
+                self = kind
+            }
+        }
         enum DefaultValue: Decodable, Equatable {
             case scalar(String), multiple([String]), invalid
 
@@ -34,7 +50,7 @@ struct ChatForm: Equatable {
         let components: [TimeUnit]?
         let defaultValue: DefaultValue?
 
-        var allowsCustomAnswer: Bool { allowCustom == true && (type == .radio || type == .select) }
+        var allowsCustomAnswer: Bool { allowCustom == true && type == .radio }
 
         var timeUnits: [TimeUnit] { components ?? (type == .duration ? [.minute, .second] : [.hour, .minute]) }
         func maximum(at index: Int) -> Int {
@@ -62,6 +78,36 @@ struct ChatForm: Equatable {
                 case .second: "SS"
                 }
             }.joined(separator: ":")
+        }
+        var dateTimePlaceholder: String {
+            "YYYY-MM-DD \(temporalPlaceholder)"
+        }
+        /// Strict `yyyy-MM-dd HH:mm` (or requested time components) validation for `datetime` fields.
+        func dateTimeComponents(_ value: String) -> (date: Date, time: [Int])? {
+            let parts = value.split(separator: " ", omittingEmptySubsequences: false)
+            guard parts.count == 2,
+                  let date = ChatForm.date(String(parts[0])),
+                  let time = temporalValues(String(parts[1])) else { return nil }
+            return (date, time)
+        }
+        func dateTimeString(date: Date, time: [Int]) -> String {
+            "\(ChatForm.dateString(date)) \(temporalString(time))"
+        }
+        /// Accepts user-typed date+time variants such as `2026/11/5 9:5`, `20261125 1430`, or `2026-11-25T14:30`.
+        func parseDateTimeInput(_ raw: String) -> (date: Date, time: [Int])? {
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return nil }
+            let normalized = trimmed
+                .replacingOccurrences(of: "T", with: " ")
+                .replacingOccurrences(of: "t", with: " ")
+            let parts = normalized.split(whereSeparator: { $0.isWhitespace })
+            guard parts.count == 2,
+                  let date = ChatForm.parseDateInput(String(parts[0])),
+                  let time = parseTemporalInput(String(parts[1])) else { return nil }
+            return (date, time)
+        }
+        func initialDateTime(now: Date = Date()) -> String {
+            dateTimeString(date: now, time: initialTemporalValues(now: now))
         }
         /// Accepts user-typed time/duration variants such as `9:5`, `14:30`, `14：30`, or `1430`.
         func parseTemporalInput(_ raw: String) -> [Int]? {
@@ -113,13 +159,14 @@ struct ChatForm: Equatable {
             if required == true && answer.allSatisfy({ $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) { return false }
             switch type {
             case .text: return answer.count <= 1 && answer.allSatisfy { $0.count <= 4000 }
-            case .select, .radio:
+            case .radio:
                 return answer.count <= 1 && answer.allSatisfy {
                     (options ?? []).contains($0) || (allowsCustomAnswer && $0.count <= 4000 && !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             case .multi: return Set(answer).count == answer.count && answer.allSatisfy { (options ?? []).contains($0) }
             case .date: return answer.count <= 1 && answer.allSatisfy { ChatForm.date($0) != nil }
             case .time, .duration: return answer.count <= 1 && answer.allSatisfy { temporalValues($0) != nil }
+            case .datetime: return answer.count <= 1 && answer.allSatisfy { dateTimeComponents($0) != nil }
             }
         }
 
@@ -137,11 +184,11 @@ struct ChatForm: Equatable {
         var isValid: Bool {
             guard !id.isEmpty, id.count <= 64, !label.isEmpty, label.count <= 200 else { return false }
             if allowCustom == true && !allowsCustomAnswer { return false }
-            if type == .select || type == .radio || type == .multi {
+            if type == .radio || type == .multi {
                 guard let options, (1...20).contains(options.count), Set(options).count == options.count,
                       options.allSatisfy({ !$0.isEmpty && $0.count <= 200 }) else { return false }
             }
-            if type == .time || type == .duration {
+            if type == .time || type == .datetime || type == .duration {
                 guard !timeUnits.isEmpty, timeUnits == TimeUnit.allCases.filter({ timeUnits.contains($0) }) else { return false }
             } else if components != nil { return false }
             return true
@@ -309,7 +356,26 @@ enum ChatFormParser {
         }
         if let block { renderBlock(block, closed: false) }
         flushMarkdown()
-        return parts
+        return placingFormLast(parts)
+    }
+
+    /// Always keep the interactive form (and its submit button) as the final element of a bubble
+    /// so prose never dangles below the submit action.
+    private static func placingFormLast(_ parts: [ChatReplyPart]) -> [ChatReplyPart] {
+        guard let formPart = parts.first(where: { if case .form = $0.content { true } else { false } }) else {
+            return parts
+        }
+        let markdownChunks = parts.compactMap { part -> String? in
+            guard case .markdown(let body) = part.content else { return nil }
+            let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+        var reordered: [ChatReplyPart] = []
+        if !markdownChunks.isEmpty {
+            reordered.append(.init(id: 0, content: .markdown(markdownChunks.joined(separator: "\n\n"))))
+        }
+        reordered.append(.init(id: reordered.count, content: formPart.content))
+        return reordered
     }
 
     static func form(in text: String) -> ChatForm? {

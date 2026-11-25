@@ -16,7 +16,22 @@ enum ChatFormParserRegression {
         """
         let complete = ChatFormParser.form(in: source)!
         precondition(complete.fields.count == 4 && complete.isComplete)
+        precondition(complete.fields[1].type == .radio, "legacy select must decode as radio")
         precondition(!complete.accepts([:]))
+        let orderedParts = ChatFormParser.parse(source, streaming: false)
+        precondition(orderedParts.count == 2, "leading and trailing markdown must merge above the form")
+        if case .markdown(let prose) = orderedParts[0].content, case .form = orderedParts[1].content {
+            precondition(prose == "先填写这些信息：\n\n填好后提交。", "trailing prose must move above the form")
+        } else {
+            preconditionFailure("form must always be the final part in a reply")
+        }
+        let trailingOnlyParts = ChatFormParser.parse("```asky-form\n{\"title\":\"仅尾文\"}\n{\"id\":\"a\",\"type\":\"text\",\"label\":\"项\"}\n```\n补充说明。", streaming: false)
+        precondition(trailingOnlyParts.count == 2)
+        if case .markdown(let prose) = trailingOnlyParts[0].content, case .form = trailingOnlyParts[1].content {
+            precondition(prose == "补充说明。")
+        } else {
+            preconditionFailure("trailing prose must render before the form even without leading text")
+        }
         // Regression: one unescaped LaTeX delimiter in an option used to turn the
         // entire otherwise valid form into a code block (including reopened history).
         let latexSource = #"""
@@ -70,6 +85,25 @@ enum ChatFormParserRegression {
         precondition(ChatForm.parseDateInput("2026/11/5").map(ChatForm.dateString) == "2026-11-05")
         precondition(ChatForm.parseDateInput("20261124").map(ChatForm.dateString) == "2026-11-24")
         precondition(ChatForm.parseDateInput("2026-02-30") == nil)
+        let dateTimeForm = ChatFormParser.form(in: "```asky-form\n{\"title\":\"日程\"}\n{\"id\":\"when\",\"type\":\"datetime\",\"label\":\"开始时间\",\"required\":true,\"defaultValue\":\"2026-11-25 14:30\"}\n```")!
+        precondition(dateTimeForm.fields[0].type == .datetime)
+        precondition(dateTimeForm.prefilling([:]) == ["when": ["2026-11-25 14:30"]])
+        precondition(dateTimeForm.accepts(["when": ["2026-11-25 14:30"]]))
+        precondition(!dateTimeForm.accepts(["when": ["2026-11-25"]]))
+        precondition(!dateTimeForm.accepts(["when": ["2026-02-30 14:30"]]))
+        precondition(!dateTimeForm.accepts(["when": ["2026-11-25 24:00"]]))
+        precondition(dateTimeForm.reply(["when": ["2026-11-25 14:30"]]).contains("开始时间：2026-11-25 14:30"))
+        let dtField = dateTimeForm.fields[0]
+        let parsedDT1 = dtField.parseDateTimeInput("2026/11/5 9:5")!
+        precondition(dtField.dateTimeString(date: parsedDT1.date, time: parsedDT1.time) == "2026-11-05 09:05")
+        let parsedDT2 = dtField.parseDateTimeInput("20261125 1430")!
+        precondition(dtField.dateTimeString(date: parsedDT2.date, time: parsedDT2.time) == "2026-11-25 14:30")
+        let parsedDT3 = dtField.parseDateTimeInput("2026-11-25T08:05")!
+        precondition(dtField.dateTimeString(date: parsedDT3.date, time: parsedDT3.time) == "2026-11-25 08:05")
+        precondition(dtField.parseDateTimeInput("2026-02-30 14:30") == nil)
+        let fullDateTime = ChatFormParser.form(in: "```asky-form\n{\"title\":\"精确时间\"}\n{\"id\":\"ts\",\"type\":\"datetime\",\"label\":\"时刻\",\"components\":[\"hour\",\"minute\",\"second\"]}\n```")!
+        precondition(fullDateTime.accepts(["ts": ["2026-11-25 23:59:59"]]))
+        precondition(!fullDateTime.accepts(["ts": ["2026-11-25 23:59"]]))
         func temporalForm(_ type: String, _ components: String) -> ChatForm? {
             ChatFormParser.form(in: "```asky-form\n{\"title\":\"测试\"}\n{\"id\":\"value\",\"type\":\"\(type)\",\"label\":\"值\",\"components\":\(components)}\n```")
         }
