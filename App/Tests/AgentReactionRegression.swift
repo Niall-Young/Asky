@@ -378,8 +378,25 @@ extension AgentReplyRegression {
             let scrollCenter = NSPoint(x: (panelLeft + panelRight) / 2, y: (panelBottomAppKit + panelTopAppKit) / 2)
             move(window.convertPoint(toScreen: scrollCenter))
             try await Task.sleep(for: .milliseconds(100))
-            CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: -40, wheel2: 0, wheel3: 0)?.post(tap: .cghidEventTap)
+            // Exercise rapid continuous wheel scrolling across multiple categories and verify the
+            // expanded picker stays responsive, remains open, and syncs scroll position cleanly.
+            let emojiScrollView = descendants(surface).compactMap { $0 as? NSScrollView }
+                .first { abs($0.bounds.width - 306) < 2 }
+            precondition(emojiScrollView != nil, "Expanded emoji picker must host a native NSScrollView")
+            let naturalScroll = (UserDefaults.standard.object(forKey: "com.apple.swipescrolldirection") as? Bool) ?? true
+            let wheelDelta: Int32 = naturalScroll ? 48 : -48
+            let scrollStart = ContinuousClock.now
+            for _ in 0..<24 {
+                CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: wheelDelta, wheel2: 0, wheel3: 0)?.post(tap: .cghidEventTap)
+                try await Task.sleep(for: .milliseconds(8))
+            }
+            let scrollElapsed = scrollStart.duration(to: .now)
             try await Task.sleep(for: .milliseconds(180))
+            let scrolledY = emojiScrollView?.contentView.bounds.minY ?? -1
+            print("Expanded emoji grid scroll check (\(name)): minY=\(Int(scrolledY)), docHeight=\(Int(emojiScrollView?.documentView?.frame.height ?? 0)), burst=\(scrollElapsed)")
+            precondition(scrolledY > 400,
+                         "Rapid wheel scrolling must advance the expanded emoji grid (minY=\(scrolledY))")
+            try capture("emoji-expanded-scrolled-\(name)")
             // Click the 7th category tab (🚀 Travel & Places) at the top bar of the expanded panel.
             let travelTabPoint = NSPoint(x: panelLeft + 10 + 6 * 36 + 17, y: panelTopAppKit - 22)
             try await click(travelTabPoint, in: window)
