@@ -1269,7 +1269,10 @@ enum AgentReplyRegression {
             #"\int_{-\infty}^{\infty} e^{-x^2}\,\mathrm{d}x = \sqrt{\pi}"#,
             #"f(x) = \sum_{n=0}^{\infty} \frac{f^{(n)}(a)}{n!}(x-a)^n"#,
             #"\begin{aligned} \nabla \cdot \mathbf{E} &= \frac{\rho}{\varepsilon_0} \\ \nabla \times \mathbf{B} &= \mu_0 \mathbf{J} + \mu_0 \varepsilon_0 \frac{\partial \mathbf{E}}{\partial t} \end{aligned}"#,
-            #"A = \begin{pmatrix} a & b \\ c & d \end{pmatrix},\quad |x| = \begin{cases} x, & x \ge 0 \\ -x, & x < 0 \end{cases}"#
+            #"A = \begin{pmatrix} a & b \\ c & d \end{pmatrix},\quad |x| = \begin{cases} x, & x \ge 0 \\ -x, & x < 0 \end{cases}"#,
+            #"\text{收入} = \text{有效播放} \times \text{eCPM} \times \text{填充率}"#,
+            #"\text{毛利率} = \frac{\text{收入} - \text{成本}}{\text{收入}} \times 100\%"#,
+            #"x_{\text{总}} = \sum_{i=1}^{n} x_i,\quad \text{利润}(\text{元}) = \text{收入} - \text{成本}"#
         ]
         for formula in formulas {
             for color in [NSColor.white, .black] {
@@ -1284,11 +1287,17 @@ enum AgentReplyRegression {
                 }
             }
         }
+        // Verify CJK runs are actually drawn rather than silently dropped by SwiftMath.
+        let cjkFormula = ChatMathRenderer.render(.init(source: #"\text{收入} = \text{有效播放} \times \text{eCPM} \times \text{填充率}"#, display: true), color: .black)!
+        let strippedFormula = ChatMathRenderer.render(.init(source: #"= \times \text{eCPM} \times"#, display: true), color: .black)!
+        precondition(cjkFormula.image.size.width > strippedFormula.image.size.width + 80,
+                     "CJK glyphs must contribute real rendered width: cjk=\(cjkFormula.image.size) stripped=\(strippedFormula.image.size)")
+        precondition(ChatMathRenderer.render(.init(source: #"\text{纯中文}"#, display: false), color: .black) != nil)
         precondition(ChatMathRenderer.render(.init(source: #"\unknowncommand{x}"#, display: true), color: .black) == nil)
         for literal in [#"`$x$`"#, "```tex\n$$x$$\n```", #"\$20 and \$30"#, "$20 and $30", #"[price](https://example.com/$x$)"#, "$unfinished", "$$unfinished", "    $$code$$"] {
             precondition(ChatMath.markdown(literal) == literal, literal)
         }
-        for input in [#"$x^2$"#, #"$2x$"#, #"$20$"#, #"$$x^2$$"#, #"\(x^2\)"#, #"\[x^2\]"#] {
+        for input in [#"$x^2$"#, #"$2x$"#, #"$20$"#, #"$$x^2$$"#, #"\(x^2\)"#, #"\[x^2\]"#, #"$\text{收入} = \text{有效播放} \times \text{eCPM}$"#] {
             precondition(ChatMath.markdown(input).contains("asky-math://"), input)
         }
         let explanatory = "独立公式（使用 $$ 包裹）：\n\n$$x^2$$"
@@ -1296,7 +1305,7 @@ enum AgentReplyRegression {
         precondition(ChatMath.markdown(explanatory).contains("asky-math://display/"))
         let markdown = """
         ## 公式示例
-        行内公式：质能方程 $E = mc^2$，圆的面积 $S = \\pi r^2$。
+        行内公式：质能方程 $E = mc^2$，圆的面积 $S = \\pi r^2$，毛利率 $\\text{毛利率} = \\frac{\\text{毛利}}{\\text{收入}}$。
 
         """ + formulas.dropFirst().map { "$$" + $0 + "$$" }.joined(separator: "\n\n") + """
 

@@ -140,12 +140,12 @@ enum ChatMathRenderer {
         if let cached = cache.object(forKey: key) { return cached }
         // Bound layout work for malformed or unexpectedly large streamed output.
         guard formula.source.count < 8192 else { return nil }
+        guard let mathList = buildMathList(from: formula.source) else { return nil }
         let label = MTMathUILabel()
         label.fontSize = formula.display ? 18 : 14
         label.labelMode = formula.display ? .display : .text
         label.textColor = color
-        label.latex = formula.source
-        guard label.error == nil else { return nil }
+        label.mathList = mathList
         label.frame = NSRect(origin: .zero, size: label.fittingSize)
         label.layout()
         guard let display = label.displayList else { return nil }
@@ -168,6 +168,132 @@ enum ChatMathRenderer {
         let rendered = Rendered(image: image, descent: display.descent + 2)
         cache.setObject(rendered, forKey: key, cost: bitmap.bytesPerRow * bitmap.pixelsHigh)
         return rendered
+    }
+
+    /// SwiftMath drops characters outside ASCII, Cyrillic, and a fixed accented Latin table.
+    /// Preserve CJK and other Unicode text by round-tripping contiguous runs through ASCII placeholders
+    /// so CoreText renders them via system font fallback while keeping TeX spacing and layout intact.
+    private static func buildMathList(from source: String) -> MTMathList? {
+        let needsSubstitution = source.contains { !$0.isASCII && MTMathAtomFactory.atom(forCharacter: $0) == nil }
+        if !needsSubstitution {
+            var error: NSError?
+            let list = MTMathListBuilder.build(fromString: source, error: &error)
+            return error == nil ? list : nil
+        }
+
+        var prefix = "ASKYPH"
+        while source.contains(prefix) { prefix += "X" }
+
+        var sanitized = ""
+        sanitized.reserveCapacity(source.count + 32)
+        var replacements: [String] = []
+        let chars = Array(source)
+        var index = 0
+        while index < chars.count {
+            let ch = chars[index]
+            if !ch.isASCII && MTMathAtomFactory.atom(forCharacter: ch) == nil {
+                var end = index + 1
+                while end < chars.count, !chars[end].isASCII, MTMathAtomFactory.atom(forCharacter: chars[end]) == nil {
+                    end += 1
+                }
+                let id = replacements.count
+                replacements.append(String(chars[index..<end]))
+                sanitized += "{\(prefix)\(id)Z}"
+                index = end
+            } else {
+                sanitized.append(ch)
+                index += 1
+            }
+        }
+
+        var error: NSError?
+        guard let list = MTMathListBuilder.build(fromString: sanitized, error: &error), error == nil else {
+            return nil
+        }
+        restorePlaceholders(in: list, prefixChars: Array(prefix).map(String.init), replacements: replacements)
+        return list
+    }
+
+    private static func restorePlaceholders(in list: MTMathList?, prefixChars: [String], replacements: [String]) {
+        guard let list else { return }
+        var updated: [MTMathAtom] = []
+        updated.reserveCapacity(list.atoms.count)
+        var i = 0
+        while i < list.atoms.count {
+            if let match = matchPlaceholder(in: list.atoms, startingAt: i, prefixChars: prefixChars, count: replacements.count) {
+                let first = list.atoms[i]
+                let last = list.atoms[match.endIndex - 1]
+                first.type = .ordinary
+                first.nucleus = replacements[match.id]
+                first.subScript = last.subScript
+                first.superScript = last.superScript
+                restorePlaceholders(in: first.subScript, prefixChars: prefixChars, replacements: replacements)
+                restorePlaceholders(in: first.superScript, prefixChars: prefixChars, replacements: replacements)
+                updated.append(first)
+                i = match.endIndex
+                continue
+            }
+            let atom = list.atoms[i]
+            restorePlaceholders(in: atom.subScript, prefixChars: prefixChars, replacements: replacements)
+            restorePlaceholders(in: atom.superScript, prefixChars: prefixChars, replacements: replacements)
+            if let frac = atom as? MTFraction {
+                restorePlaceholders(in: frac.numerator, prefixChars: prefixChars, replacements: replacements)
+                restorePlaceholders(in: frac.denominator, prefixChars: prefixChars, replacements: replacements)
+            } else if let rad = atom as? MTRadical {
+                restorePlaceholders(in: rad.radicand, prefixChars: prefixChars, replacements: replacements)
+                restorePlaceholders(in: rad.degree, prefixChars: prefixChars, replacements: replacements)
+            } else if let inner = atom as? MTInner {
+                restorePlaceholders(in: inner.innerList, prefixChars: prefixChars, replacements: replacements)
+            } else if let over = atom as? MTOverLine {
+                restorePlaceholders(in: over.innerList, prefixChars: prefixChars, replacements: replacements)
+            } else if let under = atom as? MTUnderLine {
+                restorePlaceholders(in: under.innerList, prefixChars: prefixChars, replacements: replacements)
+            } else if let accent = atom as? MTAccent {
+                restorePlaceholders(in: accent.innerList, prefixChars: prefixChars, replacements: replacements)
+            } else if let color = atom as? MTMathColor {
+                restorePlaceholders(in: color.innerList, prefixChars: prefixChars, replacements: replacements)
+            } else if let textColor = atom as? MTMathTextColor {
+                restorePlaceholders(in: textColor.innerList, prefixChars: prefixChars, replacements: replacements)
+            } else if let colorBox = atom as? MTMathColorbox {
+                restorePlaceholders(in: colorBox.innerList, prefixChars: prefixChars, replacements: replacements)
+            } else if let table = atom as? MTMathTable {
+                for row in table.cells {
+                    for cell in row {
+                        restorePlaceholders(in: cell, prefixChars: prefixChars, replacements: replacements)
+                    }
+                }
+            }
+            updated.append(atom)
+            i += 1
+        }
+        list.atoms = updated
+    }
+
+    private static func matchPlaceholder(in atoms: [MTMathAtom], startingAt start: Int, prefixChars: [String], count: Int) -> (id: Int, endIndex: Int)? {
+        let prefixEnd = start + prefixChars.count
+        guard prefixEnd + 2 <= atoms.count else { return nil }
+        for offset in 0..<prefixChars.count {
+            let atom = atoms[start + offset]
+            guard atom.type == .variable, atom.nucleus == prefixChars[offset],
+                  atom.subScript == nil, atom.superScript == nil else { return nil }
+        }
+        var cursor = prefixEnd
+        var digits = ""
+        while cursor < atoms.count {
+            let atom = atoms[cursor]
+            if atom.type == .number, atom.nucleus.count == 1, atom.nucleus.first?.isNumber == true,
+               atom.subScript == nil, atom.superScript == nil {
+                digits += atom.nucleus
+                cursor += 1
+            } else {
+                break
+            }
+        }
+        guard !digits.isEmpty, cursor < atoms.count else { return nil }
+        let terminator = atoms[cursor]
+        guard terminator.type == .variable, terminator.nucleus == "Z",
+              let id = Int(digits), id >= 0, id < count else { return nil }
+        return (id, cursor + 1)
     }
 }
 
