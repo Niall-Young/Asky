@@ -4,19 +4,50 @@ import Testing
 @testable import ToolService
 
 struct ChatImageTests {
-    @Test func publicationChecksDecodeAllImagesAndPopulateTheDisplayCache() async throws {
+    @Test func publicationChecksDecodeAllImagesRejectTinyIconsAndPopulateTheDisplayCache() async throws {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [ImageFixtureProtocol.self]
         let service = ChatImageService(session: URLSession(configuration: configuration))
         let root = "https://images.example/" + UUID().uuidString + "/"
         let good = URL(string: root + "good.png")!
+        let tiny = URL(string: root + "tiny.png")!
+        let strip = URL(string: root + "strip.png")!
         let broken = URL(string: root + "404.png")!
         let html = URL(string: root + "html.png")!
-        #expect(try await service.availableImages([good, broken, html]) == [good])
+        #expect(try await service.availableImages([good, tiny, strip, broken, html]) == [good])
         #expect(!(try await service.imageData(from: good)).isEmpty)
         #expect(ImageFixtureProtocol.counts.count(for: good) == 1, "UI reuses the decoded thumbnail")
+        #expect(ImageFixtureProtocol.counts.count(for: tiny) == 1)
+        #expect(ImageFixtureProtocol.counts.count(for: strip) == 1)
         #expect(ImageFixtureProtocol.counts.count(for: broken) == 1)
         #expect(ImageFixtureProtocol.counts.count(for: html) == 1)
+    }
+
+    @Test func probeIllustrationsReturnsRealDimensionsAndSeparatesRejectionsFromTimeouts() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [ImageFixtureProtocol.self]
+        let service = ChatImageService(session: URLSession(configuration: configuration))
+        let root = "https://images.example/" + UUID().uuidString + "/"
+        let good = URL(string: root + "good.png")!
+        let tiny = URL(string: root + "tiny.png")!
+        let slow = URL(string: root + "slow.png")!
+        let probed = await service.probeIllustrations([good, tiny, slow], budget: .milliseconds(300), maxConcurrent: 3)
+        #expect(probed[good] == .some(ChatImageService.ImageDimensions(width: 320, height: 240)))
+        #expect(probed.keys.contains(tiny) && probed[tiny]! == nil)
+        #expect(!probed.keys.contains(slow))
+    }
+
+    @Test func illustrationDimensionThresholdsRejectIconsAndStripsWhileKeepingPhotos() {
+        #expect(!ChatImageService.isAcceptableIllustration(width: 32, height: 32))
+        #expect(!ChatImageService.isAcceptableIllustration(width: 64, height: 64))
+        #expect(!ChatImageService.isAcceptableIllustration(width: 128, height: 128))
+        #expect(!ChatImageService.isAcceptableIllustration(width: 150, height: 150))
+        #expect(!ChatImageService.isAcceptableIllustration(width: 800, height: 40))
+        #expect(!ChatImageService.isAcceptableIllustration(width: 1000, height: 150))
+        #expect(ChatImageService.isAcceptableIllustration(width: 180, height: 180))
+        #expect(ChatImageService.isAcceptableIllustration(width: 250, height: 140))
+        #expect(ChatImageService.isAcceptableIllustration(width: 330, height: 219))
+        #expect(ChatImageService.isAcceptableIllustration(width: 1280, height: 853))
     }
 
     @Test func publicationDeadlineKeepsGoodImagesAndCancelsSlowReads() async throws {
@@ -52,6 +83,7 @@ struct ChatImageTests {
         #expect(image.pixelsWide == 1600)
         #expect(image.pixelsHigh == 800)
     }
+
     @Test func downloadsPreserveOriginalPixelsAndNeverOverwrite() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -68,7 +100,6 @@ struct ChatImageTests {
         #expect(try Data(contentsOf: second) == data)
         #expect(try #require(NSBitmapImageRep(data: Data(contentsOf: first))).pixelsWide == 3200)
     }
-
 }
 
 private final class ImageFixtureCounts: @unchecked Sendable {
@@ -80,6 +111,17 @@ private final class ImageFixtureCounts: @unchecked Sendable {
 
 private final class ImageFixtureProtocol: URLProtocol, @unchecked Sendable {
     static let counts = ImageFixtureCounts()
+    private static let goodPNG = makePNG(width: 320, height: 240)
+    private static let tinyPNG = makePNG(width: 32, height: 32)
+    private static let stripPNG = makePNG(width: 800, height: 40)
+
+    private static func makePNG(width: Int, height: Int) -> Data {
+        let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: width, pixelsHigh: height,
+            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
+            bytesPerRow: 0, bitsPerPixel: 0)!
+        return bitmap.representation(using: .png, properties: [:])!
+    }
+
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
@@ -87,8 +129,13 @@ private final class ImageFixtureProtocol: URLProtocol, @unchecked Sendable {
         Self.counts.record(url)
         if url.lastPathComponent == "slow.png" { return } // URLSession cancellation must release the read.
         let status = url.lastPathComponent == "404.png" ? 404 : 200
-        let png = Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jhV8AAAAASUVORK5CYII=")!
-        let data = url.lastPathComponent == "html.png" ? Data("<html>not an image</html>".utf8) : png
+        let data: Data
+        switch url.lastPathComponent {
+        case "html.png": data = Data("<html>not an image</html>".utf8)
+        case "tiny.png": data = Self.tinyPNG
+        case "strip.png": data = Self.stripPNG
+        default: data = Self.goodPNG
+        }
         client?.urlProtocol(self, didReceive: HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: nil)!, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: data)
         client?.urlProtocolDidFinishLoading(self)

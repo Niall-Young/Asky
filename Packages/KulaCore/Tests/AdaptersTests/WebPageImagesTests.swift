@@ -52,6 +52,8 @@ import ToolService
         ![本地](http://localhost/a.png)
         ![凭据](https://user:pass@example.com/a.jpg)
         ![图标](https://example.com/icon.svg)
+        ![箭头](https://example.com/assets/right-arrow.png)
+        ![评分](https://pages.c-ctrip.com/you/livestream/gs-dianping-score-5.png)
         ![内嵌](data:image/png;base64,AA)
         ![追踪](https://sb.scorecardresearch.com/p?c1=2&c2=17813110)
         """
