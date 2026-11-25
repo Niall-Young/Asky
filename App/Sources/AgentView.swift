@@ -610,6 +610,7 @@ private struct Transcript: View {
     private let state: AgentTaskState?
 
     @State private var viewport = TranscriptViewport()
+    @State private var pacer = TranscriptPrependPacer()
 
     init(model: AgentModel, bottomInset: CGFloat, bubblePopover: ChatBubblePopoverController) {
         self.model = model
@@ -626,34 +627,63 @@ private struct Transcript: View {
 
     var body: some View {
         GeometryReader { geometry in
-            let allGroups = groups
+            let displayedItems = pacer.visibleItems(from: items)
+            let allGroups = makeGroups(from: displayedItems)
             let latestCompletedReplyID = allGroups.last(where: { $0.content.contains { $0.kind == .assistant } })?
                 .content.first(where: { $0.kind == .assistant })?.id
-            CompatibleTranscriptScroll(submittedMessageID: items.last(where: { $0.kind == .user })?.id, isWaiting: isRunning, completedReplyID: latestCompletedReplyID, viewport: viewport, bottomInset: bottomInset, replyNavigation: model.replyNavigation, hasNewer: model.hasNewer, loadLatest: model.loadLatestMessages) {
+            CompatibleTranscriptScroll(submittedMessageID: items.last(where: { $0.kind == .user })?.id, isWaiting: isRunning, completedReplyID: latestCompletedReplyID, viewport: viewport, bottomInset: bottomInset, replyNavigation: model.replyNavigation, hasNewer: model.hasNewer, loadLatest: {
+                pacer.cancel(viewport: viewport)
+                model.loadLatestMessages()
+            }) {
                 // The model already bounds this window to 120 records. Measure it eagerly:
                 // lazy height estimates changed during scrolling and moved native text offscreen.
                 VStack(alignment: .leading, spacing: 0) {
                     if hasOlder {
                         TranscriptPagingButton(title: NSLocalizedString("加载更早的消息", comment: "")) {
-                            viewport.preserveReadingPosition { model.loadOlder() }
+                            guard !pacer.isStaging else { return }
+                            let previousFirstID = model.items.first?.id
+                            viewport.preserveReadingPosition {
+                                model.loadOlder()
+                                pacer.beginPrepend(previousFirstID: previousFirstID, updatedItems: model.items, viewport: viewport)
+                            }
                         }
-                        .disabled(isRunning)
+                        .disabled(isRunning || pacer.isStaging)
                         .padding(.bottom, 16)
                     }
                     let latestIndex = allGroups.count - 1
                     let navigationTarget = model.replyNavigation?.messageID
                     let groupLayouts = ChatTranscriptBubbleLayout.resolve(allGroups)
+                    let avatarColor = model.avatarColor
+                    let canDelete = !isRunning && !model.isCleaningHistory
                     ForEach(Array(allGroups.enumerated()), id: \.element.id) { index, group in
                         let layout = groupLayouts[index]
+                        let formStates = group.items.compactMap { item -> ResponseGroupView.FormSnapshot? in
+                            guard item.kind == .assistant, item.text.contains("```asky-form") else { return nil }
+                            return ResponseGroupView.FormSnapshot(
+                                id: item.id,
+                                answers: model.formAnswers(item.id),
+                                active: model.formIsActive(item.id)
+                            )
+                        }
                         TranscriptGroupWindow(pinned: index >= latestIndex - 1
                             || (navigationTarget != nil && group.items.contains { $0.id == navigationTarget })) {
-                            ResponseGroupView(group: group, layout: layout, model: model, bubblePopover: bubblePopover, isLatest: index == latestIndex)
+                            ResponseGroupView(
+                                group: group,
+                                layout: layout,
+                                model: model,
+                                bubblePopover: bubblePopover,
+                                isLatest: index == latestIndex,
+                                avatarColor: avatarColor,
+                                canDelete: canDelete,
+                                formStates: formStates
+                            ).equatable()
                         }
                             .background { TranscriptGroupPosition(id: group.id) }
                             .padding(.top, layout.topSpacing)
                     }
                     if model.hasNewer {
                         TranscriptPagingButton(title: NSLocalizedString("加载更新的消息", comment: "")) {
+                            pacer.cancel(viewport: viewport)
                             viewport.preserveReadingPosition { model.loadNewer() }
                         }
                         .disabled(isRunning)
@@ -668,14 +698,18 @@ private struct Transcript: View {
                 // Keep an initially short conversation at the top without padding individual turns.
                 .frame(minHeight: geometry.size.height, alignment: .top)
             }
+            .onChange(of: model.replyNavigation) { _, request in
+                if request != nil { pacer.cancel(viewport: viewport) }
+            }
+            .onDisappear { pacer.cancel(viewport: viewport) }
         }
     }
 
-    private var groups: [ChatResponseGroup] {
+    private func makeGroups(from sourceItems: [ChatItem]) -> [ChatResponseGroup] {
         var result: [ChatResponseGroup] = []
         var segmentCounts: [String: Int] = [:]
         var lastBaseID: String?
-        for item in items {
+        for item in sourceItems {
             let baseID = item.responseID ?? item.id
             if lastBaseID == baseID, !result.isEmpty {
                 result[result.count - 1].items.append(item)
@@ -742,19 +776,162 @@ private struct CompatibleTranscriptScroll<Content: View>: View {
     }
 }
 
+/// Progressively reveals a prepended history page from bottom to top on actual display frames
+/// so building native Markdown views never blocks the main thread for hundreds of milliseconds.
+@MainActor @Observable
+private final class TranscriptPrependPacer {
+    private(set) var hiddenLeadingCount = 0
+    @ObservationIgnored private var trackedAnchorID: String?
+    @ObservationIgnored private var trackedExpectedFirstID: String?
+    @ObservationIgnored private var trackedItems: [ChatItem] = []
+    @ObservationIgnored private var stageTask: Task<Void, Never>?
+
+    var isStaging: Bool { hiddenLeadingCount > 0 }
+
+    func visibleItems(from items: [ChatItem]) -> [ChatItem] {
+        guard hiddenLeadingCount > 0 else { return items }
+        guard hiddenLeadingCount < items.count,
+              items.first?.id == trackedExpectedFirstID,
+              trackedAnchorID == nil || items[hiddenLeadingCount...].contains(where: { $0.id == trackedAnchorID }) else {
+            return items
+        }
+        return Array(items[hiddenLeadingCount...])
+    }
+
+    func beginPrepend(previousFirstID: String?, updatedItems: [ChatItem], viewport: TranscriptViewport) {
+        stageTask?.cancel()
+        stageTask = nil
+        guard let previousFirstID,
+              let anchorIndex = updatedItems.firstIndex(where: { $0.id == previousFirstID }),
+              anchorIndex > 0 else {
+            reset(viewport: viewport)
+            return
+        }
+        let initialStart = Self.nextBatchStart(before: anchorIndex, totalPrepended: anchorIndex, in: updatedItems)
+        guard initialStart > 0 else {
+            reset(viewport: viewport)
+            return
+        }
+        trackedAnchorID = previousFirstID
+        trackedExpectedFirstID = updatedItems.first?.id
+        trackedItems = updatedItems
+        hiddenLeadingCount = initialStart
+        viewport.setStagingPrepend(true)
+        stageTask = Task { @MainActor [weak self, weak viewport] in
+            // Yield until the current run-loop turn's layout/commit finishes plus one display interval,
+            // so batches never coalesce into one stall and never stall on inactive windows.
+            guard await Self.waitForNextCommit(), !Task.isCancelled else { return }
+            while !Task.isCancelled, let self, self.hiddenLeadingCount > 0 {
+                viewport?.prepareForStagedBatch()
+                let nextStart = Self.nextBatchStart(before: self.hiddenLeadingCount, totalPrepended: anchorIndex, in: self.trackedItems)
+                self.hiddenLeadingCount = nextStart
+                if nextStart == 0 { break }
+                guard await Self.waitForNextCommit() else { return }
+            }
+            guard !Task.isCancelled, let self else { return }
+            self.trackedAnchorID = nil
+            self.trackedExpectedFirstID = nil
+            self.trackedItems = []
+            self.stageTask = nil
+            viewport?.setStagingPrepend(false)
+        }
+    }
+
+    func cancel(viewport: TranscriptViewport? = nil) {
+        stageTask?.cancel()
+        stageTask = nil
+        reset(viewport: viewport)
+    }
+
+    private func reset(viewport: TranscriptViewport?) {
+        hiddenLeadingCount = 0
+        trackedAnchorID = nil
+        trackedExpectedFirstID = nil
+        trackedItems = []
+        viewport?.setStagingPrepend(false)
+    }
+
+    private static func estimatedRenderCost(of item: ChatItem) -> Int {
+        guard item.kind == .assistant || item.kind == .toolNarration else { return 1 }
+        let text = item.text
+        var cost = 1 + min(3, text.count / 500)
+        if text.contains("```") { cost += 5 }
+        if text.contains("\n|") || text.hasPrefix("|") { cost += 6 }
+        if text.contains("\n- ") || text.contains("\n1. ") { cost += 3 }
+        return cost
+    }
+
+    private static func nextBatchStart(before endIndex: Int, totalPrepended: Int, in items: [ChatItem]) -> Int {
+        guard endIndex > 6 else { return 0 }
+        // Plain prose pages settle in 2–3 fast frames; heavy Markdown (code/tables) splits into ~5–6 frames
+        // so neither freezes the main thread nor triggers O(K²) relayouts.
+        let minItems = max(3, min(8, (totalPrepended + 5) / 6))
+        let budget = 30
+        var index = endIndex
+        var spent = 0
+        var count = 0
+        while index > 0 && count < 16 {
+            let cost = estimatedRenderCost(of: items[index - 1])
+            if count >= minItems && spent + cost > budget { break }
+            index -= 1
+            spent += cost
+            count += 1
+        }
+        return index <= 3 ? 0 : index
+    }
+
+    private static func waitForNextCommit() async -> Bool {
+        // First hop onto the next main-queue turn (after SwiftUI/AppKit finishes laying out and
+        // committing the current batch), then pause one frame interval so presentation & events run.
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            DispatchQueue.main.async {
+                continuation.resume()
+            }
+        }
+        guard !Task.isCancelled else { return false }
+        do { try await Task.sleep(for: .milliseconds(16)) } catch { return false }
+        return !Task.isCancelled
+    }
+}
+
 @MainActor
 private final class TranscriptViewport {
+    private enum AnchorMode {
+        case preservePosition
+        case revealReply
+    }
+
     weak var scroll: NSScrollView?
     var readerMoved = true
     var followsLatestContent = false
+    var isLiveScrolling = false
 
     var replyID: String?
 
-    private var readingAnchor: (id: NSUserInterfaceItemIdentifier, offset: CGFloat)?
+    private struct WeakAnchor {
+        let id: NSUserInterfaceItemIdentifier
+        let offset: CGFloat
+        weak var view: NSView?
+    }
+
+    private var anchorMode: AnchorMode = .preservePosition
+    private var readingAnchors: [WeakAnchor] = []
     private var anchorTask: Task<Void, Never>?
     private var animatingReply = false
     private var initialized = false
     private var isAligning = false
+    private var isRestoringPosition = false
+    private var isStagingPrepend = false
+    private var hasUserScrolledDuringPreserve = false
+    private var preUpdateDocumentHeight: CGFloat?
+
+    var shouldSyncPreserveOnBoundsChange: Bool {
+        !animatingReply && anchorMode == .preservePosition && !readingAnchors.isEmpty
+    }
+
+    func setStagingPrepend(_ active: Bool) {
+        isStagingPrepend = active
+    }
 
     func prepareInitialAlignmentIfNeeded(replyID: String?) {
         guard !initialized else { return }
@@ -764,28 +941,98 @@ private final class TranscriptViewport {
         self.replyID = replyID
     }
 
+    private func captureVisibleAnchors(in scroll: NSScrollView, document: NSView) -> [WeakAnchor] {
+        func collect(_ view: NSView, prefixes: [String]) -> [NSView] {
+            if let raw = view.identifier?.rawValue, prefixes.contains(where: { raw.hasPrefix($0) }) {
+                return [view]
+            }
+            return view.subviews.flatMap { collect($0, prefixes: prefixes) }
+        }
+        var markers = collect(document, prefixes: ["transcript-reply-", "transcript-item-"])
+        if markers.isEmpty {
+            markers = collect(document, prefixes: ["transcript-group-"])
+        }
+        let clipBounds = scroll.contentView.bounds
+        // Clamp against top/bottom rubber-band overscroll so the saved screen offset never absorbs bounce.
+        let baselineY = scroll.contentView.constrainBoundsRect(clipBounds).minY
+        let visibleTop = baselineY + AgentLayout.headerHeight + 12
+        let visibleBottom = baselineY + clipBounds.height
+        let sorted: [(id: NSUserInterfaceItemIdentifier, view: NSView, rect: NSRect)] = markers.compactMap { view in
+            guard let id = view.identifier else { return nil }
+            let rect = scroll.contentView.convert(view.bounds, from: view)
+            guard rect.height > 0.5 else { return nil }
+            return (id, view, rect)
+        }.sorted { lhs, rhs in
+            if abs(lhs.rect.minY - rhs.rect.minY) > 0.5 { return lhs.rect.minY < rhs.rect.minY }
+            return lhs.rect.maxY < rhs.rect.maxY
+        }
+        var candidates = sorted.filter { $0.rect.maxY > visibleTop && $0.rect.minY < visibleBottom }
+        if candidates.isEmpty {
+            candidates = sorted.filter { $0.rect.intersects(clipBounds) }
+        }
+        if candidates.isEmpty, let first = sorted.first {
+            candidates = [first]
+        }
+        return candidates.prefix(4).map { WeakAnchor(id: $0.id, offset: $0.rect.minY - baselineY, view: $0.view) }
+    }
+
     func preserveReadingPosition(_ update: () -> Void) {
         guard let scroll, let document = scroll.documentView else { update(); return }
         followsLatestContent = false
         readerMoved = true
+        isLiveScrolling = false
         cancelReadingAnchor()
-        func markers(_ view: NSView) -> [NSView] {
-            if view.identifier?.rawValue.hasPrefix("transcript-group-") == true { return [view] }
-            return view.subviews.flatMap(markers)
-        }
-        let visible = scroll.contentView.bounds.insetBy(dx: 0, dy: AgentLayout.headerHeight + 12)
-        if let marker = markers(document).first(where: {
-            scroll.contentView.convert($0.bounds, from: $0).intersects(visible)
-        }), let id = marker.identifier {
-            readingAnchor = (id, scroll.contentView.convert(marker.bounds, from: marker).minY - scroll.contentView.bounds.minY)
-        }
+        anchorMode = .preservePosition
+        hasUserScrolledDuringPreserve = false
+        preUpdateDocumentHeight = document.bounds.height
+        readingAnchors = captureVisibleAnchors(in: scroll, document: document)
         update()
         anchorTask = Task { @MainActor [weak self] in
-            for _ in 0..<10 {
-                do { try await Task.sleep(for: .milliseconds(30)) } catch { return }
-                self?.restoreReadingPosition()
+            var lastHeight = self?.scroll?.documentView?.bounds.height ?? 0
+            var lastScrollY = self?.scroll?.contentView.bounds.minY ?? 0
+            var heightChanged = false
+            var settledPasses = 0
+            for _ in 0..<120 {
+                do { try await Task.sleep(for: .milliseconds(25)) } catch { return }
+                guard let self, !Task.isCancelled else { return }
+                if self.readingAnchors.isEmpty { return }
+                if self.isStagingPrepend {
+                    // Staged batches synchronize on frame/bounds/layout callbacks; avoid forcing
+                    // extra synchronous layoutSubtreeIfNeeded() passes mid-staging.
+                    settledPasses = 0
+                    continue
+                }
+                if !self.isLiveScrolling {
+                    self.restoreReadingPosition(layoutIfNeeded: true)
+                }
+                let currentHeight = self.scroll?.documentView?.bounds.height ?? lastHeight
+                let currentScrollY = self.scroll?.contentView.bounds.minY ?? lastScrollY
+                if let pre = self.preUpdateDocumentHeight, abs(currentHeight - pre) > 0.5 {
+                    heightChanged = true
+                }
+                if abs(currentHeight - lastHeight) <= 0.5 && abs(currentScrollY - lastScrollY) <= 0.5 {
+                    settledPasses += 1
+                    if settledPasses >= (heightChanged ? 6 : 12) { break }
+                } else {
+                    settledPasses = 0
+                }
+                lastHeight = currentHeight
+                lastScrollY = currentScrollY
             }
-            self?.readingAnchor = nil
+            if let self, !self.isStagingPrepend {
+                self.readingAnchors = []
+                self.preUpdateDocumentHeight = nil
+            }
+        }
+    }
+
+    /// Re-locks to the reader's current visible item right before inserting the next staged batch,
+    /// so even if the reader started scrolling up during staging, their live viewport stays steady.
+    func prepareForStagedBatch() {
+        guard let scroll, let document = scroll.documentView else { return }
+        if hasUserScrolledDuringPreserve || readingAnchors.isEmpty {
+            anchorMode = .preservePosition
+            readingAnchors = captureVisibleAnchors(in: scroll, document: document)
         }
     }
 
@@ -793,52 +1040,118 @@ private final class TranscriptViewport {
         cancelReadingAnchor()
         followsLatestContent = false
         readerMoved = true
+        isLiveScrolling = false
+        anchorMode = .revealReply
         // The marker is on the text, so subtract the bubble inset as well.
-        readingAnchor = (NSUserInterfaceItemIdentifier("transcript-reply-" + id),
-                         AgentLayout.headerHeight + 12 + AgentLayout.messageVerticalInset)
+        readingAnchors = [WeakAnchor(
+            id: NSUserInterfaceItemIdentifier("transcript-reply-" + id),
+            offset: AgentLayout.headerHeight + 12 + AgentLayout.messageVerticalInset,
+            view: nil
+        )]
         animatingReply = !reduceMotion
         anchorTask = Task { @MainActor [weak self] in
             // Let a newly loaded history page settle before measuring the destination.
             do { try await Task.sleep(for: .milliseconds(30)) } catch { return }
             guard let self, !Task.isCancelled else { return }
             if !reduceMotion {
-                await self.animateScroll { self.readingOrigin()?.y }
+                await self.animateScroll { self.readingOrigin(layoutIfNeeded: true)?.y }
             }
             guard !Task.isCancelled else { return }
             self.animatingReply = false
-            self.restoreReadingPosition()
+            self.restoreReadingPosition(layoutIfNeeded: true)
             for _ in 0..<30 {
                 do { try await Task.sleep(for: .milliseconds(30)) } catch { return }
-                self.restoreReadingPosition()
+                self.restoreReadingPosition(layoutIfNeeded: true)
             }
-            self.readingAnchor = nil
+            self.readingAnchors = []
         }
     }
 
     func cancelReadingAnchor() {
         anchorTask?.cancel()
-        readingAnchor = nil
+        anchorTask = nil
+        readingAnchors = []
         animatingReply = false
+        hasUserScrolledDuringPreserve = false
+        preUpdateDocumentHeight = nil
     }
 
-    func restoreReadingPosition() {
-        guard !animatingReply, let scroll, let origin = readingOrigin() else { return }
+    /// Cancels reveal animations immediately; during passive touch (.tracking) preserves a pending
+    /// history-load anchor so resting fingers on a trackpad cannot drop the reading offset.
+    func handleScrollPhaseChange(isTrackingOnly: Bool) {
+        if anchorMode == .revealReply {
+            cancelReadingAnchor()
+            return
+        }
+        if isTrackingOnly {
+            return
+        }
+        hasUserScrolledDuringPreserve = true
+        if !isStagingPrepend {
+            cancelReadingAnchor()
+        } else {
+            readingAnchors = []
+        }
+    }
+
+    func handleUserLiveScrollBegan() {
+        isLiveScrolling = true
+        if anchorMode == .revealReply {
+            cancelReadingAnchor()
+            return
+        }
+        hasUserScrolledDuringPreserve = true
+        if !isStagingPrepend {
+            cancelReadingAnchor()
+        } else {
+            readingAnchors = []
+        }
+    }
+
+    func handleUserLiveScrollEnded() {
+        isLiveScrolling = false
+    }
+
+    func restoreReadingPosition(layoutIfNeeded: Bool = true) {
+        guard !animatingReply, !isRestoringPosition, !readingAnchors.isEmpty, let scroll else { return }
+        isRestoringPosition = true
+        defer { isRestoringPosition = false }
+        guard let origin = readingOrigin(layoutIfNeeded: layoutIfNeeded) else { return }
         if abs(scroll.contentView.bounds.minY - origin.y) > 0.5 {
             scroll.contentView.scroll(to: origin)
             scroll.reflectScrolledClipView(scroll.contentView)
         }
     }
 
-    private func readingOrigin() -> NSPoint? {
-        guard let readingAnchor, let scroll, let document = scroll.documentView else { return nil }
-        document.layoutSubtreeIfNeeded()
-        func find(_ view: NSView) -> NSView? {
-            if view.identifier == readingAnchor.id { return view }
-            return view.subviews.compactMap(find).first
+    private func readingOrigin(layoutIfNeeded: Bool) -> NSPoint? {
+        guard !readingAnchors.isEmpty, let scroll, let document = scroll.documentView else { return nil }
+        if layoutIfNeeded { document.layoutSubtreeIfNeeded() }
+        // Fast path: reuse the still-mounted weak reference to the anchor marker view in O(1).
+        for anchor in readingAnchors {
+            if let marker = anchor.view, marker.identifier == anchor.id, marker.isDescendant(of: document) {
+                var bounds = scroll.contentView.bounds
+                bounds.origin.y = scroll.contentView.convert(marker.bounds, from: marker).minY - anchor.offset
+                return scroll.contentView.constrainBoundsRect(bounds).origin
+            }
         }
-        guard let marker = find(document) else { return nil }
+        let targetIDs = Set(readingAnchors.map(\.id))
+        var found: [NSUserInterfaceItemIdentifier: NSView] = [:]
+        func collect(_ view: NSView) {
+            if let id = view.identifier, targetIDs.contains(id) {
+                found[id] = view
+                if found.count == targetIDs.count { return }
+            }
+            for child in view.subviews {
+                collect(child)
+                if found.count == targetIDs.count { return }
+            }
+        }
+        collect(document)
+        guard let index = readingAnchors.firstIndex(where: { found[$0.id] != nil }),
+              let marker = found[readingAnchors[index].id] else { return nil }
+        readingAnchors[index].view = marker
         var bounds = scroll.contentView.bounds
-        bounds.origin.y = scroll.contentView.convert(marker.bounds, from: marker).minY - readingAnchor.offset
+        bounds.origin.y = scroll.contentView.convert(marker.bounds, from: marker).minY - readingAnchors[index].offset
         return scroll.contentView.constrainBoundsRect(bounds).origin
     }
 
@@ -890,6 +1203,7 @@ private final class TranscriptViewport {
     func returnToBottom(reduceMotion: Bool) -> Task<Void, Never> {
         cancelReadingAnchor()
         readerMoved = true
+        isLiveScrolling = false
         followsLatestContent = false
         return Task { @MainActor in
             guard !Task.isCancelled, let scroll else { return }
@@ -989,9 +1303,25 @@ private struct TranscriptGroupWindow<Content: View>: View {
 
 private struct TranscriptGroupPosition: NSViewRepresentable {
     let id: String
-    func makeNSView(context: Context) -> NSView { NSView() }
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        view.identifier = NSUserInterfaceItemIdentifier("transcript-group-" + id)
+        return view
+    }
     func updateNSView(_ view: NSView, context: Context) {
         view.identifier = NSUserInterfaceItemIdentifier("transcript-group-" + id)
+    }
+}
+
+private struct TranscriptItemPosition: NSViewRepresentable {
+    let id: String
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        view.identifier = NSUserInterfaceItemIdentifier("transcript-item-" + id)
+        return view
+    }
+    func updateNSView(_ view: NSView, context: Context) {
+        view.identifier = NSUserInterfaceItemIdentifier("transcript-item-" + id)
     }
 }
 
@@ -1106,7 +1436,7 @@ private struct ModernTranscriptScroll<Content: View>: View {
         .defaultScrollAnchor(.top, for: .sizeChanges)
         .onScrollPhaseChange { _, phase in
             if phase == .interacting || phase == .tracking {
-                viewport.cancelReadingAnchor()
+                viewport.handleScrollPhaseChange(isTrackingOnly: phase == .tracking)
                 viewport.followsLatestContent = false
                 bottomTask?.cancel()
                 submissionTask?.cancel()
@@ -1180,6 +1510,7 @@ private struct TranscriptPosition: NSViewRepresentable {
         override func layout() {
             super.layout()
             attachAndSync(layoutIfNeeded: false)
+            viewport?.restoreReadingPosition(layoutIfNeeded: false)
         }
 
         /// Coalesces the per-frame bounds notifications of a scroll into one update per run loop turn.
@@ -1194,14 +1525,23 @@ private struct TranscriptPosition: NSViewRepresentable {
 
         @objc private func boundsChanged(_ notification: Notification) {
             syncAlignmentIfFollowing(layoutIfNeeded: false)
+            if viewport?.shouldSyncPreserveOnBoundsChange == true {
+                viewport?.restoreReadingPosition(layoutIfNeeded: false)
+            }
             scheduleUpdate()
         }
         @objc private func documentFrameChanged(_ notification: Notification) {
             syncAlignmentIfFollowing(layoutIfNeeded: false)
-            viewport?.restoreReadingPosition()
+            viewport?.restoreReadingPosition(layoutIfNeeded: false)
             scheduleUpdate()
         }
-        @objc private func userScrolled(_ notification: Notification) { viewport?.cancelReadingAnchor(); onUserScroll?() }
+        @objc private func userScrolled(_ notification: Notification) {
+            viewport?.handleUserLiveScrollBegan()
+            onUserScroll?()
+        }
+        @objc private func userScrollEnded(_ notification: Notification) {
+            viewport?.handleUserLiveScrollEnded()
+        }
 
         func attachAndSync(layoutIfNeeded: Bool) {
             guard let scroll = enclosingScrollView, let document = scroll.documentView else { return }
@@ -1212,6 +1552,8 @@ private struct TranscriptPosition: NSViewRepresentable {
                 observedScroll = scroll
                 NotificationCenter.default.addObserver(self, selector: #selector(userScrolled(_:)),
                     name: NSScrollView.willStartLiveScrollNotification, object: scroll)
+                NotificationCenter.default.addObserver(self, selector: #selector(userScrollEnded(_:)),
+                    name: NSScrollView.didEndLiveScrollNotification, object: scroll)
                 scroll.contentView.postsBoundsChangedNotifications = true
                 document.postsFrameChangedNotifications = true
                 NotificationCenter.default.addObserver(self, selector: #selector(boundsChanged(_:)),
@@ -1230,7 +1572,7 @@ private struct TranscriptPosition: NSViewRepresentable {
 
         private func updatePosition() {
             attachAndSync(layoutIfNeeded: true)
-            viewport?.restoreReadingPosition()
+            viewport?.restoreReadingPosition(layoutIfNeeded: true)
             onChange?(viewport?.isAtBottom ?? false)
         }
 
@@ -1314,7 +1656,7 @@ private struct LegacyTranscriptScroll<Content: View>: View {
     }
 }
 
-struct ChatResponseGroup: Identifiable {
+struct ChatResponseGroup: Identifiable, Equatable {
     let id: String
     var items: [ChatItem]
     var startedAt: Date?
@@ -1382,7 +1724,13 @@ enum ChatCompletionTime {
     }
 }
 
-private struct ResponseGroupView: View {
+private struct ResponseGroupView: View, Equatable {
+    struct FormSnapshot: Equatable {
+        let id: String
+        let answers: [String: [String]]
+        let active: Bool
+    }
+
     let group: ChatResponseGroup
     let layout: ChatGroupBubbleLayout
     let model: AgentModel
@@ -1390,8 +1738,20 @@ private struct ResponseGroupView: View {
     /// Only the newest turn can morph from the typing bubble. Older replies skip
     /// matched geometry, whose global anchors would otherwise update on every scroll frame.
     var isLatest = true
+    var avatarColor: AgentAvatarColor
+    var canDelete: Bool
+    var formStates: [FormSnapshot]
     @Namespace private var bubbleMotion
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.group == rhs.group
+            && lhs.layout == rhs.layout
+            && lhs.isLatest == rhs.isLatest
+            && lhs.avatarColor == rhs.avatarColor
+            && lhs.canDelete == rhs.canDelete
+            && lhs.formStates == rhs.formStates
+    }
 
     var body: some View {
         let content = group.content
@@ -1422,6 +1782,11 @@ private struct ResponseGroupView: View {
             if item.needsPermissionSettings {
                 Button(NSLocalizedString("管理权限…", comment: "")) { model.openSettings(permissions: true) }
                     .buttonStyle(.link)
+            }
+        }
+        .background {
+            if item.kind != .user && item.kind != .assistant {
+                TranscriptItemPosition(id: item.id)
             }
         }
     }
@@ -1641,7 +2006,11 @@ private struct AssistantSideActionBar: View {
                         )
                     )
                 }
-                .background(ChatBubbleAnchorReader(box: emojiAnchor).allowsHitTesting(false))
+                .background {
+                    if isVisible {
+                        ChatBubbleAnchorReader(box: emojiAnchor).allowsHitTesting(false)
+                    }
+                }
                 .focused($actionFocused)
                 .accessibilityIdentifier("assistant-emoji-trigger-" + messageID)
 
@@ -1660,7 +2029,11 @@ private struct AssistantSideActionBar: View {
                         )
                     )
                 }
-                .background(ChatBubbleAnchorReader(box: moreAnchor).allowsHitTesting(false))
+                .background {
+                    if isVisible {
+                        ChatBubbleAnchorReader(box: moreAnchor).allowsHitTesting(false)
+                    }
+                }
                 .focused($actionFocused)
                 .accessibilityIdentifier("assistant-more-trigger-" + messageID)
             }
@@ -1669,7 +2042,12 @@ private struct AssistantSideActionBar: View {
             .opacity(isVisible ? 1 : 0)
             .allowsHitTesting(isVisible)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.14), value: isVisible)
-            .position(x: Self.width / 2, y: bubbleSideActionCenterY(in: proxy, barHeight: Self.height, visibleInsets: visibleInsets))
+            .position(
+                x: Self.width / 2,
+                y: isVisible
+                    ? bubbleSideActionCenterY(in: proxy, barHeight: Self.height, visibleInsets: visibleInsets)
+                    : proxy.size.height / 2
+            )
         }
         .frame(width: Self.width)
     }
@@ -1717,7 +2095,11 @@ private struct UserSideActionBar: View {
                         )
                     )
                 }
-                .background(ChatBubbleAnchorReader(box: moreAnchor).allowsHitTesting(false))
+                .background {
+                    if isVisible {
+                        ChatBubbleAnchorReader(box: moreAnchor).allowsHitTesting(false)
+                    }
+                }
                 .focused($actionFocused)
                 .accessibilityIdentifier("user-more-trigger-" + messageID)
 
@@ -1729,7 +2111,12 @@ private struct UserSideActionBar: View {
             .opacity(isVisible ? 1 : 0)
             .allowsHitTesting(isVisible)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.14), value: isVisible)
-            .position(x: Self.width / 2, y: bubbleSideActionCenterY(in: proxy, barHeight: Self.height, visibleInsets: visibleInsets))
+            .position(
+                x: Self.width / 2,
+                y: isVisible
+                    ? bubbleSideActionCenterY(in: proxy, barHeight: Self.height, visibleInsets: visibleInsets)
+                    : proxy.size.height / 2
+            )
         }
         .frame(width: Self.width)
     }
@@ -1832,11 +2219,12 @@ private struct ChatBubble: View {
         case .assistant:
             let contextActions = item.id == "streaming" ? nil : assistantContextActions
             let bubbleShape = grouping.shape(for: .leading)
+            let hasForm = item.text.contains("```asky-form")
             HStack(alignment: .center, spacing: 8) {
                 ChatReplyView(text: item.text, isStreaming: item.id == "streaming",
-                    values: Binding(get: { model.formAnswers(item.id) },
-                                    set: { model.setFormAnswers($0, for: item.id) }),
-                    active: model.formIsActive(item.id), submit: { model.submitForm(item.id) })
+                    values: hasForm ? Binding(get: { model.formAnswers(item.id) },
+                                              set: { model.setFormAnswers($0, for: item.id) }) : .constant([:]),
+                    active: hasForm && model.formIsActive(item.id), submit: { model.submitForm(item.id) })
                     .environment(\.chatSelectionColor, model.avatarColor.tint)
                     .environment(\.chatQuoteAction, { model.addQuote($0, sourceMessageID: item.id) })
                     .environment(\.chatBubbleContextActions, contextActions)

@@ -245,6 +245,9 @@ enum ChatFormParser {
     /// Fields are published only after their newline arrives; unfinished JSON never reaches Markdown.
     /// At most one form per reply. Other fenced code (including examples) stays ordinary Markdown.
     static func parse(_ text: String, streaming: Bool) -> [ChatReplyPart] {
+        if !streaming, !text.contains("```asky-form") {
+            return text.isEmpty ? [] : [.init(id: 0, content: .markdown(text))]
+        }
         var parts: [ChatReplyPart] = []
         var markdown = ""
         var block: [String]? = nil

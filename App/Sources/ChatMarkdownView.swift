@@ -14,8 +14,18 @@ struct ChatMarkdownView: View, Equatable {
 
     private static let bodyStyle = TextStyle(size: 14, weight: 400, mode: .default)
 
+    private var galleryParts: [ChatGalleryPart] {
+        let mathMarkdown = (text.contains("$") || text.contains("\\(") || text.contains("\\["))
+            ? ChatMath.markdown(text) : text
+        if mathMarkdown.contains("![") || mathMarkdown.contains("<!-- end list -->") {
+            return ChatImageGalleryContent.parts(MarkdownContent(mathMarkdown).renderMarkdown())
+        }
+        let trimmed = mathMarkdown.trimmingCharacters(in: .newlines)
+        return trimmed.isEmpty ? [] : [.markdown(trimmed)]
+    }
+
     var body: some View {
-        let parts = ChatImageGalleryContent.parts(MarkdownContent(ChatMath.markdown(text)).renderMarkdown())
+        let parts = galleryParts
         VStack(alignment: .leading, spacing: 14) {
             ForEach(Array(parts.enumerated()), id: \.offset) { _, part in
                 switch part {
@@ -42,11 +52,12 @@ struct ChatMarkdownView: View, Equatable {
             .markdownBlockStyle(\.heading5, body: Self.heading)
             .markdownBlockStyle(\.heading6, body: Self.heading)
             .markdownBlockStyle(\.paragraph) { configuration in
+                let rendered = configuration.content.renderMarkdown()
                 Group {
-                    if ChatInlineText.isImageOnly(configuration.content.renderMarkdown()) {
+                    if rendered.contains("!["), ChatInlineText.isImageOnly(rendered) {
                         configuration.label
                     } else {
-                        ChatInlineText(markdown: configuration.content.renderMarkdown())
+                        ChatInlineText(markdown: rendered)
                     }
                 }
                     .fixedSize(horizontal: false, vertical: true)
@@ -836,8 +847,7 @@ private struct ChatInlineNativeText: NSViewRepresentable {
         private(set) var naturalWidth: CGFloat = 2
         private(set) var monospacedWidth: CGFloat = 200
         var lastRenderKey: RenderKey?
-        private var cachedWidth: CGFloat?
-        private var cachedHeight: CGFloat = 0
+        private var cachedMeasurements: [(width: CGFloat, height: CGFloat, firstBaseline: CGFloat)] = []
         private var cachedFirstBaseline: CGFloat = ceil(NSFont.systemFont(ofSize: 14).ascender)
         private var cachedBullet: ChatListBullet?
         private var cachedBulletColor: NSColor?
@@ -860,13 +870,15 @@ private struct ChatInlineNativeText: NSViewRepresentable {
             return attachment
         }
 
-        func update(_ content: NSAttributedString, monospaced: Bool) {
+        func update(_ content: NSAttributedString, monospaced: Bool, needsNaturalWidth: Bool) {
             guard !storage.isEqual(to: content) else { return }
             storage.setAttributedString(content)
-            cachedWidth = nil
-            container.containerSize = NSSize(width: 100_000, height: CGFloat.greatestFiniteMagnitude)
-            manager.ensureLayout(for: container)
-            naturalWidth = ceil(manager.usedRect(for: container).width) + 2
+            cachedMeasurements.removeAll(keepingCapacity: true)
+            if needsNaturalWidth {
+                container.containerSize = NSSize(width: 100_000, height: CGFloat.greatestFiniteMagnitude)
+                manager.ensureLayout(for: container)
+                naturalWidth = ceil(manager.usedRect(for: container).width) + 2
+            }
             if monospaced {
                 let font = NSFont.monospacedSystemFont(ofSize: 14, weight: .regular)
                 monospacedWidth = max(200, (content.string.components(separatedBy: "\n").map {
@@ -876,7 +888,10 @@ private struct ChatInlineNativeText: NSViewRepresentable {
         }
 
         func height(for width: CGFloat) -> CGFloat {
-            if let cachedWidth, abs(cachedWidth - width) < 0.01 { return cachedHeight }
+            if let hit = cachedMeasurements.first(where: { abs($0.width - width) < 0.01 }) {
+                cachedFirstBaseline = hit.firstBaseline
+                return hit.height
+            }
             container.containerSize = NSSize(width: width, height: .greatestFiniteMagnitude)
             manager.ensureLayout(for: container)
             let usedHeight = manager.usedRect(for: container).height
@@ -902,8 +917,8 @@ private struct ChatInlineNativeText: NSViewRepresentable {
                     }
                 }
             }
-            cachedWidth = width
-            cachedHeight = h
+            if cachedMeasurements.count >= 8 { cachedMeasurements.removeFirst() }
+            cachedMeasurements.append((width: width, height: h, firstBaseline: baseline))
             cachedFirstBaseline = baseline
             return h
         }
@@ -1048,7 +1063,7 @@ private struct ChatInlineNativeText: NSViewRepresentable {
         if let sourceView = view as? ChatSourceTextView {
             sourceView.hasSourceBadges = hasSources
         }
-        context.coordinator.update(result, monospaced: monospaced)
+        context.coordinator.update(result, monospaced: monospaced, needsNaturalWidth: shrinkToFit && !monospaced)
         if view.textStorage?.isEqual(to: result) != true { view.textStorage?.setAttributedString(result) }
     }
 

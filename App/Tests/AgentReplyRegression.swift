@@ -2532,7 +2532,116 @@ enum AgentReplyRegression {
         try await Task.sleep(for: .milliseconds(800))
         precondition(model.items.map(\.id) == latestIDs && !model.hasNewer)
         precondition(abs(scroll.documentView!.bounds.maxY - scroll.documentVisibleRect.maxY) <= 1)
-        print("Scroll stability passed: repeated scrolling, visible text, native older/newer buttons, reading anchor and latest jump")
+        try await splitMultiBubbleLoadOlderRegression(app: app)
+        print("Scroll stability passed: repeated scrolling, visible text, native older/newer buttons, reading anchor, split multi-bubble prepend and latest jump")
+    }
+
+    /// Regression for top load-older across a split multi-bubble turn (shared responseID),
+    /// verifying zero in-flight and final scroll drift plus bounded frame stalls under rich Markdown.
+    private static func splitMultiBubbleLoadOlderRegression(app: AppModel) async throws {
+        let store = ConversationStore(app.store)
+        let cid = try store.create(title: "Split multi-bubble loadOlder")
+        var turn = 0
+        var count = 0
+        while count < 162 {
+            turn += 1
+            try store.append(conversationID: cid, role: "user", text: "第 \(turn) 轮问题：请分析方案 \(turn)。")
+            count += 1
+            let responseID = "split-resp-\(turn)"
+            for part in 1...3 where count < 162 {
+                let md = """
+                第 \(turn) 轮分条回复（第 \(part) 条）：
+
+                - **锚点稳定**：顶部加载更早消息时保持阅读位置不跳动。
+                - **分批渲染**：避免单帧同步挂载整页富文本造成长卡顿。
+
+                ```swift
+                func step_\(turn)_\(part)() -> Int { return \(turn) + \(part) }
+                ```
+
+                | 项目 | 目标 |
+                | --- | --- |
+                | 位置漂移 | 0 pt |
+                """
+                try store.append(conversationID: cid, role: "assistant", text: md,
+                    presentation: MessagePresentation(responseID: responseID))
+                count += 1
+            }
+        }
+
+        let model = AgentModel(app: app)
+        model.open(cid)
+        let controller = AgentWindowController(model: model, presentation: WindowPresentation())
+        controller.show()
+        let window = NSApplication.shared.windows.last { $0.title == "Asky AI" && $0.isVisible }!
+        defer { window.orderOut(nil) }
+
+        func findScroll(_ view: NSView) -> NSScrollView? {
+            if let scroll = view as? NSScrollView, scroll.contentSize.height > 200 { return scroll }
+            return view.subviews.compactMap(findScroll).first
+        }
+        func texts(_ view: NSView) -> [NSTextView] {
+            (view as? NSTextView).map { [$0] } ?? view.subviews.flatMap(texts)
+        }
+        func click(_ point: NSPoint) {
+            for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                window.sendEvent(NSEvent.mouseEvent(with: type, location: point, modifierFlags: [],
+                    timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                    context: nil, eventNumber: 1, clickCount: 1, pressure: type == .leftMouseDown ? 1 : 0)!)
+            }
+        }
+
+        try await Task.sleep(for: .milliseconds(900))
+        let scroll = findScroll(window.contentView!)!
+        precondition(model.items.first?.responseID != nil, "First item must begin inside a split multi-bubble response")
+
+        NotificationCenter.default.post(name: NSScrollView.willStartLiveScrollNotification, object: scroll)
+        scroll.contentView.scroll(to: .zero)
+        scroll.reflectScrolledClipView(scroll.contentView)
+        NotificationCenter.default.post(name: NSScrollView.didEndLiveScrollNotification, object: scroll)
+        try await Task.sleep(for: .milliseconds(300))
+
+        let firstItem = model.items.first!
+        let firstPrefix = firstItem.text.components(separatedBy: "\n\n")[0]
+        let anchorText = texts(scroll).first { $0.string.hasPrefix(firstPrefix) }!
+        let beforeOffset = scroll.contentView.convert(anchorText.bounds, from: anchorText).minY - scroll.contentView.bounds.minY
+
+        var maxInFlightDrift: CGFloat = 0
+        var maxFrameGapMs: Double = 0
+        var lastTick = ProcessInfo.processInfo.systemUptime
+        final class TickObserver: NSObject {
+            var onTick: (() -> Void)?
+            @objc func step(_ link: CADisplayLink) { onTick?() }
+        }
+        let observer = TickObserver()
+        observer.onTick = {
+            let now = ProcessInfo.processInfo.systemUptime
+            maxFrameGapMs = max(maxFrameGapMs, (now - lastTick) * 1000.0)
+            lastTick = now
+            if let current = texts(scroll).first(where: { $0.string.hasPrefix(firstPrefix) }) {
+                let offset = scroll.contentView.convert(current.bounds, from: current).minY - scroll.contentView.bounds.minY
+                maxInFlightDrift = max(maxInFlightDrift, abs(offset - beforeOffset))
+            }
+        }
+        let link = window.displayLink(target: observer, selector: #selector(TickObserver.step(_:)))
+        link.add(to: .main, forMode: .common)
+
+        click(scroll.convert(NSPoint(x: scroll.bounds.midX,
+            y: scroll.isFlipped ? scroll.bounds.minY + 82 : scroll.bounds.maxY - 82), to: nil))
+        try await Task.sleep(for: .milliseconds(1600))
+        link.invalidate()
+
+        precondition(model.items.first?.id != firstItem.id && model.items.count == 80,
+                     "Older page must load into a split multi-bubble conversation")
+        let afterText = texts(scroll).first { $0.string.hasPrefix(firstPrefix) }!
+        let afterOffset = scroll.contentView.convert(afterText.bounds, from: afterText).minY - scroll.contentView.bounds.minY
+        print("Split multi-bubble loadOlder: before=\(beforeOffset) after=\(afterOffset) maxInFlightDrift=\(maxInFlightDrift) maxFrameGap=\(String(format: "%.1f", maxFrameGapMs))ms")
+        precondition(abs(afterOffset - beforeOffset) <= 1.0,
+                     "Split multi-bubble prepend must retain the visible bubble offset: \(beforeOffset) -> \(afterOffset)")
+        precondition(maxInFlightDrift <= 1.0,
+                     "Prepending history must not flash or drift mid-staging: maxInFlightDrift=\(maxInFlightDrift)")
+        precondition(maxFrameGapMs < 600.0,
+                     "Prepending rich Markdown must avoid long single-frame freezes: maxFrameGap=\(maxFrameGapMs)ms")
     }
 
     static func scrollPerfRegression(app: AppModel) async throws {
