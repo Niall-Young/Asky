@@ -673,8 +673,8 @@ private final class ChatInlineLayoutManager: NSLayoutManager {
                 // Enclosing selection rects include line spacing and were clipped at the text view edge.
                 // Draw against the font baseline so all four corners remain inside the text bounds.
                 let pill = NSRect(x: horizontalBounds.minX + origin.x,
-                    y: baseline - font.ascender - 2 + origin.y,
-                    width: horizontalBounds.width, height: ceil(font.ascender - font.descender) + 4)
+                    y: baseline - font.ascender - 1 + origin.y,
+                    width: horizontalBounds.width, height: ceil(font.ascender - font.descender) + 2)
                 color.setFill()
                 NSBezierPath(roundedRect: pill, xRadius: 8, yRadius: 8).fill()
             }
@@ -879,7 +879,14 @@ private struct ChatInlineNativeText: NSViewRepresentable {
             if let cachedWidth, abs(cachedWidth - width) < 0.01 { return cachedHeight }
             container.containerSize = NSSize(width: width, height: .greatestFiniteMagnitude)
             manager.ensureLayout(for: container)
-            let h = ceil(manager.usedRect(for: container).height) + 4
+            let usedHeight = manager.usedRect(for: container).height
+            var opticalBottom: CGFloat = 1.5
+            if manager.numberOfGlyphs > 0 {
+                let lastLine = manager.lineFragmentRect(forGlyphAt: manager.numberOfGlyphs - 1, effectiveRange: nil)
+                // Tall inline attachments (e.g. 24 pt source badges) already fill the line vertically.
+                if lastLine.height >= 21.5 { opticalBottom = 0 }
+            }
+            let h = usedHeight > 0 ? max(ceil(usedHeight), round(usedHeight + opticalBottom)) : 0
             var baseline = ceil(NSFont.systemFont(ofSize: 14).ascender)
             if manager.numberOfGlyphs > 0 {
                 let lineRect = manager.lineFragmentRect(forGlyphAt: 0, effectiveRange: nil)

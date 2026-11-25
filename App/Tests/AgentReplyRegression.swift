@@ -4556,7 +4556,7 @@ enum AgentReplyRegression {
         // 1. Unit-verify corner radii and spacing rules across solo, 2-bubble, 3-bubble, typing, reaction, and card cases.
         let r = AgentLayout.bubbleCornerRadius
         let linked = AgentLayout.linkedBubbleCornerRadius
-        precondition(r == 19.5, "Bubble corner radius must match single-line capsule radius (19.5 pt), got \(r)")
+        precondition(r == 21.5, "Bubble corner radius must match single-line capsule radius (21.5 pt), got \(r)")
         let soloLeading = ChatBubbleGrouping.solo.cornerRadii(for: .leading)
         precondition(soloLeading == RectangleCornerRadii(topLeading: r, bottomLeading: r, bottomTrailing: r, topTrailing: r),
                      "Solo leading bubble must use full capsule corner radius")

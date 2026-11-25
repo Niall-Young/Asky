@@ -728,7 +728,13 @@ private struct UserInlineNativeText: NSViewRepresentable {
             if let cachedWidth, abs(cachedWidth - width) < 0.01 { return cachedHeight }
             container.containerSize = NSSize(width: width, height: .greatestFiniteMagnitude)
             manager.ensureLayout(for: container)
-            let h = max(22, ceil(manager.usedRect(for: container).height) + 2)
+            let usedHeight = manager.usedRect(for: container).height
+            var opticalBottom: CGFloat = 1.5
+            if manager.numberOfGlyphs > 0 {
+                let lastLine = manager.lineFragmentRect(forGlyphAt: manager.numberOfGlyphs - 1, effectiveRange: nil)
+                if lastLine.height >= 21.5 { opticalBottom = 0 }
+            }
+            let h = usedHeight > 0 ? max(ceil(usedHeight), round(usedHeight + opticalBottom)) : 0
             cachedWidth = width
             cachedHeight = h
             return h
