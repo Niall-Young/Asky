@@ -78,8 +78,6 @@ public actor AgentHost {
         var pendingTools = 0
         var state: AgentTaskState = .starting
         var hadWrite = false
-        var dispatched = false
-        var pendingSteers: [AgentRequest] = []
     }
     private var tasks: [String: TaskContext] = [:]
     private var sessionFiles: [String: String] = [:]
@@ -134,22 +132,6 @@ public actor AgentHost {
         return stream
     }
 
-    @discardableResult
-    public func steer(taskID: String, _ request: AgentRequest) -> Bool {
-        guard var ctx = tasks[taskID] else { return false }
-        if ctx.dispatched, let p = process {
-            do {
-                try p.write(HostMessage.steer(taskID: taskID, request).encoded())
-                return true
-            } catch {
-                return false
-            }
-        }
-        ctx.pendingSteers.append(request)
-        tasks[taskID] = ctx
-        return true
-    }
-
     public func cancel(taskID: String) async {
         guard tasks[taskID] != nil else { return }
         try? process?.write(HostMessage.cancel(taskID: taskID).encoded())
@@ -177,15 +159,6 @@ public actor AgentHost {
             state = .busy
             try p.write(resources.encoded())
             try p.write(HostMessage.prompt(request, sessionFile: sessionFiles[request.sessionID]).encoded())
-            if var ctx = tasks[request.taskID] {
-                ctx.dispatched = true
-                let queued = ctx.pendingSteers
-                ctx.pendingSteers.removeAll()
-                tasks[request.taskID] = ctx
-                for steered in queued {
-                    try p.write(HostMessage.steer(taskID: request.taskID, steered).encoded())
-                }
-            }
         } catch {
             emit(request.taskID, .error(taskID: request.taskID, String(format: CoreLocalization.text("无法启动 AI 运行时：%@"), error.localizedDescription)))
             finish(request.taskID, .failed)
@@ -286,8 +259,6 @@ public actor AgentHost {
             // so a pending clarification never keeps the helper process alive.
             emit(id, .clarification(taskID: id, question: q))
             finish(id, .awaitingInput)
-        case .steerAccepted(let id, let steerIDs):
-            emit(id, .steerAccepted(taskID: id, steerIDs: steerIDs))
         case .error(let id, let m):
             if let id { emit(id, .error(taskID: id, m)) } else { emitAll(.error(taskID: nil, m)) }
         case .toolCall(let id, let callID, let tool, let args, let intent):

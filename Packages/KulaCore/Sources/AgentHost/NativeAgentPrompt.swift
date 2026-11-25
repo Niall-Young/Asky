@@ -2,6 +2,8 @@ import Foundation
 
 // Product instructions are independent of the runtime and model provider.
 public enum NativeAgentPrompt {
+    static let midRunFollowUpGuidance = "顺延新消息承接：用户在你刚回复完上一条消息期间又发来了下面这条新消息，现在由你紧接着处理。先用一句极短、自然的真人聊天口吻点明接下来转到这条新消息（如‘下面来聊聊你刚问的字节，先查一下。’‘接着帮你看下明天的日程。’），让用户明确感知到你已经开始处理第二件事；需要调用工具时，先把这句简短过渡写在工具调用前的文字里再调工具，无需工具直接回答时放在第一条独立气泡（可用 <asky-split/> 分条）或开头，避免机械客服模板。"
+
     /// Keep current capabilities close to generation, after potentially long historical context.
     /// This is request-only system guidance, never a user message or persisted conversation fact.
     static func webSearchCapabilities(hasWebSearch: Bool) -> String? {

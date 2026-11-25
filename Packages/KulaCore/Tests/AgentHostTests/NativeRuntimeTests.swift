@@ -493,7 +493,7 @@ private func host(root: URL, script: ModelScript, tools: [ToolDefinition] = [],
         #expect(requests.count == 2)
         #expect(requests[0]["tools"] == nil)
         #expect(requests[1]["messages"]?.arrayValue?.last?["content"]?.stringValue?.contains("当前请求") == true)
-        #expect(requests[1].canonicalData().count < 30_000)
+        #expect(requests[1].canonicalData().count < NativeAgentPrompt.system(guidance: []).utf8.count + 5_000)
         let saved = try await storage.load(sessionID: "s", legacyPath: nil)
         #expect(saved.first?["content"]?.stringValue?.contains("待核实") == true)
         await agent.shutdown()
@@ -712,6 +712,19 @@ server.serve_forever()
         #expect(!prompt.contains("大麦"))
     }
 
+    @Test func latexFormulaGuidanceActivelyRequiresMathRenderingAcrossLayers() {
+        let protocolPrompt = NativeAgentPrompt.runtimeProtocolPrompt
+        #expect(protocolPrompt.contains("LaTeX 公式："))
+        #expect(protocolPrompt.contains(#"\text{收入} = \text{有效播放} \times \text{eCPM} \times \text{填充率}"#))
+        #expect(protocolPrompt.contains("一律用 LaTeX 写出"))
+        #expect(protocolPrompt.contains("单个数字、金额、比例保持纯文本"))
+        let personaPrompt = NativeAgentPrompt.defaultSystemPrompt
+        #expect(personaPrompt.contains("LaTeX"))
+        #expect(personaPrompt.contains("别口语平铺"))
+        let customAssembled = NativeAgentPrompt.system(basePrompt: "自定义人设。", guidance: [])
+        #expect(customAssembled.contains("LaTeX 公式："))
+    }
+
     @Test func multiBubbleGuidanceEncouragesNaturalParagraphBubblesOutsidePersonaTags() {
         #expect(NativeAgentPrompt.runtimeProtocolPrompt.contains("分条气泡发送"))
         #expect(NativeAgentPrompt.runtimeProtocolPrompt.contains("<asky-split/>"))
@@ -720,80 +733,27 @@ server.serve_forever()
         #expect(!NativeAgentPrompt.defaultSystemPrompt.contains("<asky-split/>"))
     }
 
-    @Test func steerInjectedAfterToolRoundAndResetsWebGuards() async throws {
+    @Test func midRunFollowUpInjectsInitialSystemGuidanceOnlyOnce() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
-        let (toolStarted, signalStarted) = AsyncStream<Void>.makeStream()
-        let (toolResume, signalResume) = AsyncStream<Void>.makeStream()
         let script = ModelScript([
-            NativeCompletion(text: "先查一下百度。", calls: [call("web_read_page", ["imagesOnly": true], id: "img-1")]),
-            NativeCompletion(calls: [call("web_search", ["query": "字节跳动"], id: "search-2")]),
-            NativeCompletion(text: "百度和字节一并回答完毕。")
+            NativeCompletion(text: "下面来看看你刚问的字节，先查一下。", calls: [call("web_search")]),
+            NativeCompletion(text: "字节起来主要是靠移动信息流。")
         ])
-        let definitions = ["web_read_page", "web_search"].map {
-            ToolDefinition(name: $0, summary: $0, source: .web, effect: .read, confirmation: .never, externallyExposable: false)
+        let definition = ToolDefinition(name: "web_search", summary: "search", source: .web, effect: .read, confirmation: .never, externallyExposable: false)
+        let agent = host(root: root, script: script, tools: [definition]) {
+            ExecutionResult(requestID: $0.requestID, status: .completed, output: ["results": []])
         }
-        let agent = host(root: root, script: script, tools: definitions) { request in
-            if request.tool == "web_read_page" {
-                signalStarted.yield(())
-                for await _ in toolResume { break }
-                return ExecutionResult(requestID: request.requestID, status: .completed, output: ["images": []])
-            }
-            return ExecutionResult(requestID: request.requestID, status: .completed, output: ["results": []])
-        }
-        let task = Task { await collect(agent, AgentRequest(sessionID: "s", taskID: "t1", text: "百度为啥不行了")) }
-        for await _ in toolStarted { break }
-        let sent = await agent.steer(taskID: "t1", AgentRequest(sessionID: "s", taskID: "steer-1", text: "也好奇字节是怎么起来的"))
-        #expect(sent)
-        signalResume.yield(())
-        let events = await task.value
+        let followUpContext = ContextSnippet(sourceID: "mid-run-followup", text: "紧接着处理第二条消息")
+        _ = await collect(agent, AgentRequest(sessionID: "s", text: "也好奇字节是怎么起来的", context: [followUpContext]))
         await agent.shutdown()
 
-        #expect(events.contains(.steerAccepted(taskID: "t1", steerIDs: ["steer-1"])))
-        #expect(events.contains { if case .message(_, "百度和字节一并回答完毕。") = $0 { true } else { false } })
-        #expect(events.filter { if case .toolCall = $0 { true } else { false } }.count == 2,
-                "Steer must reset illustrationsFinished so the follow-up topic can still search the web")
         let requests = await script.requests
-        try #require(requests.count == 3)
-        let secondMessages = try #require(requests[1]["messages"]?.arrayValue)
-        let lastSecond = try #require(secondMessages.last)
-        #expect(lastSecond["role"] == "user")
-        #expect(lastSecond["content"]?.stringValue?.contains("也好奇字节是怎么起来的") == true)
-        let saved = try await AgentSessionStorage(root: root).load(sessionID: "s", legacyPath: nil)
-        #expect(saved.contains { $0["role"] == "user" && $0["content"]?.stringValue?.contains("也好奇字节是怎么起来的") == true })
-    }
-
-    @Test func steerDuringFinalResponseIsNotAccepted() async throws {
-        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: root) }
-        let (modelStarted, signalStarted) = AsyncStream<Void>.makeStream()
-        let (modelResume, signalResume) = AsyncStream<Void>.makeStream()
-        let storage = AgentSessionStorage(root: root)
-        let agent = AgentHost(
-            launcher: {
-                NativeRuntime(storage: storage, client: NativeModelClient(transport: { _, delta in
-                    signalStarted.yield(())
-                    for await _ in modelResume { break }
-                    delta("只回复第一个问题。")
-                    return NativeCompletion(text: "只回复第一个问题。")
-                }))
-            },
-            configProvider: { RuntimeLaunchConfig(baseURL: "https://example.test/v1", model: "mock", apiKey: "secret") },
-            toolsProvider: { [] },
-            toolHandler: { .failure($0.requestID, .adapterFailure, "unexpected tool") }
-        )
-        let task = Task { await collect(agent, AgentRequest(sessionID: "s", taskID: "t1", text: "第一个问题")) }
-        for await _ in modelStarted { break }
-        let sent = await agent.steer(taskID: "t1", AgentRequest(sessionID: "s", taskID: "steer-late", text: "第二个问题"))
-        #expect(sent)
-        signalResume.yield(())
-        let events = await task.value
-        await agent.shutdown()
-
-        #expect(!events.contains { if case .steerAccepted = $0 { true } else { false } })
-        #expect(events.contains { if case .message(_, "只回复第一个问题。") = $0 { true } else { false } })
-        let saved = try await AgentSessionStorage(root: root).load(sessionID: "s", legacyPath: nil)
-        #expect(!saved.contains { $0["content"]?.stringValue?.contains("第二个问题") == true })
+        try #require(requests.count == 2)
+        let initialMessages = try #require(requests[0]["messages"]?.arrayValue)
+        let continuationMessages = try #require(requests[1]["messages"]?.arrayValue)
+        #expect(initialMessages.contains { $0["role"] == "system" && $0["content"] == .string(NativeAgentPrompt.midRunFollowUpGuidance) })
+        #expect(!continuationMessages.contains { $0["role"] == "system" && $0["content"] == .string(NativeAgentPrompt.midRunFollowUpGuidance) })
     }
 }
 

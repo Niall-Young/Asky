@@ -16,7 +16,6 @@ public enum HostMessage: Sendable, Equatable {
     case configure(baseURL: String, model: String, apiKey: String, tools: [ToolDefinition], maxToolRounds: Int, pluginGuidance: [String] = [], systemPrompt: String? = nil)
     case resources(tools: [ToolDefinition], pluginGuidance: [String], systemPrompt: String? = nil)
     case prompt(AgentRequest, sessionFile: String?)
-    case steer(taskID: String, AgentRequest)
     case cancel(taskID: String)
     case toolResult(callID: String, ExecutionResult)
     case shutdown
@@ -36,8 +35,6 @@ public enum HostMessage: Sendable, Equatable {
         case .prompt(let r, let sessionFile):
             o = ["type": "prompt", "request": try Self.json(r)]
             if let sessionFile { o["sessionFile"] = .string(sessionFile) }
-        case .steer(let id, let r):
-            o = ["type": "steer", "taskID": .string(id), "request": try Self.json(r)]
         case .cancel(let id):
             o = ["type": "cancel", "taskID": .string(id)]
         case .toolResult(let callID, let result):
@@ -64,7 +61,6 @@ public enum RuntimeMessage: Sendable, Equatable {
     case message(taskID: String, String)
     case toolCall(taskID: String, callID: String, tool: String, arguments: JSONValue, intent: UserIntent)
     case clarification(taskID: String, question: String)
-    case steerAccepted(taskID: String, steerIDs: [String])
     case error(taskID: String?, String)
 
     public static func decode(_ line: Data) throws -> RuntimeMessage {
@@ -90,9 +86,6 @@ public enum RuntimeMessage: Sendable, Equatable {
             return .toolCall(taskID: try s("taskID"), callID: try s("callID"), tool: try s("tool"),
                              arguments: v["arguments"] ?? .object([:]), intent: intent)
         case "clarification": return .clarification(taskID: try s("taskID"), question: try s("question"))
-        case "steerAccepted":
-            let ids = v["steerIDs"]?.arrayValue?.compactMap(\.stringValue) ?? []
-            return .steerAccepted(taskID: try s("taskID"), steerIDs: ids)
         case "error": return .error(taskID: v["taskID"]?.stringValue, v["message"]?.stringValue ?? CoreLocalization.text("未知错误"))
         default: throw FrameError.malformed(CoreLocalization.text("未知消息类型"))
         }

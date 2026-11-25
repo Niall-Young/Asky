@@ -309,19 +309,26 @@ enum AgentReplyRegression {
         let (toolResume, toolResumeSink) = AsyncStream<Void>.makeStream()
         let (modelStarted, modelStartedSink) = AsyncStream<Int>.makeStream()
 
-        let searchCall: JSONValue = [
+        let searchCall1: JSONValue = [
             "id": "call_baidu",
             "type": "function",
             "function": ["name": "web_search", "arguments": "{\"query\":\"百度\"}"]
         ]
+        let searchCall2: JSONValue = [
+            "id": "call_bytedance",
+            "type": "function",
+            "function": ["name": "web_search", "arguments": "{\"query\":\"字节跳动\"}"]
+        ]
         let script = ScriptedTurns([
-            // Scenario 1: tool round accepts mid-run steer
-            .immediate(NativeCompletion(text: "查一下百度现在的实际处境再聊。", calls: [searchCall])),
-            .immediate(NativeCompletion(text: "百度和字节都在这里回答了。")),
-            // Scenario 2: late mid-run send during final reply triggers automatic follow-up
+            // Scenario 1: Turn 1 finishes Baidu first, then Turn 2 hands off naturally to ByteDance
+            .immediate(NativeCompletion(text: "查一下百度现在的实际处境再聊。", calls: [searchCall1])),
+            .immediate(NativeCompletion(text: "百度现在掉队主要是移动转型慢和搜索广告承压。")),
+            .immediate(NativeCompletion(text: "下面来看看你刚问的字节，我先查一下。", calls: [searchCall2])),
+            .immediate(NativeCompletion(text: "字节起来主要是靠移动信息流和推荐算法。")),
+            // Scenario 2: Multiple rapid messages during a non-tool turn batch into one follow-up with handoff context
             .gated(NativeCompletion(text: "这是第一个问题的回答。")),
-            .immediate(NativeCompletion(text: "这是自动续答第二个问题的回答。")),
-            // Scenario 3: explicit stop discards unconsumed follow-up
+            .immediate(NativeCompletion(text: "接着回你刚才补的两句。")),
+            // Scenario 3: Explicit stop discards queued follow-up
             .gated(NativeCompletion(text: "不会被发出的回答。"))
         ])
         await script.setStartedSink(modelStartedSink)
@@ -338,8 +345,10 @@ enum AgentReplyRegression {
             configProvider: { RuntimeLaunchConfig(baseURL: "https://example.test/v1", model: "mock", apiKey: "secret") },
             toolsProvider: { [webTool] },
             toolHandler: { request in
-                toolStartedSink.yield(())
-                for await _ in toolResume { break }
+                if request.arguments["query"]?.stringValue == "百度" {
+                    toolStartedSink.yield(())
+                    for await _ in toolResume { break }
+                }
                 return ExecutionResult(requestID: request.requestID, status: .completed, output: ["results": []])
             }
         )
@@ -376,7 +385,7 @@ enum AgentReplyRegression {
 
         precondition(model.composerPrimaryAction == .send(enabled: false), "Idle empty composer must show disabled Send")
 
-        // 1. Mid-run steer during tool execution + dynamic Stop/Send button switching + Return key submission
+        // 1. Mid-run send during tool execution: Turn 1 finishes Baidu first, then Turn 2 hands off to ByteDance
         editor.insertText("我很好奇百度为啥现在不行了", replacementRange: editor.selectedRange())
         try await Task.sleep(for: .milliseconds(80))
         precondition(model.composerPrimaryAction == .send(enabled: true), "Idle non-empty composer must show enabled Send")
@@ -409,30 +418,49 @@ enum AgentReplyRegression {
         toolResumeSink.yield(())
         try await waitUntil { !model.isRunning }
         try await Task.sleep(for: .milliseconds(120))
-        let replies1 = model.items.filter { $0.kind == .assistant }.map(\.text)
-        precondition(replies1 == ["百度和字节都在这里回答了。"], "Steered turn must finish in one combined reply, got \(replies1)")
-        let reqCount1 = await script.requests.count
-        precondition(reqCount1 == 2, "Steer accepted mid-turn must not trigger a duplicate follow-up turn")
 
-        // 2. Late mid-run send during final reply triggers automatic follow-up without duplicating user bubble
+        let reqCount1 = await script.requests.count
+        precondition(reqCount1 == 4, "Turn 1 must finish Baidu before Turn 2 handles ByteDance (requests=\(reqCount1))")
+        let visibleDialogue1 = model.items.filter { $0.kind == .user || $0.kind == .toolNarration || $0.kind == .assistant }.map(\.text)
+        precondition(visibleDialogue1 == [
+            "我很好奇百度为啥现在不行了",
+            "查一下百度现在的实际处境再聊。",
+            "也好奇字节是怎么起来的",
+            "百度现在掉队主要是移动转型慢和搜索广告承压。",
+            "下面来看看你刚问的字节，我先查一下。",
+            "字节起来主要是靠移动信息流和推荐算法。"
+        ], "Expected finish-first reply followed by natural handoff narration, got \(visibleDialogue1)")
+        let req3Messages = (await script.requests[2])["messages"]?.arrayValue ?? []
+        let req3UserText = req3Messages.last(where: { $0["role"] == "user" })?["content"]?.stringValue ?? ""
+        precondition(req3Messages.last?["role"] == "system" && (req3Messages.last?["content"]?.stringValue?.contains("顺延新消息承接") == true),
+                     "Follow-up turn initial request must append mid-run handoff system guidance")
+        precondition(req3UserText.contains("source=\"mid-run-followup\""),
+                     "Follow-up turn must include mid-run-followup handoff context")
+        precondition(req3UserText.contains("百度现在掉队主要是移动转型慢和搜索广告承压。") && req3UserText.hasSuffix("也好奇字节是怎么起来的"),
+                     "Follow-up turn must include finished first reply in history and current follow-up as prompt")
+
+        // 2. Multiple rapid mid-run messages during a non-tool reply batch into one follow-up without duplicating user bubbles
         var modelIterator = modelStarted.makeAsyncIterator()
-        _ = await modelIterator.next() // request 1
-        _ = await modelIterator.next() // request 2
+        for _ in 0..<4 { _ = await modelIterator.next() }
 
         editor.insertText("第一个独立问题", replacementRange: editor.selectedRange())
         try await Task.sleep(for: .milliseconds(80))
         model.send()
-        let req3 = await modelIterator.next()
-        precondition(req3 == 3)
+        let req5 = await modelIterator.next()
+        precondition(req5 == 5)
 
         editor.insertText("第二个紧接的问题", replacementRange: editor.selectedRange())
         try await Task.sleep(for: .milliseconds(80))
         model.send()
-        precondition(model.isRunning && model.items.last?.text == "第二个紧接的问题")
+        try await Task.sleep(for: .milliseconds(80))
+        editor.insertText("再补一句细节", replacementRange: editor.selectedRange())
+        try await Task.sleep(for: .milliseconds(80))
+        model.send()
+        precondition(model.isRunning && model.items.last?.text == "再补一句细节")
 
         await script.releaseGate()
-        let req4 = await modelIterator.next()
-        precondition(req4 == 4, "Unconsumed mid-run message must automatically trigger a follow-up turn")
+        let req6 = await modelIterator.next()
+        precondition(req6 == 6, "Queued mid-run messages must trigger a follow-up turn after Turn 1 finishes")
         try await waitUntil { !model.isRunning }
         try await Task.sleep(for: .milliseconds(120))
 
@@ -441,19 +469,23 @@ enum AgentReplyRegression {
         let storedUser2Count = ConversationStore(app.store).timeline(limit: 40).filter { $0.role == "user" && $0.text == "第二个紧接的问题" }.count
         precondition(storedUser2Count == 1, "Follow-up turn must not duplicate the stored user message (count=\(storedUser2Count))")
         let allAssistantTexts = model.items.filter { $0.kind == .assistant }.map(\.text)
-        precondition(allAssistantTexts.suffix(2) == ["这是第一个问题的回答。", "这是自动续答第二个问题的回答。"],
-                     "Expected both first answer and auto follow-up answer, got \(allAssistantTexts)")
-        let req4Messages = (await script.requests[3])["messages"]?.arrayValue ?? []
-        let req4UserText = req4Messages.last?["content"]?.stringValue ?? ""
-        precondition(req4UserText.contains("这是第一个问题的回答。") && req4UserText.hasSuffix("第二个紧接的问题"),
-                     "Follow-up turn must include prior reply in history and current prompt as user text")
+        precondition(allAssistantTexts.suffix(2) == ["这是第一个问题的回答。", "接着回你刚才补的两句。"],
+                     "Expected both first answer and batched follow-up answer, got \(allAssistantTexts)")
+        let req6Messages = (await script.requests[5])["messages"]?.arrayValue ?? []
+        let req6UserText = req6Messages.last(where: { $0["role"] == "user" })?["content"]?.stringValue ?? ""
+        precondition(req6Messages.last?["role"] == "system" && (req6Messages.last?["content"]?.stringValue?.contains("顺延新消息承接") == true),
+                     "Batched follow-up turn initial request must append mid-run handoff system guidance")
+        precondition(req6UserText.contains("source=\"mid-run-followup\"") && req6UserText.contains("这 2 条新消息"),
+                     "Batched follow-up turn must carry multi-message handoff context")
+        precondition(req6UserText.contains("这是第一个问题的回答。") && req6UserText.hasSuffix("第二个紧接的问题\n再补一句细节"),
+                     "Batched follow-up turn must combine queued user texts without duplicating them in history")
 
-        // 3. Explicit stop clears unconsumed follow-up
+        // 3. Explicit stop clears queued follow-up
         editor.insertText("会被停止的问题", replacementRange: editor.selectedRange())
         try await Task.sleep(for: .milliseconds(80))
         model.send()
-        let req5 = await modelIterator.next()
-        precondition(req5 == 5)
+        let req7 = await modelIterator.next()
+        precondition(req7 == 7)
         editor.insertText("停止后不该自动续答", replacementRange: editor.selectedRange())
         try await Task.sleep(for: .milliseconds(80))
         model.send()
@@ -462,10 +494,10 @@ enum AgentReplyRegression {
         await script.releaseGate()
         try await Task.sleep(for: .milliseconds(150))
         let reqCountFinal = await script.requests.count
-        precondition(reqCountFinal == 5, "Explicit Stop must cancel unconsumed follow-ups")
+        precondition(reqCountFinal == 7, "Explicit Stop must cancel queued follow-ups")
         precondition(model.items.last?.kind == .notice, "Stopped turn must record cancelled notice")
 
-        print("Mid-run send regression passed: dynamic Stop/Send button, tool-boundary steer, auto follow-up without duplication, and explicit Stop")
+        print("Mid-run send regression passed: dynamic Stop/Send button, finish-first sequential handoff, batched follow-up without duplication, and explicit Stop")
     }
 
     static func inlineTagAlignmentRegression(app: AppModel, capturePath: String?) async throws {

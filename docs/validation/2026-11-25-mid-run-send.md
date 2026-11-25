@@ -1,11 +1,11 @@
-# 生成中发送消息与中途注入验证
+# 生成中发送消息与顺延承接验证
 
 日期：2026 年 11 月 25 日
 
 ## 变更范围
 
-- 协议与运行时（[Agent.swift](../../Packages/KulaCore/Sources/Contracts/Agent.swift)、[WireProtocol.swift](../../Packages/KulaCore/Sources/AgentHost/WireProtocol.swift)、[AgentHost.swift](../../Packages/KulaCore/Sources/AgentHost/AgentHost.swift)、[NativeRuntime.swift](../../Packages/KulaCore/Sources/AgentHost/NativeRuntime.swift)）：新增 `HostMessage.steer`、`RuntimeMessage.steerAccepted` 与 `AgentEvent.steerAccepted`。支持在任务启动前暂存并在派发 `prompt` 后补发 `steer`；`NativeRuntime` 在工具调用批次返回后、下一次模型请求前注入用户新消息，重置 `illustrationsFinished` / `webCoolingDown`，保存快照并发出 `steerAccepted`；若已处于无工具收尾阶段则不吞入该消息。
-- 模型与界面（[AgentModel.swift](../../App/Sources/AgentModel.swift)、[AgentView.swift](../../App/Sources/AgentView.swift)、[AppModel.swift](../../App/Sources/AppModel.swift)）：支持在 `isRunning` 期间直接发送消息并立即落盘与上屏，右下角按钮按 `composerPrimaryAction` 在停止（空输入）与发送（有内容）间动态切换；支持回车发送（空输入回车不触发停止）；未在工具边界消费的消息在本轮正常完成后自动发起续答且不重复落盘或重复显示用户气泡，显式停止清空待续答队列；修复跨用户消息分段的响应分组唯一 ID 与底部单 `•••` 思考气泡展示。
+- 运行时与提示词（[NativeAgentPrompt.swift](../../Packages/KulaCore/Sources/AgentHost/NativeAgentPrompt.swift)、[NativeRuntime.swift](../../Packages/KulaCore/Sources/AgentHost/NativeRuntime.swift)、[AgentHost.swift](../../Packages/KulaCore/Sources/AgentHost/AgentHost.swift)、[WireProtocol.swift](../../Packages/KulaCore/Sources/AgentHost/WireProtocol.swift)、[Agent.swift](../../Packages/KulaCore/Sources/Contracts/Agent.swift)）：移除中途劫持当前轮次的 `steer` 帧，确保第一件事先完整回复；当续答轮次携带 `source="mid-run-followup"` 上下文时，`NativeRuntime` 仅在首轮模型请求末尾按需追加系统过渡提示（不增加常规轮次与压缩请求的字节开销），引导模型先用自然口语过渡承接第二件事。
+- 模型与界面（[AgentModel.swift](../../App/Sources/AgentModel.swift)、[AgentView.swift](../../App/Sources/AgentView.swift)、[AppModel.swift](../../App/Sources/AppModel.swift)）：生成中发送的新消息立即写入当前会话并上屏、清空输入框，当前轮正常答完后自动续答且不重复落盘或重复渲染用户气泡；期间连发多条合并为同一续答轮次；右下角按钮按 `composerPrimaryAction` 在停止（空输入）与发送（有内容）间动态切换；显式停止清空待续答队列。
 
 ## 已执行验证
 
@@ -13,7 +13,7 @@
    ```sh
    (cd Packages/KulaCore && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test)
    ```
-   结果：全部通过（包含新增的 `steerInjectedAfterToolRoundAndResetsWebGuards`、`steerDuringFinalResponseIsNotAccepted`、`steerQueuesBeforeDispatchAndForwardsSteerAccepted`、`encodesSteerAndDecodesSteerAccepted`）。
+   结果：全部通过（含新增的 `midRunFollowUpInjectsInitialSystemGuidanceOnlyOnce` 及全部上下文压缩测试）。
 
 2. 工程生成与 Debug 构建：
    ```sh
@@ -26,10 +26,9 @@
    ```sh
    python3 App/Tests/run-agent-reply-regression.py --mid-run-send
    python3 App/Tests/run-agent-reply-regression.py --bubble-chain
-   python3 App/Tests/run-agent-reply-regression.py --composer-backspace
    ```
-   结果：全部通过，覆盖真实窗口内的停止/发送按钮切换、回车发送、工具中注入合并回答、收尾期自动续答无重复、显式停止取消待续答、气泡链圆角间距及输入框退格撤销。
+   结果：全部通过，验证了真实窗口内先完整答完第一个问题再紧接自然过渡承接第二个问题、多条连续补发合并且无重复、停止/发送动态切换与回车提交、显式停止取消待续答及气泡链布局。
 
 ## 未覆盖范围
 
-- 真实在线模型提供商在复杂多工具链下中途注入的响应质量与长文本滚动手感，仍需实机体验验收。
+- 真实在线模型提供商在各类中英文闲聊与工具场景下的自然过渡语气，仍需实机体验验收。

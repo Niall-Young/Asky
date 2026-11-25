@@ -41,7 +41,6 @@ private actor NativeAgentEngine {
     var systemPrompt: String?
     var maxToolCalls = 50
     var jobs: [String: Task<Void, Never>] = [:]
-    var pendingSteers: [String: [AgentRequest]] = [:]
     var pending: [String: CheckedContinuation<JSONValue, Never>] = [:]
     var exitWaiters: [CheckedContinuation<Int32, Never>] = []
     var stopped = false
@@ -100,10 +99,6 @@ private actor NativeAgentEngine {
                 }
             case "toolResult":
                 if let id = value["callID"]?.stringValue { pending.removeValue(forKey: id)?.resume(returning: value["result"] ?? [:]) }
-            case "steer":
-                guard let taskID = value["taskID"]?.stringValue, jobs[taskID] != nil else { return }
-                let request = try JSONDecoder().decode(AgentRequest.self, from: (value["request"] ?? [:]).canonicalData())
-                pendingSteers[taskID, default: []].append(request)
             case "cancel": if let id = value["taskID"]?.stringValue { cancel(id) }
             case "shutdown": await stop()
             default: throw NativeModelError.malformed("未知宿主事件")
@@ -116,7 +111,6 @@ private actor NativeAgentEngine {
         systemPrompt = value["systemPrompt"]?.stringValue
     }
     func cancel(_ id: String) {
-        pendingSteers.removeValue(forKey: id)
         jobs[id]?.cancel()
         for key in Array(pending.keys) where key.hasPrefix(id + ":") {
             pending.removeValue(forKey: key)?.resume(returning: ["status": "pendingVerification", "error": ["message": "调用已中断，结果待核实，不要重放写入。"]])
@@ -164,10 +158,8 @@ private actor NativeAgentEngine {
 
     func run(_ request: AgentRequest, legacy: String?, config: RuntimeLaunchConfig, catalogue: [ToolDefinition], guidance: [String], systemPrompt: String?, limit: Int) async {
         let id = request.taskID
-        defer { pendingSteers.removeValue(forKey: id) }
         var messages: [JSONValue] = []
         var file: String?
-        var allowedUserTexts = [request.text]
         do {
             messages = try await storage.load(sessionID: request.sessionID, legacyPath: legacy)
             try Task.checkCancellation()
@@ -179,6 +171,7 @@ private actor NativeAgentEngine {
             let system: JSONValue = ["role": "system", "content": .string(NativeAgentPrompt.system(basePrompt: systemPrompt, guidance: guidance, hasWebSearch: hasWebSearch, hasPageReader: hasPageReader))]
             let compactionSystem: JSONValue = ["role": "system", "content": .string(NativeAgentPrompt.system(basePrompt: systemPrompt, guidance: guidance))]
             let available = definitions(catalogue)
+            let isMidRunFollowUp = request.context.contains { $0.sourceID == "mid-run-followup" }
             var phase = ModelRequestPhase.initial
             var count = 0
             var webCoolingDown = false
@@ -186,17 +179,6 @@ private actor NativeAgentEngine {
             var imageCorrection: String?
             while true {
                 try Task.checkCancellation()
-                if imageCorrection == nil, let incoming = pendingSteers.removeValue(forKey: id), !incoming.isEmpty {
-                    for steered in incoming {
-                        messages.append(["role": "user", "content": try await storage.input(steered)])
-                        allowedUserTexts.append(steered.text)
-                    }
-                    file = try await storage.save(sessionID: request.sessionID, messages: messages)
-                    illustrationsFinished = false
-                    webCoolingDown = false
-                    send(["type": "steerAccepted", "taskID": .string(id),
-                          "steerIDs": .array(incoming.map { .string($0.taskID) })])
-                }
                 // Conservative byte budget works across CJK and tool payloads without shipping a tokenizer.
                 // Compact only at a user boundary, keeping whole tool-call/result groups together.
                 if messages.reduce(0, { $0 + $1.canonicalData().count }) > 180_000,
@@ -211,6 +193,9 @@ private actor NativeAgentEngine {
                     state(id, .running, file: file)
                 }
                 var completionMessages = [system] + (try await storage.materialize(NativeWebContext.messages(messages)))
+                if isMidRunFollowUp && phase == .initial {
+                    completionMessages.append(["role": "system", "content": .string(NativeAgentPrompt.midRunFollowUpGuidance)])
+                }
                 if webCoolingDown {
                     completionMessages.append(["role": "system", "content": "本轮所有联网来源正在冷却，网页搜索和读页已暂停；不要换词重试或等待冷却。本轮立即基于已取得的有效资料完成回答，依据联网结果写出的事实仍须在对应段落用 Markdown 链接（如 [来源](url)）附真实来源，无法核实的部分如实说明，不猜图片链接，不把历史回复当作已核实来源。"])
                 }
@@ -230,7 +215,7 @@ private actor NativeAgentEngine {
                 try Task.checkCancellation()
                 if response.calls.isEmpty {
                     let images = Set(NativeReplyImages.images(in: response.text).map(\.url))
-                    let allowed = NativeReplyImages.allowedURLs(messages: messages, userText: allowedUserTexts.joined(separator: "\n"))
+                    let allowed = NativeReplyImages.allowedURLs(messages: messages, userText: request.text)
                     let invented = images.subtracting(allowed)
                     if !invented.isEmpty, imageCorrection == nil,
                        catalogue.contains(where: { $0.name == "web_read_page" }), count < limit {
