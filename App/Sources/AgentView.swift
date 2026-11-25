@@ -26,6 +26,9 @@ final class AgentWindowController {
         // animating from an empty greeting after the window is already visible.
         model.reloadConversations()
         model.resumeTimeline()
+        if window?.isVisible != true {
+            model.clearToast()
+        }
         if window == nil {
             let w = AgentWindow(contentRect: NSRect(x: 0, y: 0, width: WindowMetrics.agentInitialSize.width,
                                                  height: WindowMetrics.agentInitialSize.height),
@@ -44,7 +47,10 @@ final class AgentWindowController {
             w.minSize = NSSize(width: WindowMetrics.agentMinSize.width, height: WindowMetrics.agentMinSize.height)
             w.maxSize = w.minSize
             w.isReleasedWhenClosed = false
-            let host = NSHostingView(rootView: AgentView(model: model, close: { [weak w] in w?.close() },
+            let host = NSHostingView(rootView: AgentView(model: model, close: { [weak w, weak model] in
+                model?.clearToast()
+                w?.close()
+            },
                 setPinned: { [weak w] pinned in w?.level = pinned ? .floating : .normal }))
             host.sizingOptions = []
             host.frame = NSRect(origin: .zero, size: w.contentLayoutRect.size)
@@ -95,6 +101,7 @@ private enum AgentLayout {
     static let radius: CGFloat = LauncherLayout.shellCornerRadius
     static let message = TextStyle(size: 14, weight: 400, mode: .default)
     static let headerHeight: CGFloat = 64
+    static let toastTopInset: CGFloat = 48
     static let messageHorizontalInset: CGFloat = 18
     static let messageVerticalInset: CGFloat = 14
     static let userMessageVerticalInset: CGFloat = 12
@@ -360,6 +367,30 @@ struct AgentView: View {
             onCancel: { model.cancelPendingDeleteMessage() },
             onConfirm: { model.commitPendingDeleteMessage() }
         ))
+        .overlay(alignment: .top) {
+            ZStack(alignment: .top) {
+                if let toast = model.toast {
+                    ClipboardStatusToast(message: toast)
+                        .background(AgentToastFrameProbe().allowsHitTesting(false))
+                        .shadow(color: .black.opacity(colorScheme == .dark ? 0.36 : 0.12), radius: 12, x: 0, y: 4)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityIdentifier("agent-status-toast")
+                        .padding(.top, AgentLayout.toastTopInset)
+                        .padding(.horizontal, 24)
+                        .transition(
+                            reduceMotion
+                                ? .opacity
+                                : .opacity.combined(with: .offset(y: -6)).combined(with: .scale(scale: 0.96, anchor: .top))
+                        )
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .top)
+            .allowsHitTesting(false)
+            .animation(
+                reduceMotion ? .easeOut(duration: 0.12) : .spring(response: 0.24, dampingFraction: 0.86),
+                value: model.toast
+            )
+        }
         .onChange(of: model.pendingDeleteMessage != nil) { _, presented in
             if presented {
                 showingApprovalMenu = false
@@ -1432,6 +1463,19 @@ private struct FallbackClipShape<S: Shape>: ViewModifier {
     }
 }
 
+private struct AgentToastFrameProbe: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = PassiveProbeView()
+        view.setAccessibilityIdentifier("agent-status-toast-surface")
+        return view
+    }
+    func updateNSView(_ view: NSView, context: Context) {}
+
+    private final class PassiveProbeView: NSView {
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    }
+}
+
 @MainActor @Observable
 private final class UserMessageHoverState {
     var bubbleHovered = false
@@ -1915,7 +1959,11 @@ private struct ChatBubble: View {
 
     private var assistantContextActions: ChatBubbleContextActions {
         ChatBubbleContextActions(
-            copy: { _ = MessageClipboard.copy(item.text) },
+            copy: {
+                if MessageClipboard.copy(item.text) {
+                    model.showToast(NSLocalizedString("已复制", comment: ""))
+                }
+            },
             reply: { model.addQuote(item.text, sourceMessageID: item.id, kind: .reply) },
             share: { ChatShareWindowController.shared.show(text: item.text, colorScheme: scheme) }
         )

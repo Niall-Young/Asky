@@ -677,4 +677,160 @@ extension AgentReplyRegression {
         precondition(store.message(targetUser.id, conversationID: cid) == nil, "Deleted message must be removed from store")
         print("Delete confirmation dialog regression passed in light and dark")
     }
+
+    static func copyToastRegression() async throws {
+        let originalPointer = NSEvent.mouseLocation
+        func move(_ point: NSPoint) {
+            let quartz = CGPoint(x: point.x, y: NSScreen.screens[0].frame.maxY - point.y)
+            CGWarpMouseCursorPosition(quartz)
+            CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: quartz, mouseButton: .left)?
+                .post(tap: .cghidEventTap)
+        }
+        func click(_ point: NSPoint, in window: NSWindow) async throws {
+            let screen = window.convertPoint(toScreen: point)
+            move(screen)
+            try await Task.sleep(for: .milliseconds(160))
+            let quartz = CGPoint(x: screen.x, y: NSScreen.screens[0].frame.maxY - screen.y)
+            for type in [CGEventType.leftMouseDown, .leftMouseUp] {
+                CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: quartz, mouseButton: .left)?
+                    .post(tap: .cghidEventTap)
+                try await Task.sleep(for: .milliseconds(80))
+            }
+            try await Task.sleep(for: .milliseconds(260))
+        }
+        defer { move(originalPointer) }
+        func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
+        func findAccessibilityElement(id: String, in root: AnyObject) -> NSAccessibilityProtocol? {
+            var visited = Set<ObjectIdentifier>()
+            func walk(_ node: AnyObject) -> NSAccessibilityProtocol? {
+                guard visited.insert(ObjectIdentifier(node)).inserted else { return nil }
+                if let element = node as? NSAccessibilityProtocol {
+                    if element.accessibilityIdentifier() == id { return element }
+                    if let children = element.accessibilityChildren() as? [AnyObject] {
+                        for child in children {
+                            if let match = walk(child) { return match }
+                        }
+                    }
+                }
+                if let view = node as? NSView {
+                    for subview in view.subviews {
+                        if let match = walk(subview) { return match }
+                    }
+                }
+                return nil
+            }
+            return walk(root)
+        }
+
+        let root = FileManager.default.temporaryDirectory.appending(path: "Asky-copy-toast-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let app = try AppModel(root: root)
+        let store = ConversationStore(app.store)
+        let cid = try store.create(title: "复制提示回归")
+        let replyText = "AI 短剧刚好把这两条同时解开了。成本压到原来的一小部分，于是同样的广告收入能对应更多部剧，单部亏损不再是硬约束；产能不再受人限制，一个人加一套流程就能批量出片，供给曲线直接抬起来。"
+        try store.append(conversationID: cid, role: "user", text: "聊聊 AI 短剧的供给变化")
+        let replyMessage = try store.append(conversationID: cid, role: "assistant", text: replyText)
+        try store.append(conversationID: cid, role: "assistant", text: "飞轮真正转起来，靠的是这几个环节接上了。")
+
+        let model = AgentModel(app: app)
+        model.open(cid)
+        model.avatarColor = .blue
+
+        let controller = AgentWindowController(model: model, presentation: WindowPresentation())
+        controller.show()
+        let window = NSApp.windows.first { $0.title == "Asky AI" && $0.isVisible }!
+        defer { window.orderOut(nil) }
+        if let screen = NSScreen.screens.first {
+            let origin = NSPoint(
+                x: max(screen.visibleFrame.minX + 24, screen.visibleFrame.maxX - window.frame.width - 24),
+                y: max(screen.visibleFrame.minY + 24, screen.visibleFrame.midY - window.frame.height / 2)
+            )
+            window.setFrameOrigin(origin)
+        }
+        window.level = .floating
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+
+        let backing = NSWindow(contentRect: window.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        backing.level = .floating
+        backing.order(.below, relativeTo: window.windowNumber)
+        defer { backing.orderOut(nil) }
+
+        func capture(_ name: String) throws {
+            let path = "build/agent-copy-toast-\(name).png"
+            let capture = Process()
+            capture.executableURL = URL(filePath: "/usr/sbin/screencapture")
+            let rect = window.frame
+            capture.arguments = ["-x", "-R", "\(Int(rect.minX)),\(Int(NSScreen.screens[0].frame.maxY - rect.maxY)),\(Int(rect.width)),\(Int(rect.height))", path]
+            try capture.run()
+            capture.waitUntilExit()
+            precondition(capture.terminationStatus == 0)
+        }
+
+        let expectedToast = NSLocalizedString("已复制", comment: "")
+        for (name, appearance) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
+            model.clearToast()
+            NSPasteboard.general.clearContents()
+            window.appearance = NSAppearance(named: appearance)
+            backing.backgroundColor = name == "light" ? NSColor(white: 0.90, alpha: 1) : NSColor(white: 0.14, alpha: 1)
+            backing.order(.below, relativeTo: window.windowNumber)
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            try await Task.sleep(for: .milliseconds(500))
+
+            let surface = window.contentView!
+            let texts = descendants(surface).compactMap { $0 as? NSTextView }
+            let replyView = texts.first { $0.string.contains("AI 短剧刚好把这两条同时解开了") }!
+            let replyFrame = replyView.convert(replyView.bounds, to: nil)
+
+            // Hover assistant bubble -> open More menu -> click "复制".
+            move(window.convertPoint(toScreen: NSPoint(x: replyFrame.midX, y: replyFrame.midY)))
+            try await Task.sleep(for: .milliseconds(240))
+            let moreTrigger = findAccessibilityElement(id: "assistant-more-trigger-" + replyMessage.id, in: surface)
+            precondition(moreTrigger != nil, "Assistant more trigger must be accessible in \(name) mode")
+            let moreScreenFrame = moreTrigger!.accessibilityFrame()
+            let aiMorePoint = window.convertPoint(fromScreen: NSPoint(x: moreScreenFrame.midX, y: moreScreenFrame.midY))
+            try await click(aiMorePoint, in: window)
+
+            // Locate the opened More menu surface (width 196) and click its first action row ("复制").
+            let menuBacking = descendants(surface).first { abs($0.bounds.width - 196) < 2 && $0.bounds.height > 80 }
+            precondition(menuBacking != nil, "Assistant more menu must open in \(name) mode")
+            let menuRect = menuBacking!.convert(menuBacking!.bounds, to: nil)
+            let copyWindowPoint = NSPoint(x: menuRect.midX, y: menuRect.maxY - 56)
+            try await click(copyWindowPoint, in: window)
+            try await Task.sleep(for: .milliseconds(250))
+
+            precondition(NSPasteboard.general.string(forType: .string) == replyText,
+                         "Clicking copy in bubble more menu must copy assistant message text in \(name) mode")
+            precondition(model.toast == expectedToast,
+                         "Successful copy must show '\(expectedToast)' toast in \(name) mode (got \(String(describing: model.toast)))")
+
+            let toastView = descendants(surface).first { $0.accessibilityIdentifier() == "agent-status-toast-surface" }
+            precondition(toastView != nil, "Toast surface view must be present in \(name) mode")
+            let toastRect = toastView!.convert(toastView!.bounds, to: nil)
+            precondition(!toastRect.isEmpty, "Toast frame must be non-empty in \(name) mode")
+            let topOffset = window.contentLayoutRect.height - toastRect.maxY
+            let centerDrift = abs(toastRect.midX - window.contentLayoutRect.width / 2)
+            precondition(NSRect(origin: .zero, size: window.contentLayoutRect.size).contains(toastRect),
+                         "Toast must remain inside the Agent window (\(toastRect) vs \(window.contentLayoutRect.size))")
+            precondition(abs(topOffset - 48) <= 2,
+                         "Toast top must sit 48 pt below window top in \(name) mode (got \(topOffset))")
+            precondition(centerDrift <= 2,
+                         "Toast must stay horizontally centered in \(name) mode (drift=\(centerDrift))")
+            try capture(name)
+            print("Copy toast geometry (\(name)): topOffset=\(topOffset)pt, centerDrift=\(centerDrift)pt, size=\(toastRect.size)")
+        }
+
+        // Verify 3-second lifetime and timer reset on repeated copy.
+        model.clearToast()
+        model.showToast(expectedToast)
+        try await Task.sleep(for: .milliseconds(1500))
+        precondition(model.toast == expectedToast, "Toast must remain visible 1.5s after showing")
+        model.showToast(expectedToast)
+        try await Task.sleep(for: .milliseconds(2000))
+        precondition(model.toast == expectedToast, "Repeated copy must restart the 3s toast lifetime")
+        try await Task.sleep(for: .milliseconds(1300))
+        precondition(model.toast == nil, "Toast must disappear automatically 3s after the latest copy")
+        print("Copy toast regression passed in light and dark (48pt top offset, 3s lifetime, reset on repeat)")
+    }
 }

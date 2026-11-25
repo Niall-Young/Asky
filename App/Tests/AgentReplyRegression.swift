@@ -3735,7 +3735,7 @@ enum AgentReplyRegression {
     static func main() async throws {
         let application = NSApplication.shared
         application.setActivationPolicy(.accessory)
-        if CommandLine.arguments.contains("--window-presentation") || CommandLine.arguments.contains("--first-open-stability") || CommandLine.arguments.contains("--header-cursor-preview") || CommandLine.arguments.contains("--header-drag") || CommandLine.arguments.contains("--action-cursor-preview") || CommandLine.arguments.contains("--user-bubble-hover") || CommandLine.arguments.contains("--approval-menu-hover") || CommandLine.arguments.contains("--bubble-menu-preview") || CommandLine.arguments.contains("--reaction-swap-preview") || CommandLine.arguments.contains("--delete-dialog-preview") {
+        if CommandLine.arguments.contains("--window-presentation") || CommandLine.arguments.contains("--first-open-stability") || CommandLine.arguments.contains("--header-cursor-preview") || CommandLine.arguments.contains("--header-drag") || CommandLine.arguments.contains("--action-cursor-preview") || CommandLine.arguments.contains("--user-bubble-hover") || CommandLine.arguments.contains("--approval-menu-hover") || CommandLine.arguments.contains("--bubble-menu-preview") || CommandLine.arguments.contains("--reaction-swap-preview") || CommandLine.arguments.contains("--delete-dialog-preview") || CommandLine.arguments.contains("--copy-toast-preview") {
             var completed = false
             Task { @MainActor in
                 do {
@@ -3748,6 +3748,7 @@ enum AgentReplyRegression {
                     else if CommandLine.arguments.contains("--bubble-menu-preview") { try await bubbleMenuPreviewRegression() }
                     else if CommandLine.arguments.contains("--reaction-swap-preview") { try await reactionSwapPreviewRegression() }
                     else if CommandLine.arguments.contains("--delete-dialog-preview") { try await deleteDialogPreviewRegression() }
+                    else if CommandLine.arguments.contains("--copy-toast-preview") { try await copyToastRegression() }
                     else { try await userBubbleHoverRegression() }
                 } catch { preconditionFailure("Header/hover regression failed: \(error)") }
                 completed = true

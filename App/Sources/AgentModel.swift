@@ -149,6 +149,26 @@ final class AgentModel {
     private(set) var newConversationRevision = 0
     private var startingNewConversation = false
     private(set) var pendingDeleteMessage: ChatItem?
+    static let toastDuration: Duration = .seconds(3)
+    private(set) var toast: String?
+    @ObservationIgnored private var toastTask: Task<Void, Never>?
+
+    func showToast(_ message: String, duration: Duration = toastDuration) {
+        toastTask?.cancel()
+        toast = message
+        toastTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: duration)
+            guard !Task.isCancelled else { return }
+            self?.toast = nil
+            self?.toastTask = nil
+        }
+    }
+
+    func clearToast() {
+        toastTask?.cancel()
+        toastTask = nil
+        toast = nil
+    }
     var formValues: [String: [String: [String]]] = [:]
     var draft = ""
     var draftSegments: [MessageSegment] = []
