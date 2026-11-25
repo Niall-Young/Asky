@@ -11,13 +11,22 @@ struct AgentMessageSplitTests {
     @Test("Splits on standalone marker lines")
     func splitOnMarker() {
         let input = """
-        好了，明早六点五十的提醒已经定好。
+        千岛湖那页改好了，现在是 22 张照片，三组并列。
         <asky-split/>
-        到点会响，你可以安心休息了。
+        霞浦那页还在做，做好了再拿给你看。
         """
         #expect(AgentMessageSplit.split(input) == [
-            "好了，明早六点五十的提醒已经定好。",
-            "到点会响，你可以安心休息了。"
+            "千岛湖那页改好了，现在是 22 张照片，三组并列。",
+            "霞浦那页还在做，做好了再拿给你看。"
+        ])
+    }
+
+    @Test("Splits on inline markers outside code fences")
+    func splitOnInlineMarker() {
+        let input = "第一件事搞定了。<asky-split/>另一件事还在跑。"
+        #expect(AgentMessageSplit.split(input) == [
+            "第一件事搞定了。",
+            "另一件事还在跑。"
         ])
     }
 
@@ -48,90 +57,38 @@ struct AgentMessageSplitTests {
         #expect(AgentMessageSplit.strippingMarkers("我来帮你查一下<asky-split/>") == "我来帮你查一下")
     }
 
-    @Test("Auto-splits multi-paragraph replies into natural chat bubbles")
-    func autoSplitsParagraphs() {
-        let input = """
-        百度主站直接访问 baidu.com 就行。
+    @Test("Keeps multi-paragraph analysis and structured digests in a single bubble without explicit markers")
+    func keepsStructuredLongReplyIntact() {
+        let digest = """
+        ### 大厂 AI 设计工程
 
-        主要几个入口：
-        - 搜索引擎：https://www.baidu.com
-        - 百度智能云：https://cloud.baidu.com
-        - 百度开发者中心：https://developer.baidu.com
+        1. AWS 给编码 Agent 加了沙箱与决策小模型，用来做低延迟路由。
+        2. 国产巨头也在跟进 Code + Work 两条线。
 
-        平时查资料用主站，接 API 或看文档就进后面两个。
+        ### AI 公司动态
+
+        3. GPT-6.2 进了日常对话页。
+        4. Anthropic 企业零留存安全方案进入公测。
         """
-        #expect(AgentMessageSplit.split(input) == [
-            "百度主站直接访问 baidu.com 就行。",
-            "主要几个入口：\n- 搜索引擎：https://www.baidu.com\n- 百度智能云：https://cloud.baidu.com\n- 百度开发者中心：https://developer.baidu.com",
-            "平时查资料用主站，接 API 或看文档就进后面两个。"
-        ])
+        #expect(AgentMessageSplit.split(digest) == [digest])
+
+        let multiParagraphAnalysis = (1...6).map { "第 \($0) 段连贯分析内容。" }.joined(separator: "\n\n")
+        #expect(AgentMessageSplit.split(multiParagraphAnalysis) == [multiParagraphAnalysis])
     }
 
-    @Test("Keeps colon lead-in attached to following list, code, or table")
-    func keepsColonLeadInAttached() {
-        let input = """
-        主要几个入口：
-
-        - 搜索引擎：https://www.baidu.com
-        - 百度开发者中心：https://developer.baidu.com
-        """
-        #expect(AgentMessageSplit.split(input) == [input])
-    }
-
-    @Test("Keeps loose list items in one bubble")
-    func keepsLooseListTogether() {
-        let input = """
-        - 第一项说明
-
-        - 第二项说明
-
-        - 第三项说明
-        """
-        #expect(AgentMessageSplit.split(input) == [input])
-    }
-
-    @Test("Keeps headings attached to following content and citations attached to images")
-    func keepsHeadingsAndImageCitationsAttached() {
-        let headingReply = """
-        ### 已启动 Claude Code
-
-        - 项目：**Asky**
-        - 打开方式：CLI 终端窗口
-        """
-        #expect(AgentMessageSplit.split(headingReply) == [headingReply])
-
-        let imageReply = """
-        水豚长得有点像放大的豚鼠。
-
-        ![水豚](https://example.com/capybara.jpg)
-
-        [来源](https://example.com/article)
-        """
-        #expect(AgentMessageSplit.split(imageReply) == [
-            "水豚长得有点像放大的豚鼠。",
-            "![水豚](https://example.com/capybara.jpg)\n\n[来源](https://example.com/article)"
-        ])
-    }
-
-    @Test("Does not auto-split replies containing asky-form")
+    @Test("Does not split replies containing asky-form even if markers appear")
     func keepsFormReplyIntact() {
         let input = """
         还需要补一下会议时间：
-
+        <asky-split/>
         ```asky-form
         {"title":"会议安排"}
         {"id":"start","type":"time","label":"开始时间","required":true}
         ```
         """
-        #expect(AgentMessageSplit.split(input) == [input])
-    }
-
-    @Test("Caps auto-split paragraphs at maxBubbles")
-    func capsAutoSplitParagraphs() {
-        let input = (1...6).map { "第 \($0) 段自然聊天内容。" }.joined(separator: "\n\n")
         let parts = AgentMessageSplit.split(input)
-        #expect(parts.count == AgentMessageSplit.maxBubbles)
-        #expect(parts.first == "第 1 段自然聊天内容。")
-        #expect(parts.last?.contains("第 6 段自然聊天内容。") == true)
+        #expect(parts.count == 1)
+        #expect(!parts[0].contains(AgentMessageSplit.marker))
+        #expect(parts[0].contains("```asky-form"))
     }
 }

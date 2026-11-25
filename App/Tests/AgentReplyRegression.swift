@@ -4523,6 +4523,28 @@ enum AgentReplyRegression {
         precondition(!shareWindow.isVisible && shareWindow.contentView == nil,
                      "Resign-key must automatically dismiss share window")
 
+        // 5. Verify full-turn share merging skips narration/tools and only activates for multi-bubble assistant turns.
+        let singleTurnItems = [
+            ChatItem(id: "narration", kind: .toolNarration, text: "先帮你查一下。"),
+            ChatItem(id: "only-reply", kind: .assistant, text: "千岛湖那页改好了。")
+        ]
+        precondition(ChatShareTurnText.merged(from: singleTurnItems) == nil,
+                     "Single assistant bubble turns must not produce a merged full-turn override")
+
+        let multiTurnItems = [
+            ChatItem(id: "narration", kind: .toolNarration, text: "先帮你查一下。"),
+            ChatItem(id: "reply-1", kind: .assistant, text: "千岛湖那页改好了。"),
+            ChatItem(id: "reply-2", kind: .assistant, text: "霞浦那页还在做，做好了再拿给你看。")
+        ]
+        let mergedTurn = ChatShareTurnText.merged(from: multiTurnItems)
+        precondition(mergedTurn == "千岛湖那页改好了。\n\n霞浦那页还在做，做好了再拿给你看。",
+                     "Expected multi-bubble assistant turn to merge only assistant replies, got \(String(describing: mergedTurn))")
+        ChatShareWindowController.shared.show(text: multiTurnItems[1].text, fullTurnText: mergedTurn, colorScheme: .light)
+        try await Task.sleep(for: .milliseconds(150))
+        precondition(ChatShareWindowController.shared.window?.isVisible == true,
+                     "Expected share window to open cleanly with full-turn scope toggle")
+        ChatShareWindowController.shared.dismiss()
+
         print("Share card and user reply regression passed")
     }
 

@@ -8,6 +8,33 @@ import SwiftUI
 import Theme
 import ToolService
 
+enum ShareCardScope: String, CaseIterable, Identifiable {
+    case fullTurn
+    case singleBubble
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .fullTurn: NSLocalizedString("整轮回复", comment: "")
+        case .singleBubble: NSLocalizedString("仅此条", comment: "")
+        }
+    }
+}
+
+enum ChatShareTurnText {
+    /// Combines multiple assistant reply bubbles from the same response turn into one cohesive shareable text.
+    /// Returns `nil` when the turn contains only a single assistant bubble.
+    static func merged(from items: [ChatItem]) -> String? {
+        let parts = items
+            .filter { $0.kind == .assistant }
+            .map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard parts.count >= 2 else { return nil }
+        return parts.joined(separator: "\n\n")
+    }
+}
+
 enum ShareCardAppearance: String, CaseIterable, Identifiable {
     case light
     case dark
@@ -691,39 +718,26 @@ struct ChatShareCardContent: View {
                 .markdownBlockStyle(\.heading1) { configuration in
                     configuration.label
                         .markdownTextStyle {
-                            FontSize(17.5)
+                            FontSize(15.5)
                             FontWeight(.semibold)
                             ForegroundColor(primaryTextColor)
                         }
-                        .markdownMargin(top: 4, bottom: 10)
+                        .markdownMargin(top: 14, bottom: 6)
                 }
-                .markdownBlockStyle(\.heading2) { configuration in
-                    configuration.label
-                        .markdownTextStyle {
-                            FontSize(16)
-                            FontWeight(.semibold)
-                            ForegroundColor(primaryTextColor)
-                        }
-                        .markdownMargin(top: 4, bottom: 8)
-                }
-                .markdownBlockStyle(\.heading3) { configuration in
-                    configuration.label
-                        .markdownTextStyle {
-                            FontSize(15)
-                            FontWeight(.semibold)
-                            ForegroundColor(primaryTextColor)
-                        }
-                        .markdownMargin(top: 2, bottom: 8)
-                }
+                .markdownBlockStyle(\.heading2, body: sectionHeading)
+                .markdownBlockStyle(\.heading3, body: sectionHeading)
+                .markdownBlockStyle(\.heading4, body: sectionHeading)
+                .markdownBlockStyle(\.heading5, body: sectionHeading)
+                .markdownBlockStyle(\.heading6, body: sectionHeading)
                 .markdownBlockStyle(\.paragraph) { configuration in
                     configuration.label
                         .lineSpacing(5)
                         .fixedSize(horizontal: false, vertical: true)
-                        .markdownMargin(top: 0, bottom: 11)
+                        .markdownMargin(top: 0, bottom: 10)
                 }
                 .markdownBlockStyle(\.listItem) { configuration in
                     configuration.label
-                        .markdownMargin(top: 4, bottom: 4)
+                        .markdownMargin(top: 6, bottom: 6)
                 }
                 .markdownBlockStyle(\.codeBlock) { configuration in
                     configuration.label
@@ -787,6 +801,16 @@ struct ChatShareCardContent: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    private func sectionHeading(_ configuration: BlockConfiguration) -> some View {
+        configuration.label
+            .markdownTextStyle {
+                FontSize(14)
+                FontWeight(.semibold)
+                ForegroundColor(primaryTextColor)
+            }
+            .markdownMargin(top: 14, bottom: 6)
     }
 }
 
@@ -1057,7 +1081,7 @@ final class ChatShareWindowController: NSWindowController, NSWindowDelegate {
         autoDismissSuspensionCount > 0 || window?.attachedSheet != nil
     }
 
-    func show(text: String, colorScheme: ColorScheme) {
+    func show(text: String, fullTurnText: String? = nil, colorScheme: ColorScheme) {
         shareCoordinator?.cancel()
         shareCoordinator = nil
         autoDismissSuspensionCount = 0
@@ -1075,9 +1099,17 @@ final class ChatShareWindowController: NSWindowController, NSWindowDelegate {
         let entrance = ChatShareEntranceState(isPresented: wasVisible || reduceMotion)
         entranceState = entrance
 
+        let normalizedFullTurn: String? = fullTurnText.flatMap { candidate in
+            let trimmedCandidate = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+            let trimmedSingle = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedCandidate.isEmpty, trimmedCandidate != trimmedSingle else { return nil }
+            return trimmedCandidate
+        }
+
         window.title = NSLocalizedString("分享回复", comment: "")
         let content = ChatSharePreviewSheet(
             text: text,
+            fullTurnText: normalizedFullTurn,
             initialAppearance: ShareCardAppearance(colorScheme: colorScheme),
             entrance: entrance,
             windowProvider: { [weak window] in window },
@@ -1346,6 +1378,7 @@ private struct ChatSharePreviewSheet: View {
     private static let bottomFadeHeight: CGFloat = 78
 
     let text: String
+    let fullTurnText: String?
     let entrance: ChatShareEntranceState
     let windowProvider: () -> NSWindow?
     let suspendAutoDismiss: () -> () -> Void
@@ -1354,6 +1387,7 @@ private struct ChatSharePreviewSheet: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var appearance: ShareCardAppearance
+    @State private var scope: ShareCardScope
     @State private var cardHeight: CGFloat = 0
     @State private var copied = false
     @State private var saved = false
@@ -1363,6 +1397,7 @@ private struct ChatSharePreviewSheet: View {
 
     init(
         text: String,
+        fullTurnText: String? = nil,
         initialAppearance: ShareCardAppearance,
         entrance: ChatShareEntranceState,
         windowProvider: @escaping () -> NSWindow?,
@@ -1371,12 +1406,18 @@ private struct ChatSharePreviewSheet: View {
         close: @escaping () -> Void
     ) {
         self.text = text
+        self.fullTurnText = fullTurnText
         self.entrance = entrance
         self.windowProvider = windowProvider
         self.suspendAutoDismiss = suspendAutoDismiss
         self.presentSystemShareAction = presentSystemShare
         self.close = close
         _appearance = State(initialValue: initialAppearance)
+        _scope = State(initialValue: fullTurnText != nil ? .fullTurn : .singleBubble)
+    }
+
+    private var activeText: String {
+        scope == .fullTurn ? (fullTurnText ?? text) : text
     }
 
     private var isDark: Bool { appearance == .dark }
@@ -1440,6 +1481,10 @@ private struct ChatSharePreviewSheet: View {
                     .contentShape(.rect)
                     .background(WindowDragArea())
 
+                    if fullTurnText != nil {
+                        ShareScopeToggle(selection: $scope, isDark: isDark, reduceMotion: reduceMotion)
+                    }
+
                     Button(action: close) {
                         Image(mingCute: "xmark", size: 12.5)
                             .foregroundStyle(chromeTextColor.opacity(0.92))
@@ -1457,7 +1502,7 @@ private struct ChatSharePreviewSheet: View {
 
                 Spacer(minLength: 0)
 
-                ChatShareCardContent(text: text, appearance: appearance)
+                ChatShareCardContent(text: activeText, appearance: appearance)
                     .padding(.horizontal, 22)
                     .padding(.vertical, 20)
                     .frame(width: Self.modalWidth - Self.cardHorizontalInset * 2, alignment: .leading)
@@ -1582,7 +1627,7 @@ private struct ChatSharePreviewSheet: View {
 
     private func presentSystemShare() {
         guard let anchor = shareAnchor.view,
-              let png = ChatShareCardRenderer.renderPNG(text: text, appearance: appearance),
+              let png = ChatShareCardRenderer.renderPNG(text: activeText, appearance: appearance),
               let url = try? ShareImageService.writeTemporarySharePNG(png) else {
             showError(NSLocalizedString("生成分享图片失败", comment: ""))
             return
@@ -1591,7 +1636,7 @@ private struct ChatSharePreviewSheet: View {
     }
 
     private func copyImage() {
-        guard let png = ChatShareCardRenderer.renderPNG(text: text, appearance: appearance),
+        guard let png = ChatShareCardRenderer.renderPNG(text: activeText, appearance: appearance),
               ShareImageService.copyPNG(png) else {
             showError(NSLocalizedString("生成分享图片失败", comment: ""))
             return
@@ -1600,7 +1645,7 @@ private struct ChatSharePreviewSheet: View {
     }
 
     private func saveImage() {
-        guard let png = ChatShareCardRenderer.renderPNG(text: text, appearance: appearance) else {
+        guard let png = ChatShareCardRenderer.renderPNG(text: activeText, appearance: appearance) else {
             showError(NSLocalizedString("生成分享图片失败", comment: ""))
             return
         }
@@ -1628,6 +1673,47 @@ private extension View {
                 reduceMotion ? nil : .spring(response: 0.32, dampingFraction: 0.80).delay(0.03 + Double(index) * 0.03),
                 value: revealed
             )
+    }
+}
+
+private struct ShareScopeToggle: View {
+    @Binding var selection: ShareCardScope
+    let isDark: Bool
+    let reduceMotion: Bool
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(ShareCardScope.allCases) { option in
+                let isSelected = selection == option
+                Button {
+                    withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.16)) {
+                        selection = option
+                    }
+                } label: {
+                    Text(option.title)
+                        .font(.system(size: 12, weight: isSelected ? .semibold : .medium))
+                        .foregroundStyle(
+                            isSelected
+                                ? (isDark ? Color.white.opacity(0.96) : Color(white: 0.10))
+                                : (isDark ? Color.white.opacity(0.68) : Color(white: 0.24))
+                        )
+                        .padding(.horizontal, 10)
+                        .frame(height: 22)
+                        .background {
+                            if isSelected {
+                                Capsule()
+                                    .fill(isDark ? Color.white.opacity(0.18) : Color.white.opacity(0.68))
+                            }
+                        }
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("share-scope-\(option.rawValue)")
+            }
+        }
+        .padding(3)
+        .frame(height: 28)
+        .nativeGlassBackground(in: Capsule())
     }
 }
 

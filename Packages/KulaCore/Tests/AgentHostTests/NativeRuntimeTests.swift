@@ -725,11 +725,15 @@ server.serve_forever()
         #expect(customAssembled.contains("LaTeX 公式："))
     }
 
-    @Test func multiBubbleGuidanceEncouragesNaturalParagraphBubblesOutsidePersonaTags() {
+    @Test func multiBubbleAndStructuredReadabilityGuidanceStaysLayered() {
         #expect(NativeAgentPrompt.runtimeProtocolPrompt.contains("分条气泡发送"))
         #expect(NativeAgentPrompt.runtimeProtocolPrompt.contains("<asky-split/>"))
-        #expect(!NativeAgentPrompt.runtimeProtocolPrompt.contains("普通回答默认用一条消息即可"))
-        #expect(NativeAgentPrompt.defaultSystemPrompt.contains("分成一条条消息发"))
+        #expect(NativeAgentPrompt.runtimeProtocolPrompt.contains("按对话事项和节奏决定是否分条，不按自然段硬拆"))
+        #expect(NativeAgentPrompt.runtimeProtocolPrompt.contains("留在同一条完整气泡内"))
+        #expect(NativeAgentPrompt.defaultSystemPrompt.contains("该合就合、该拆就拆"))
+        #expect(NativeAgentPrompt.defaultSystemPrompt.contains("250–450 字"))
+        #expect(NativeAgentPrompt.defaultSystemPrompt.contains("极简的 ### 分组小标题"))
+        #expect(NativeAgentPrompt.defaultSystemPrompt.contains("一句一行"))
         #expect(!NativeAgentPrompt.defaultSystemPrompt.contains("<asky-split/>"))
     }
 

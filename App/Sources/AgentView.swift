@@ -1412,10 +1412,11 @@ private struct ResponseGroupView: View {
     }
 
     private func message(_ item: ChatItem, grouping: ChatBubbleGrouping) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        let fullTurnShareText = ChatShareTurnText.merged(from: group.content)
+        return VStack(alignment: .leading, spacing: 6) {
             ChatBubble(item: item, model: model, bubblePopover: bubblePopover, bubbleMotion: isLatest ? bubbleMotion : nil,
                 morphsFromTyping: !group.isRunning && group.content.first(where: { $0.kind == .assistant })?.id == item.id,
-                grouping: grouping)
+                grouping: grouping, fullTurnShareText: fullTurnShareText)
             if item.needsPermissionSettings {
                 Button(NSLocalizedString("管理权限…", comment: "")) { model.openSettings(permissions: true) }
                     .buttonStyle(.link)
@@ -1751,6 +1752,7 @@ private struct ChatBubble: View {
     let bubbleMotion: Namespace.ID?
     var morphsFromTyping = true
     var grouping: ChatBubbleGrouping = .solo
+    var fullTurnShareText: String? = nil
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hoverState = UserMessageHoverState()
     @State private var replyUnavailable = false
@@ -1965,7 +1967,7 @@ private struct ChatBubble: View {
                 }
             },
             reply: { model.addQuote(item.text, sourceMessageID: item.id, kind: .reply) },
-            share: { ChatShareWindowController.shared.show(text: item.text, colorScheme: scheme) }
+            share: { ChatShareWindowController.shared.show(text: item.text, fullTurnText: fullTurnShareText, colorScheme: scheme) }
         )
     }
 

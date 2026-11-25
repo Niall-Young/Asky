@@ -51,7 +51,7 @@ struct ChatMarkdownView: View, Equatable {
                 }
                     .fixedSize(horizontal: false, vertical: true)
                     .lineSpacing(Self.bodyStyle.lineHeight - Self.bodyStyle.size * 1.2)
-                    .markdownMargin(top: 0, bottom: 14)
+                    .markdownMargin(top: 0, bottom: 12)
             }
             .markdownTextStyle(\.link) {
                 ForegroundColor(ChatInlineText.linkSwiftUIColor(for: colorScheme))
@@ -75,8 +75,8 @@ struct ChatMarkdownView: View, Equatable {
                 configuration.label
                     .labelStyle(ChatListItemLabelStyle())
                     // Tight Markdown lists discard bottom margins between items.
-                    // A top margin keeps item boundaries distinct from wrapped lines.
-                    .markdownMargin(top: 14, bottom: 14)
+                    // Keep items compactly grouped while leaving section headings distinct above them.
+                    .markdownMargin(top: 8, bottom: 8)
             }
             .markdownBlockStyle(\.codeBlock) { configuration in
                 ChatCodeBlock(configuration: configuration)
@@ -131,16 +131,16 @@ struct ChatMarkdownView: View, Equatable {
             .environment(\.chatSelectionGroup, selectionGroup)
     }
 
-    // Headings follow ordinary message typography, including reopened history.
+    // Headings stay at 14 pt like prose, using semibold weight and clearer top rhythm for lightweight grouping.
     private static func heading(_ configuration: BlockConfiguration) -> some View {
         ChatInlineText(markdown: configuration.content.renderMarkdown().replacingOccurrences(
-            of: "^#{1,6} +", with: "", options: .regularExpression))
+            of: "^#{1,6} +", with: "", options: .regularExpression), weight: .semibold)
             .markdownTextStyle {
                 FontSize(bodyStyle.size)
-                FontWeight(.regular)
+                FontWeight(.semibold)
             }
             .lineSpacing(bodyStyle.lineHeight - bodyStyle.size * 1.2)
-            .markdownMargin(top: 0, bottom: 14)
+            .markdownMargin(top: 16, bottom: 6)
     }
 
 }
