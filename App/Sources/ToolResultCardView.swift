@@ -134,9 +134,16 @@ struct ToolResultCardView: View {
                         }
                     }
                 }
-                .padding(.top, 4)
+                .padding(.top, hasTextAboveRows ? 4 : 0)
             }
         }
+    }
+
+    private var hasTextAboveRows: Bool {
+        !card.headline.isEmpty
+            || !card.title.isEmpty
+            || !(card.subtitle?.isEmpty ?? true)
+            || !card.metadata.isEmpty
     }
 
     private func actionButton(_ action: ToolResultCard.Action) -> some View {

@@ -4050,65 +4050,69 @@ enum AgentReplyRegression {
     }
 
     private static func toolResultCardsRegression(app: AppModel) async throws {
-        let singleSchedule = ToolResultCard(
-            id: "cal-sched-1",
-            kind: .calendarSchedule,
-            source: .calendar,
-            categoryTitle: "日历日程",
-            headline: "1 个日程",
-            rows: [
-                ToolResultCard.DetailRow(
-                    id: "ev-birthday",
-                    title: "何瑞兆雪的24岁生日",
-                    subtitle: "11月28日 · 生日",
-                    trailing: "全天"
-                )
+        var fixedCalendar = Calendar(identifier: .gregorian)
+        fixedCalendar.timeZone = TimeZone(secondsFromGMT: 8 * 3600)!
+
+        let singleSchedule = ToolResultCard.from(
+            tool: "calendar_search_events",
+            result: ExecutionResult(
+                requestID: "cal-sched-1",
+                status: .completed,
+                output: [[
+                    "id": "ev-birthday",
+                    "title": "何瑞兆雪的24岁生日",
+                    "start": "2026-11-28T00:00:00+08:00",
+                    "allDay": true,
+                    "calendar": "生日"
+                ]]
+            ),
+            calendar: fixedCalendar
+        )!
+        let noteCard = ToolResultCard.from(
+            tool: "notes_create",
+            arguments: ["title": "asky", "body": "定时任务"],
+            result: ExecutionResult(
+                requestID: "note-1",
+                status: .completed,
+                targets: [TargetRef(kind: "note", identifier: "note-1")],
+                output: ["id": "note-1", "folder": "iCloud › Notes"],
+                readback: ["id": "note-1", "name": "asky"]
+            ),
+            calendar: fixedCalendar
+        )!
+        let reminderCard = ToolResultCard.from(
+            tool: "reminders_create",
+            arguments: [
+                "title": "定时任务（内容待定）",
+                "notes": "每天 9:00 提醒。具体要做什么还没定，确定后可修改标题或拆成多条提醒。"
             ],
-            action: ToolResultCard.Action(kind: .openCalendar, label: "查看日历")
-        )
-        let multiSchedule = ToolResultCard(
-            id: "cal-sched-2",
-            kind: .calendarSchedule,
-            source: .calendar,
-            categoryTitle: "日历日程",
-            headline: "2 个日程",
-            rows: [
-                ToolResultCard.DetailRow(
-                    id: "ev-1",
-                    title: "何瑞兆雪的24岁生日",
-                    subtitle: "11月28日 · 生日",
-                    trailing: "全天"
-                ),
-                ToolResultCard.DetailRow(
-                    id: "ev-2",
-                    title: "产品设计评审",
-                    subtitle: "11月28日 · 3 号会议室",
-                    trailing: "14:00–15:00"
-                )
-            ],
-            action: ToolResultCard.Action(kind: .openCalendar, label: "查看日历")
-        )
-        let createdEvent = ToolResultCard(
-            id: "cal-event-1",
-            kind: .calendarEvent,
-            source: .calendar,
-            categoryTitle: "日历",
-            headline: "14:00 – 15:00",
-            title: "项目周会",
-            subtitle: "11月25日 周三 · 工作",
-            metadata: ["会议室 A"],
-            action: ToolResultCard.Action(kind: .openCalendar, label: "查看日历")
-        )
+            result: ExecutionResult(
+                requestID: "rem-1",
+                status: .completed,
+                readback: [
+                    "id": "rem-1",
+                    "title": "定时任务（内容待定）",
+                    "due": "2026-11-26T09:00:00+08:00",
+                    "list": "提醒"
+                ]
+            ),
+            calendar: fixedCalendar
+        )!
+
+        precondition(singleSchedule.headline == "11月28日 周六", "Expected date headline, got \(singleSchedule.headline)")
+        precondition(singleSchedule.rows.first?.subtitle == nil, "Expected no gray row subtitle on single-day schedule")
+        precondition(noteCard.subtitle == nil, "Expected no folder subtitle on note card")
+        precondition(reminderCard.metadata.isEmpty, "Expected no notes metadata on reminder card")
 
         let store = ConversationStore(app.store)
         let cid = try store.create(title: "Tool result cards preview")
-        try store.append(conversationID: cid, role: "user", text: "帮我看看这周日历日程")
+        try store.append(conversationID: cid, role: "user", text: "帮我看看卡片排版")
         try store.append(conversationID: cid, role: "tool", text: "调用 calendar_search_events", id: "trc-1",
             presentation: MessagePresentation(responseID: "trc-r1", toolName: "calendar_search_events", toolStatus: .completed, resultCard: singleSchedule))
-        try store.append(conversationID: cid, role: "tool", text: "调用 calendar_search_events", id: "trc-2",
-            presentation: MessagePresentation(responseID: "trc-r2", toolName: "calendar_search_events", toolStatus: .completed, resultCard: multiSchedule))
-        try store.append(conversationID: cid, role: "tool", text: "调用 calendar_create_event", id: "trc-3",
-            presentation: MessagePresentation(responseID: "trc-r3", toolName: "calendar_create_event", toolStatus: .completed, resultCard: createdEvent))
+        try store.append(conversationID: cid, role: "tool", text: "调用 notes_create", id: "trc-2",
+            presentation: MessagePresentation(responseID: "trc-r2", toolName: "notes_create", toolStatus: .completed, resultCard: noteCard))
+        try store.append(conversationID: cid, role: "tool", text: "调用 reminders_create", id: "trc-3",
+            presentation: MessagePresentation(responseID: "trc-r3", toolName: "reminders_create", toolStatus: .completed, resultCard: reminderCard))
 
         let model = AgentModel(app: app)
         model.open(cid)

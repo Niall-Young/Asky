@@ -148,18 +148,19 @@ public struct ToolResultCard: Sendable, Hashable, Codable, Identifiable {
         let endDate = endISO.flatMap(parseISO)
 
         let headline: String
+        var subtitleParts: [String] = []
         if allDay {
-            headline = CoreLocalization.text("全天")
+            headline = startDate.map { formatMonthDayWeekday($0, calendar: calendar) } ?? CoreLocalization.text("全天")
+            if startDate != nil { subtitleParts.append(CoreLocalization.text("全天")) }
         } else if let startDate, let endDate {
             headline = "\(formatTime(startDate, calendar: calendar)) – \(formatTime(endDate, calendar: calendar))"
+            subtitleParts.append(formatMonthDayWeekday(startDate, calendar: calendar))
         } else if let startDate {
             headline = formatTime(startDate, calendar: calendar)
+            subtitleParts.append(formatMonthDayWeekday(startDate, calendar: calendar))
         } else {
             headline = title
         }
-
-        var subtitleParts: [String] = []
-        if let startDate { subtitleParts.append(formatMonthDayWeekday(startDate, calendar: calendar)) }
         if let calName { subtitleParts.append(calName) }
 
         var meta: [String] = []
@@ -182,46 +183,62 @@ public struct ToolResultCard: Sendable, Hashable, Codable, Identifiable {
         id: String, payload: JSONValue?, calendar: Calendar
     ) -> ToolResultCard? {
         guard let items = payload?.arrayValue, !items.isEmpty else { return nil }
-        let rows: [DetailRow] = items.prefix(5).enumerated().compactMap { index, item in
+        let shownItems = Array(items.prefix(5))
+        let dates = shownItems.compactMap { $0["start"]?.stringValue.flatMap(parseISO) }
+        let singleDay: Bool = {
+            guard let first = dates.first else { return false }
+            return dates.count == shownItems.count && dates.allSatisfy { calendar.isDate($0, inSameDayAs: first) }
+        }()
+        let headline: String = {
+            guard let earliest = dates.min(), let latest = dates.max() else { return "" }
+            return formatDateRange(earliest, latest, calendar: calendar)
+        }()
+
+        let rows: [DetailRow] = shownItems.enumerated().compactMap { index, item in
             guard let title = nonEmpty(item["title"]?.stringValue) else { return nil }
             let allDay = item["allDay"]?.boolValue ?? false
             let start = item["start"]?.stringValue.flatMap(parseISO)
             let end = item["end"]?.stringValue.flatMap(parseISO)
             let location = nonEmpty(item["location"]?.stringValue)
-            let calName = nonEmpty(item["calendar"]?.stringValue)
 
-            let trailing: String?
+            let timePart: String?
             if allDay {
-                trailing = CoreLocalization.text("全天")
-            } else if let start, let end {
-                trailing = "\(formatTime(start, calendar: calendar))–\(formatTime(end, calendar: calendar))"
+                timePart = CoreLocalization.text("全天")
+            } else if let start, let end, singleDay {
+                timePart = "\(formatTime(start, calendar: calendar))–\(formatTime(end, calendar: calendar))"
             } else if let start {
-                trailing = formatTime(start, calendar: calendar)
+                timePart = formatTime(start, calendar: calendar)
             } else {
-                trailing = nil
+                timePart = nil
             }
 
-            var subParts: [String] = []
-            if let start { subParts.append(formatShortDate(start, calendar: calendar)) }
-            if let location { subParts.append(location) }
-            else if let calName { subParts.append(calName) }
+            let trailing: String?
+            if singleDay {
+                trailing = timePart
+            } else if let start, let timePart {
+                trailing = "\(formatShortDate(start, calendar: calendar)) \(timePart)"
+            } else if let start {
+                trailing = formatShortDate(start, calendar: calendar)
+            } else {
+                trailing = timePart
+            }
 
             return DetailRow(
                 id: nonEmpty(item["id"]?.stringValue) ?? "\(id)-\(index)",
                 title: title,
-                subtitle: subParts.isEmpty ? nil : subParts.joined(separator: " · "),
+                subtitle: location,
                 trailing: trailing
             )
         }
         guard !rows.isEmpty else { return nil }
-        let firstStart = items.first?["start"]?.stringValue
+        let firstStart = shownItems.first?["start"]?.stringValue
 
         return ToolResultCard(
             id: id,
             kind: .calendarSchedule,
             source: .calendar,
             categoryTitle: CoreLocalization.text("日历日程"),
-            headline: CoreLocalization.format("%@ 个日程", String(items.count)),
+            headline: headline,
             rows: rows,
             action: Action(kind: .openCalendar, label: CoreLocalization.text("查看日历"), target: firstStart)
         )
@@ -240,7 +257,6 @@ public struct ToolResultCard: Sendable, Hashable, Codable, Identifiable {
             ?? nonEmpty(arguments?["due"]?.stringValue)
         let listName = nonEmpty(payload?["list"]?.stringValue)
             ?? nonEmpty(output?["list"]?.stringValue)
-        let notes = nonEmpty(arguments?["notes"]?.stringValue)
 
         let dueDate = dueISO.flatMap(parseISO)
         let headline = dueDate.map { formatTime($0, calendar: calendar) } ?? title
@@ -248,10 +264,7 @@ public struct ToolResultCard: Sendable, Hashable, Codable, Identifiable {
 
         var subParts: [String] = []
         if let dueDate { subParts.append(formatMonthDayWeekday(dueDate, calendar: calendar)) }
-        if let listName { subParts.append(listName) }
-
-        var meta: [String] = []
-        if let notes { meta.append(String(notes.prefix(120))) }
+        if let listName, !isDefaultReminderList(listName) { subParts.append(listName) }
 
         return ToolResultCard(
             id: id,
@@ -261,7 +274,6 @@ public struct ToolResultCard: Sendable, Hashable, Codable, Identifiable {
             headline: headline,
             title: displayTitle,
             subtitle: subParts.isEmpty ? nil : subParts.joined(separator: " · "),
-            metadata: meta,
             action: Action(kind: .openReminders, label: CoreLocalization.text("查看提醒事项"))
         )
     }
@@ -270,15 +282,32 @@ public struct ToolResultCard: Sendable, Hashable, Codable, Identifiable {
         id: String, payload: JSONValue?, calendar: Calendar
     ) -> ToolResultCard? {
         guard let items = payload?.arrayValue, !items.isEmpty else { return nil }
-        let rows: [DetailRow] = items.prefix(5).enumerated().compactMap { index, item in
+        let shownItems = Array(items.prefix(5))
+        let dueDates = shownItems.compactMap { $0["due"]?.stringValue.flatMap(parseISO) }
+        let allHaveDue = dueDates.count == shownItems.count
+        let singleDay: Bool = {
+            guard allHaveDue, let first = dueDates.first else { return false }
+            return dueDates.allSatisfy { calendar.isDate($0, inSameDayAs: first) }
+        }()
+        let headline: String = {
+            guard allHaveDue, let earliest = dueDates.min(), let latest = dueDates.max() else { return "" }
+            return formatDateRange(earliest, latest, calendar: calendar)
+        }()
+
+        let rows: [DetailRow] = shownItems.enumerated().compactMap { index, item in
             guard let title = nonEmpty(item["title"]?.stringValue) else { return nil }
-            let list = nonEmpty(item["list"]?.stringValue)
             let due = item["due"]?.stringValue.flatMap(parseISO)
-            let trailing = due.map { "\(formatShortDate($0, calendar: calendar)) \(formatTime($0, calendar: calendar))" }
+            let trailing: String?
+            if let due {
+                trailing = singleDay
+                    ? formatTime(due, calendar: calendar)
+                    : "\(formatShortDate(due, calendar: calendar)) \(formatTime(due, calendar: calendar))"
+            } else {
+                trailing = nil
+            }
             return DetailRow(
                 id: nonEmpty(item["id"]?.stringValue) ?? "\(id)-\(index)",
                 title: title,
-                subtitle: list,
                 trailing: trailing
             )
         }
@@ -289,7 +318,7 @@ public struct ToolResultCard: Sendable, Hashable, Codable, Identifiable {
             kind: .reminderList,
             source: .reminders,
             categoryTitle: CoreLocalization.text("提醒事项"),
-            headline: CoreLocalization.format("%@ 条待办", String(items.count)),
+            headline: headline,
             rows: rows,
             action: Action(kind: .openReminders, label: CoreLocalization.text("查看提醒事项"))
         )
@@ -303,9 +332,6 @@ public struct ToolResultCard: Sendable, Hashable, Codable, Identifiable {
             ?? nonEmpty(output?["name"]?.stringValue)
             ?? nonEmpty(arguments?["title"]?.stringValue)
             ?? CoreLocalization.text("备忘录")
-        let folder = nonEmpty(output?["folder"]?.stringValue)
-            ?? nonEmpty(payload?["folder"]?.stringValue)
-            ?? nonEmpty(arguments?["folder"]?.stringValue)
         let excerpt = nonEmpty(arguments?["body"]?.stringValue)
             ?? nonEmpty(arguments?["text"]?.stringValue)
         let noteID = nonEmpty(payload?["id"]?.stringValue)
@@ -319,7 +345,6 @@ public struct ToolResultCard: Sendable, Hashable, Codable, Identifiable {
             categoryTitle: isAppend ? CoreLocalization.text("已追加备忘录") : CoreLocalization.text("备忘录"),
             headline: title,
             title: excerpt.map { truncate($0, limit: 120) } ?? "",
-            subtitle: folder,
             action: Action(kind: .openNotes, label: CoreLocalization.text("打开备忘录"), target: noteID)
         )
     }
@@ -405,7 +430,7 @@ public struct ToolResultCard: Sendable, Hashable, Codable, Identifiable {
 
         let headline = places.count == 1
             ? (firstName ?? CoreLocalization.text("地点"))
-            : CoreLocalization.format("%@ 个地点", String(places.count))
+            : ""
 
         return ToolResultCard(
             id: id,
@@ -462,12 +487,28 @@ public struct ToolResultCard: Sendable, Hashable, Codable, Identifiable {
             categoryTitle: CoreLocalization.text("记忆"),
             headline: headline,
             title: truncate(content, limit: 160),
-            subtitle: file,
             action: Action(kind: .openMemoryFile, label: CoreLocalization.text("查看记忆"), target: file)
         )
     }
 
     // MARK: - Formatting helpers
+
+    private static func isDefaultReminderList(_ name: String) -> Bool {
+        let normalized = name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return normalized == "提醒" || normalized == "提醒事项" || normalized == "reminders"
+    }
+
+    private static func formatDateRange(_ start: Date, _ end: Date, calendar: Calendar) -> String {
+        if calendar.isDate(start, inSameDayAs: end) {
+            return formatMonthDayWeekday(start, calendar: calendar)
+        }
+        let s = calendar.dateComponents([.year, .month, .day], from: start)
+        let e = calendar.dateComponents([.year, .month, .day], from: end)
+        if s.year == e.year, s.month == e.month, let eDay = e.day {
+            return "\(formatShortDate(start, calendar: calendar)) – \(eDay)日"
+        }
+        return "\(formatShortDate(start, calendar: calendar)) – \(formatShortDate(end, calendar: calendar))"
+    }
 
     private static func nonEmpty(_ value: String?) -> String? {
         guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {
