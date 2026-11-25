@@ -1,6 +1,7 @@
 import AppKit
 import CoreImage
 import CoreImage.CIFilterBuiltins
+import ImageIO
 import MarkdownUI
 import Observation
 import QuartzCore
@@ -128,6 +129,8 @@ final class ShareCardBackdropCache {
 struct ChatShareCardContent: View {
     let text: String
     let appearance: ShareCardAppearance
+    var images: [URL: CGImage] = [:]
+    var isLoadingImages: Bool = false
 
     private var isDark: Bool { appearance == .dark }
 
@@ -684,7 +687,62 @@ struct ChatShareCardContent: View {
         }
     }
 
+    /// Extracts all supported remote image URLs from share-card Markdown, ignoring fenced/inline code.
+    static func imageURLs(in text: String) -> [URL] {
+        imageURLs(inFormattedMarkdown: formattedMarkdown(from: text))
+    }
+
+    static func imageURLs(inFormattedMarkdown markdown: String) -> [URL] {
+        let lines = markdown.components(separatedBy: "\n")
+        var urls: [URL] = []
+        var seen: Set<URL> = []
+        var fence: (character: Character, count: Int)?
+
+        for line in lines {
+            if let current = fence {
+                if let marker = fenceMarker(in: line),
+                   marker.character == current.character,
+                   marker.count >= current.count,
+                   marker.rest.trimmingCharacters(in: .whitespaces).isEmpty {
+                    fence = nil
+                }
+                continue
+            }
+            if let marker = fenceMarker(in: line),
+               !(marker.character == "`" && marker.rest.contains("`")) {
+                fence = (marker.character, marker.count)
+                continue
+            }
+            guard line.contains("![") else { continue }
+            let parsed = ChatInlineText.parsed(line)
+            for run in parsed.runs {
+                guard let url = run.imageURL,
+                      ChatImageService.supports(url),
+                      ChatMath.formula(url) == nil,
+                      seen.insert(url).inserted else { continue }
+                urls.append(url)
+            }
+        }
+        return urls
+    }
+
+    private func visibleParts(from markdown: String) -> [ChatGalleryPart] {
+        ChatImageGalleryContent.parts(markdown).compactMap { part in
+            switch part {
+            case .markdown(let body):
+                return .markdown(body)
+            case .images(let photos):
+                if isLoadingImages {
+                    return .images(photos)
+                }
+                let loaded = photos.filter { images[$0.url] != nil }
+                return loaded.isEmpty ? nil : .images(loaded)
+            }
+        }
+    }
+
     var body: some View {
+        let parts = visibleParts(from: formattedMarkdown)
         VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 8) {
                 Image("AskyLogo")
@@ -697,110 +755,141 @@ struct ChatShareCardContent: View {
                 Spacer(minLength: 0)
             }
 
-            Markdown(formattedMarkdown)
-                .markdownTextStyle {
-                    FontSize(14)
-                    FontWeight(.regular)
-                    ForegroundColor(primaryTextColor)
-                }
-                .markdownTextStyle(\.strong) {
-                    FontWeight(.semibold)
-                }
-                .markdownTextStyle(\.code) {
-                    FontSize(12.5)
-                    FontFamilyVariant(.monospaced)
-                    BackgroundColor(codeBackgroundColor)
-                }
-                .markdownTextStyle(\.link) {
-                    ForegroundColor(isDark ? Color(red: 0.45, green: 0.72, blue: 1.0) : Color(red: 0.08, green: 0.42, blue: 0.85))
-                    UnderlineStyle(.single)
-                }
-                .markdownBlockStyle(\.heading1) { configuration in
-                    configuration.label
-                        .markdownTextStyle {
-                            FontSize(15.5)
-                            FontWeight(.semibold)
-                            ForegroundColor(primaryTextColor)
-                        }
-                        .markdownMargin(top: 14, bottom: 6)
-                }
-                .markdownBlockStyle(\.heading2, body: sectionHeading)
-                .markdownBlockStyle(\.heading3, body: sectionHeading)
-                .markdownBlockStyle(\.heading4, body: sectionHeading)
-                .markdownBlockStyle(\.heading5, body: sectionHeading)
-                .markdownBlockStyle(\.heading6, body: sectionHeading)
-                .markdownBlockStyle(\.paragraph) { configuration in
-                    configuration.label
-                        .lineSpacing(5)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .markdownMargin(top: 0, bottom: 10)
-                }
-                .markdownBlockStyle(\.listItem) { configuration in
-                    configuration.label
-                        .markdownMargin(top: 6, bottom: 6)
-                }
-                .markdownBlockStyle(\.codeBlock) { configuration in
-                    configuration.label
-                        .markdownTextStyle {
-                            FontSize(12)
-                            FontFamilyVariant(.monospaced)
-                            ForegroundColor(primaryTextColor)
-                        }
-                        .lineSpacing(4)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 13)
-                        .padding(.vertical, 11)
-                        .background(codeBackgroundColor, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .strokeBorder(borderColor, lineWidth: 0.5)
-                        }
-                        .markdownMargin(top: 4, bottom: 12)
-                }
-                .markdownBlockStyle(\.blockquote) { configuration in
-                    HStack(spacing: 10) {
-                        RoundedRectangle(cornerRadius: 2)
-                            .fill(subtleTextColor.opacity(0.45))
-                            .frame(width: 3)
-                        configuration.label
-                            .markdownTextStyle {
-                                ForegroundColor(subtleTextColor)
-                            }
+            VStack(alignment: .leading, spacing: 12) {
+                ForEach(Array(parts.enumerated()), id: \.offset) { _, part in
+                    switch part {
+                    case .markdown(let body):
+                        markdownBlock(body)
+                    case .images(let photos):
+                        ShareCardImageGrid(
+                            photos: photos,
+                            images: images,
+                            isLoading: isLoadingImages,
+                            borderColor: borderColor,
+                            placeholderColor: codeBackgroundColor
+                        )
                     }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func markdownBlock(_ content: String) -> some View {
+        Markdown(content)
+            .markdownTextStyle {
+                FontSize(14)
+                FontWeight(.regular)
+                ForegroundColor(primaryTextColor)
+            }
+            .markdownTextStyle(\.strong) {
+                FontWeight(.semibold)
+            }
+            .markdownTextStyle(\.code) {
+                FontSize(12.5)
+                FontFamilyVariant(.monospaced)
+                BackgroundColor(codeBackgroundColor)
+            }
+            .markdownTextStyle(\.link) {
+                ForegroundColor(isDark ? Color(red: 0.45, green: 0.72, blue: 1.0) : Color(red: 0.08, green: 0.42, blue: 0.85))
+                UnderlineStyle(.single)
+            }
+            .markdownBlockStyle(\.heading1) { configuration in
+                configuration.label
+                    .markdownTextStyle {
+                        FontSize(15.5)
+                        FontWeight(.semibold)
+                        ForegroundColor(primaryTextColor)
+                    }
+                    .markdownMargin(top: 14, bottom: 6)
+            }
+            .markdownBlockStyle(\.heading2, body: sectionHeading)
+            .markdownBlockStyle(\.heading3, body: sectionHeading)
+            .markdownBlockStyle(\.heading4, body: sectionHeading)
+            .markdownBlockStyle(\.heading5, body: sectionHeading)
+            .markdownBlockStyle(\.heading6, body: sectionHeading)
+            .markdownBlockStyle(\.paragraph) { configuration in
+                configuration.label
+                    .lineSpacing(5)
                     .fixedSize(horizontal: false, vertical: true)
-                    .markdownMargin(top: 2, bottom: 11)
-                }
-                .markdownBlockStyle(\.table) { configuration in
-                    configuration.label
-                        .markdownTableBorderStyle(.init(.allBorders, color: borderColor, width: 0.5))
-                        .markdownTableBackgroundStyle(.alternatingRows(
-                            Color.clear,
-                            isDark ? Color.white.opacity(0.03) : Color.black.opacity(0.025),
-                            header: codeBackgroundColor
-                        ))
-                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .strokeBorder(borderColor, lineWidth: 0.5)
-                        }
-                        .markdownMargin(top: 4, bottom: 12)
-                }
-                .markdownBlockStyle(\.tableCell) { configuration in
+                    .markdownMargin(top: 0, bottom: 10)
+            }
+            .markdownBlockStyle(\.listItem) { configuration in
+                configuration.label
+                    .markdownMargin(top: 6, bottom: 6)
+            }
+            .markdownBlockStyle(\.codeBlock) { configuration in
+                configuration.label
+                    .markdownTextStyle {
+                        FontSize(12)
+                        FontFamilyVariant(.monospaced)
+                        ForegroundColor(primaryTextColor)
+                    }
+                    .lineSpacing(4)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 13)
+                    .padding(.vertical, 11)
+                    .background(codeBackgroundColor, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .strokeBorder(borderColor, lineWidth: 0.5)
+                    }
+                    .markdownMargin(top: 4, bottom: 12)
+            }
+            .markdownBlockStyle(\.blockquote) { configuration in
+                HStack(spacing: 10) {
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(subtleTextColor.opacity(0.45))
+                        .frame(width: 3)
                     configuration.label
                         .markdownTextStyle {
-                            FontSize(12.5)
+                            ForegroundColor(subtleTextColor)
                         }
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 6)
                 }
-                .markdownBlockStyle(\.thematicBreak) {
-                    Rectangle()
-                        .fill(borderColor)
-                        .frame(height: 1)
-                        .markdownMargin(top: 10, bottom: 10)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
+                .fixedSize(horizontal: false, vertical: true)
+                .markdownMargin(top: 2, bottom: 11)
+            }
+            .markdownBlockStyle(\.table) { configuration in
+                configuration.label
+                    .markdownTableBorderStyle(.init(.allBorders, color: borderColor, width: 0.5))
+                    .markdownTableBackgroundStyle(.alternatingRows(
+                        Color.clear,
+                        isDark ? Color.white.opacity(0.03) : Color.black.opacity(0.025),
+                        header: codeBackgroundColor
+                    ))
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(borderColor, lineWidth: 0.5)
+                    }
+                    .markdownMargin(top: 4, bottom: 12)
+            }
+            .markdownBlockStyle(\.tableCell) { configuration in
+                configuration.label
+                    .markdownTextStyle {
+                        FontSize(12.5)
+                    }
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 6)
+            }
+            .markdownBlockStyle(\.thematicBreak) {
+                Rectangle()
+                    .fill(borderColor)
+                    .frame(height: 1)
+                    .markdownMargin(top: 10, bottom: 10)
+            }
+            .markdownImageProvider(
+                ShareCardMarkdownImageProvider(
+                    images: images,
+                    isLoading: isLoadingImages,
+                    borderColor: borderColor,
+                    placeholderColor: codeBackgroundColor
+                )
+            )
+            .markdownInlineImageProvider(
+                ShareCardInlineImageProvider(images: images)
+            )
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func sectionHeading(_ configuration: BlockConfiguration) -> some View {
@@ -814,6 +903,159 @@ struct ChatShareCardContent: View {
     }
 }
 
+private struct ShareCardSingleImage: View {
+    let cgImage: CGImage
+    let maxHeight: CGFloat
+    let cornerRadius: CGFloat
+    let borderColor: Color
+
+    var body: some View {
+        let width = CGFloat(max(1, cgImage.width))
+        let height = CGFloat(max(1, cgImage.height))
+        let aspect = width / height
+        let maxWidth = min(width, maxHeight * aspect)
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+
+        Image(decorative: cgImage, scale: 1.0)
+            .resizable()
+            .aspectRatio(aspect, contentMode: .fit)
+            .clipShape(shape)
+            .overlay {
+                shape.strokeBorder(borderColor, lineWidth: 0.5)
+            }
+            .frame(maxWidth: maxWidth, alignment: .leading)
+    }
+}
+
+private struct ShareCardImageGrid: View {
+    let photos: [ChatGalleryImage]
+    let images: [URL: CGImage]
+    let isLoading: Bool
+    let borderColor: Color
+    let placeholderColor: Color
+
+    var body: some View {
+        if photos.count == 1, let photo = photos.first {
+            if let cgImage = images[photo.url] {
+                ShareCardSingleImage(
+                    cgImage: cgImage,
+                    maxHeight: 360,
+                    cornerRadius: 12,
+                    borderColor: borderColor
+                )
+            } else if isLoading {
+                let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
+                shape
+                    .fill(placeholderColor)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 168)
+                    .overlay {
+                        ProgressView().controlSize(.small)
+                    }
+                    .overlay {
+                        shape.strokeBorder(borderColor, lineWidth: 0.5)
+                    }
+            }
+        } else if photos.count >= 2 {
+            let columns = (photos.count == 2 || photos.count == 4) ? 2 : 3
+            let rows = stride(from: 0, to: photos.count, by: columns).map {
+                Array(photos[$0..<min($0 + columns, photos.count)])
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                    HStack(spacing: 8) {
+                        ForEach(Array(row.enumerated()), id: \.offset) { _, photo in
+                            tile(for: photo)
+                        }
+                        if row.count < columns {
+                            ForEach(0..<(columns - row.count), id: \.self) { _ in
+                                Color.clear.aspectRatio(1, contentMode: .fit)
+                            }
+                        }
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    @ViewBuilder
+    private func tile(for photo: ChatGalleryImage) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
+        Color.clear
+            .aspectRatio(1, contentMode: .fit)
+            .overlay {
+                if let cgImage = images[photo.url] {
+                    Image(decorative: cgImage, scale: 1.0)
+                        .resizable()
+                        .scaledToFill()
+                } else if isLoading {
+                    shape
+                        .fill(placeholderColor)
+                        .overlay { ProgressView().controlSize(.small) }
+                }
+            }
+            .clipShape(shape)
+            .overlay {
+                shape.strokeBorder(borderColor, lineWidth: 0.5)
+            }
+    }
+}
+
+private struct ShareCardMarkdownImageProvider: ImageProvider {
+    let images: [URL: CGImage]
+    let isLoading: Bool
+    let borderColor: Color
+    let placeholderColor: Color
+
+    @ViewBuilder
+    func makeImage(url: URL?) -> some View {
+        if let url, let cgImage = images[url] {
+            ShareCardSingleImage(
+                cgImage: cgImage,
+                maxHeight: 320,
+                cornerRadius: 10,
+                borderColor: borderColor
+            )
+        } else if isLoading {
+            let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
+            shape
+                .fill(placeholderColor)
+                .frame(maxWidth: .infinity)
+                .frame(height: 140)
+                .overlay { ProgressView().controlSize(.small) }
+                .overlay { shape.strokeBorder(borderColor, lineWidth: 0.5) }
+        } else {
+            EmptyView()
+        }
+    }
+}
+
+private struct ShareCardInlineImageProvider: InlineImageProvider {
+    let images: [URL: CGImage]
+
+    func image(with url: URL, label: String) async throws -> Image {
+        if let cgImage = images[url] {
+            return await MainActor.run {
+                let width = CGFloat(max(1, cgImage.width))
+                let height = CGFloat(max(1, cgImage.height))
+                let nsImage = NSImage(cgImage: cgImage, size: NSSize(width: 14 * width / height, height: 14))
+                return Image(nsImage: nsImage)
+            }
+        }
+        let data = try await ChatImageService.shared.imageData(from: url)
+        guard let cgImage = ChatShareCardRenderer.decodeCGImage(from: data) else {
+            throw URLError(.cannotDecodeContentData)
+        }
+        return await MainActor.run {
+            let width = CGFloat(max(1, cgImage.width))
+            let height = CGFloat(max(1, cgImage.height))
+            let nsImage = NSImage(cgImage: cgImage, size: NSSize(width: 14 * width / height, height: 14))
+            return Image(nsImage: nsImage)
+        }
+    }
+}
+
 struct ChatShareCardView: View {
     static let canvasWidth: CGFloat = 600
     private static let outerHorizontalPadding: CGFloat = 36
@@ -822,6 +1064,7 @@ struct ChatShareCardView: View {
 
     let text: String
     let appearance: ShareCardAppearance
+    var images: [URL: CGImage] = [:]
 
     private var isDark: Bool { appearance == .dark }
     private var backdrop: ShareCardBackdropCache.Pair { ShareCardBackdropCache.shared.backdrop(for: appearance) }
@@ -898,7 +1141,7 @@ struct ChatShareCardView: View {
                     .clipped()
             }
 
-            ChatShareCardContent(text: text, appearance: appearance)
+            ChatShareCardContent(text: text, appearance: appearance, images: images)
                 .padding(.horizontal, 28)
                 .padding(.vertical, 26)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -934,14 +1177,96 @@ struct ChatShareCardView: View {
 
 @MainActor
 enum ChatShareCardRenderer {
-    static func renderPNG(text: String, appearance: ShareCardAppearance, scale: CGFloat = 2.0) -> Data? {
-        let view = ChatShareCardView(text: text, appearance: appearance)
+    nonisolated static func decodeCGImage(from data: Data) -> CGImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceShouldCacheImmediately: true
+        ]
+        guard let image = CGImageSourceCreateImageAtIndex(source, 0, options as CFDictionary),
+              image.width > 0, image.height > 0 else {
+            return nil
+        }
+        return image
+    }
+
+    static func loadImages(
+        for text: String,
+        existing: [URL: CGImage] = [:],
+        timeout: Duration = .seconds(8),
+        fetchData: @escaping @Sendable (URL) async throws -> Data = { try await ChatImageService.shared.imageData(from: $0) }
+    ) async -> [URL: CGImage] {
+        let urls = ChatShareCardContent.imageURLs(in: text)
+        guard !urls.isEmpty else { return existing }
+        let missing = urls.filter { existing[$0] == nil }
+        guard !missing.isEmpty else { return existing }
+
+        let fetched: [URL: CGImage] = await withTaskGroup(of: (URL?, CGImage?).self) { group in
+            group.addTask {
+                try? await Task.sleep(for: timeout)
+                return (nil, nil)
+            }
+            for url in missing {
+                group.addTask {
+                    guard let data = try? await fetchData(url),
+                          let image = decodeCGImage(from: data) else {
+                        return (url, nil)
+                    }
+                    return (url, image)
+                }
+            }
+
+            var loaded: [URL: CGImage] = [:]
+            var completed = 0
+            for await (url, image) in group {
+                guard let url else {
+                    group.cancelAll()
+                    break
+                }
+                completed += 1
+                if let image {
+                    loaded[url] = image
+                }
+                if completed == missing.count {
+                    group.cancelAll()
+                    break
+                }
+            }
+            return loaded
+        }
+
+        guard !fetched.isEmpty else { return existing }
+        var merged = existing
+        for (url, image) in fetched {
+            merged[url] = image
+        }
+        return merged
+    }
+
+    static func renderPNG(
+        text: String,
+        appearance: ShareCardAppearance,
+        images: [URL: CGImage] = [:],
+        scale: CGFloat = 2.0
+    ) -> Data? {
+        let view = ChatShareCardView(text: text, appearance: appearance, images: images)
         let renderer = ImageRenderer(content: view)
         renderer.scale = scale
         renderer.proposedSize = ProposedViewSize(width: ChatShareCardView.canvasWidth, height: nil)
         guard let cgImage = renderer.cgImage else { return nil }
         let rep = NSBitmapImageRep(cgImage: cgImage)
         return rep.representation(using: .png, properties: [:])
+    }
+
+    static func renderPNGLoadingImages(
+        text: String,
+        appearance: ShareCardAppearance,
+        existingImages: [URL: CGImage] = [:],
+        timeout: Duration = .seconds(8),
+        scale: CGFloat = 2.0,
+        fetchData: @escaping @Sendable (URL) async throws -> Data = { try await ChatImageService.shared.imageData(from: $0) }
+    ) async -> Data? {
+        let images = await loadImages(for: text, existing: existingImages, timeout: timeout, fetchData: fetchData)
+        return renderPNG(text: text, appearance: appearance, images: images, scale: scale)
     }
 }
 
@@ -1394,6 +1719,11 @@ private struct ChatSharePreviewSheet: View {
     @State private var errorMessage: String?
     @State private var resumeErrorSuspension: (() -> Void)?
     @State private var shareAnchor = ShareAnchorBox()
+    @State private var resolvedImages: [URL: CGImage] = [:]
+    @State private var completedImageLoadTexts: Set<String> = []
+    @State private var isLoadingImages = false
+    @State private var isExporting = false
+    @State private var exportTask: Task<Void, Never>?
 
     init(
         text: String,
@@ -1502,7 +1832,12 @@ private struct ChatSharePreviewSheet: View {
 
                 Spacer(minLength: 0)
 
-                ChatShareCardContent(text: activeText, appearance: appearance)
+                ChatShareCardContent(
+                    text: activeText,
+                    appearance: appearance,
+                    images: resolvedImages,
+                    isLoadingImages: isLoadingImages
+                )
                     .padding(.horizontal, 22)
                     .padding(.vertical, 20)
                     .frame(width: Self.modalWidth - Self.cardHorizontalInset * 2, alignment: .leading)
@@ -1602,9 +1937,38 @@ private struct ChatSharePreviewSheet: View {
             message: errorMessage ?? "",
             buttons: [NSLocalizedString("好", comment: "")]
         )
+        .onChange(of: activeText) { _, _ in
+            exportTask?.cancel()
+            exportTask = nil
+            isExporting = false
+        }
         .onDisappear {
+            exportTask?.cancel()
+            exportTask = nil
+            isExporting = false
             resumeErrorSuspension?()
             resumeErrorSuspension = nil
+        }
+        .task(id: activeText) {
+            let targetText = activeText
+            let urls = ChatShareCardContent.imageURLs(in: targetText)
+            guard !urls.isEmpty else {
+                isLoadingImages = false
+                completedImageLoadTexts.insert(targetText)
+                return
+            }
+            let missing = urls.filter { resolvedImages[$0] == nil }
+            guard !missing.isEmpty else {
+                isLoadingImages = false
+                completedImageLoadTexts.insert(targetText)
+                return
+            }
+            isLoadingImages = true
+            let loaded = await ChatShareCardRenderer.loadImages(for: targetText, existing: resolvedImages)
+            guard !Task.isCancelled else { return }
+            resolvedImages = loaded
+            completedImageLoadTexts.insert(targetText)
+            isLoadingImages = false
         }
         .task(id: copied) {
             guard copied else { return }
@@ -1625,39 +1989,85 @@ private struct ChatSharePreviewSheet: View {
         errorMessage = message
     }
 
-    private func presentSystemShare() {
-        guard let anchor = shareAnchor.view,
-              let png = ChatShareCardRenderer.renderPNG(text: activeText, appearance: appearance),
-              let url = try? ShareImageService.writeTemporarySharePNG(png) else {
-            showError(NSLocalizedString("生成分享图片失败", comment: ""))
+    private func withRenderedPNG(_ perform: @escaping @MainActor (Data) -> Void) {
+        guard !isExporting else { return }
+        let targetText = activeText
+        let targetAppearance = appearance
+        let urls = ChatShareCardContent.imageURLs(in: targetText)
+        let needsImageLoad = !urls.isEmpty
+            && !completedImageLoadTexts.contains(targetText)
+            && urls.contains { resolvedImages[$0] == nil }
+
+        if !needsImageLoad {
+            guard let png = ChatShareCardRenderer.renderPNG(
+                text: targetText,
+                appearance: targetAppearance,
+                images: resolvedImages
+            ) else {
+                showError(NSLocalizedString("生成分享图片失败", comment: ""))
+                return
+            }
+            perform(png)
             return
         }
-        presentSystemShareAction(url, anchor)
+
+        isExporting = true
+        exportTask?.cancel()
+        exportTask = Task { @MainActor in
+            defer {
+                isExporting = false
+                exportTask = nil
+            }
+            let loaded = await ChatShareCardRenderer.loadImages(for: targetText, existing: resolvedImages)
+            guard !Task.isCancelled, activeText == targetText else { return }
+            resolvedImages = loaded
+            completedImageLoadTexts.insert(targetText)
+            isLoadingImages = false
+            guard let png = ChatShareCardRenderer.renderPNG(
+                text: targetText,
+                appearance: appearance,
+                images: loaded
+            ) else {
+                showError(NSLocalizedString("生成分享图片失败", comment: ""))
+                return
+            }
+            perform(png)
+        }
+    }
+
+    private func presentSystemShare() {
+        withRenderedPNG { png in
+            guard let anchor = shareAnchor.view,
+                  let url = try? ShareImageService.writeTemporarySharePNG(png) else {
+                showError(NSLocalizedString("生成分享图片失败", comment: ""))
+                return
+            }
+            presentSystemShareAction(url, anchor)
+        }
     }
 
     private func copyImage() {
-        guard let png = ChatShareCardRenderer.renderPNG(text: activeText, appearance: appearance),
-              ShareImageService.copyPNG(png) else {
-            showError(NSLocalizedString("生成分享图片失败", comment: ""))
-            return
+        withRenderedPNG { png in
+            guard ShareImageService.copyPNG(png) else {
+                showError(NSLocalizedString("生成分享图片失败", comment: ""))
+                return
+            }
+            copied = true
         }
-        copied = true
     }
 
     private func saveImage() {
-        guard let png = ChatShareCardRenderer.renderPNG(text: activeText, appearance: appearance) else {
-            showError(NSLocalizedString("生成分享图片失败", comment: ""))
-            return
-        }
-        let resume = suspendAutoDismiss()
-        Task {
-            defer { resume() }
-            do {
-                if try await ShareImageService.savePNG(png, for: windowProvider()) != nil {
-                    saved = true
+        withRenderedPNG { png in
+            let resume = suspendAutoDismiss()
+            Task {
+                defer { resume() }
+                do {
+                    if try await ShareImageService.savePNG(png, for: windowProvider()) != nil {
+                        saved = true
+                    }
+                } catch {
+                    showError(error.localizedDescription)
                 }
-            } catch {
-                showError(error.localizedDescription)
             }
         }
     }

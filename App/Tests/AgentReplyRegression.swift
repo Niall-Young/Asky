@@ -4408,6 +4408,118 @@ enum AgentReplyRegression {
             print("Share card \(appearance.rawValue): \(rep.pixelsWide)x\(rep.pixelsHigh) (\(png.count) bytes)")
         }
 
+        // 2c. Verify share card extracts image URLs accurately and renders preloaded single/multi images into exported PNGs.
+        func makeSolidTestPNG(width: Int, height: Int, color: NSColor) -> Data {
+            let rep = NSBitmapImageRep(
+                bitmapDataPlanes: nil, pixelsWide: width, pixelsHigh: height,
+                bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0
+            )!
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+            color.setFill()
+            NSRect(x: 0, y: 0, width: width, height: height).fill()
+            NSGraphicsContext.restoreGraphicsState()
+            return rep.representation(using: .png, properties: [:])!
+        }
+
+        func countMatchingPixels(in png: Data, r: CGFloat, g: CGFloat, b: CGFloat, tolerance: CGFloat = 0.14) -> Int {
+            guard let rep = NSBitmapImageRep(data: png) else { return 0 }
+            var matches = 0
+            for y in stride(from: 0, to: rep.pixelsHigh, by: 4) {
+                for x in stride(from: 0, to: rep.pixelsWide, by: 4) {
+                    guard let color = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { continue }
+                    if abs(color.redComponent - r) <= tolerance,
+                       abs(color.greenComponent - g) <= tolerance,
+                       abs(color.blueComponent - b) <= tolerance {
+                        matches += 1
+                    }
+                }
+            }
+            return matches
+        }
+
+        let singlePhotoURL = URL(string: "https://example.com/qiandao-lake.png")!
+        let galleryPhoto2URL = URL(string: "https://example.com/qiandao-meifeng.png")!
+        let galleryPhoto3URL = URL(string: "https://example.com/qiandao-sunset.png")!
+        let ignoredCodeURL = URL(string: "https://example.com/in-code.png")!
+        let singlePhotoReply = """
+        千岛湖本质上是新安江水电站蓄水形成的人工湖，1078 座岛散布湖面，属于「风景够看、节奏得慢」的度假型目的地。[千岛湖三日游记](https://example.com/article)
+
+        ![千岛湖俯瞰](\(singlePhotoURL.absoluteString))
+        [来源](https://example.com/photo-source)
+
+        真正有意思的是两点：一是梅峰岛观景台俯瞰一片小岛，二是水底下沉着贺城和狮城两座千年古城。
+
+        行内代码中的 `![忽略](\(ignoredCodeURL.absoluteString))` 不应被加载。
+
+        ```markdown
+        ![围栏忽略](\(ignoredCodeURL.absoluteString))
+        ```
+        """
+        let extractedURLs = ChatShareCardContent.imageURLs(in: singlePhotoReply)
+        precondition(extractedURLs == [singlePhotoURL],
+                     "Expected only the real remote photo URL to be extracted, got \(extractedURLs)")
+
+        let tealPNG = makeSolidTestPNG(width: 800, height: 600, color: NSColor(srgbRed: 0.05, green: 0.72, blue: 0.78, alpha: 1))
+        let coralPNG = makeSolidTestPNG(width: 640, height: 640, color: NSColor(srgbRed: 0.94, green: 0.34, blue: 0.28, alpha: 1))
+        let amberPNG = makeSolidTestPNG(width: 640, height: 640, color: NSColor(srgbRed: 0.96, green: 0.76, blue: 0.14, alpha: 1))
+        let stubImages: [URL: Data] = [
+            singlePhotoURL: tealPNG,
+            galleryPhoto2URL: coralPNG,
+            galleryPhoto3URL: amberPNG
+        ]
+
+        guard let withoutPhotoPNG = ChatShareCardRenderer.renderPNG(text: singlePhotoReply, appearance: .light),
+              let withoutPhotoRep = NSBitmapImageRep(data: withoutPhotoPNG) else {
+            preconditionFailure("Expected fallback render when images fail to load")
+        }
+        guard let withSinglePhotoPNG = await ChatShareCardRenderer.renderPNGLoadingImages(
+            text: singlePhotoReply,
+            appearance: .light,
+            fetchData: { url in
+                guard let data = stubImages[url] else { throw URLError(.fileDoesNotExist) }
+                return data
+            }
+        ), let withSinglePhotoRep = NSBitmapImageRep(data: withSinglePhotoPNG) else {
+            preconditionFailure("Expected share card PNG with single photo")
+        }
+        precondition(withSinglePhotoRep.pixelsHigh > withoutPhotoRep.pixelsHigh + 400,
+                     "Expected single photo to expand exported share card height (\(withSinglePhotoRep.pixelsHigh) vs \(withoutPhotoRep.pixelsHigh))")
+        let tealMatches = countMatchingPixels(in: withSinglePhotoPNG, r: 0.05, g: 0.72, b: 0.78)
+        precondition(tealMatches > 2000,
+                     "Expected rendered single photo pixels to appear in exported share card PNG, got \(tealMatches) sampled pixels")
+        try withSinglePhotoPNG.write(to: URL(filePath: "build/share-card-single-image.png"))
+        print("Share card single-image: \(withSinglePhotoRep.pixelsWide)x\(withSinglePhotoRep.pixelsHigh) (teal samples: \(tealMatches))")
+
+        let multiPhotoReply = """
+        千岛湖几处经典机位：
+
+        ![千岛湖俯瞰](\(singlePhotoURL.absoluteString))
+        ![梅峰岛](\(galleryPhoto2URL.absoluteString))
+        ![天屿山日落](\(galleryPhoto3URL.absoluteString))
+        [来源](https://example.com/gallery-source)
+
+        秋冬淡季人少，湖景反而更通透。
+        """
+        guard let multiPhotoPNG = await ChatShareCardRenderer.renderPNGLoadingImages(
+            text: multiPhotoReply,
+            appearance: .dark,
+            fetchData: { url in
+                guard let data = stubImages[url] else { throw URLError(.fileDoesNotExist) }
+                return data
+            }
+        ), let multiPhotoRep = NSBitmapImageRep(data: multiPhotoPNG) else {
+            preconditionFailure("Expected share card PNG with multi-image grid")
+        }
+        let multiTeal = countMatchingPixels(in: multiPhotoPNG, r: 0.05, g: 0.72, b: 0.78)
+        let multiCoral = countMatchingPixels(in: multiPhotoPNG, r: 0.94, g: 0.34, b: 0.28)
+        let multiAmber = countMatchingPixels(in: multiPhotoPNG, r: 0.96, g: 0.76, b: 0.14)
+        precondition(multiTeal > 500 && multiCoral > 500 && multiAmber > 500,
+                     "Expected all 3 gallery images to render in exported share card PNG, got teal=\(multiTeal) coral=\(multiCoral) amber=\(multiAmber)")
+        try multiPhotoPNG.write(to: URL(filePath: "build/share-card-multi-image.png"))
+        print("Share card multi-image: \(multiPhotoRep.pixelsWide)x\(multiPhotoRep.pixelsHigh) (samples: teal=\(multiTeal), coral=\(multiCoral), amber=\(multiAmber))")
+
         // 3. Open the actual share preview window for both short and long replies to inspect layout, entrance settle, and bottom fade.
         let longReply = sampleReply + "\n\n" + (1...6).map { index in
             "### 第 \(index) 项补充说明\n\n这是用于验证长图预览在固定高度截断后，底部是否通过平滑渐变自然融合到窗口背景中的长段落示例文本。"
