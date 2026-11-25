@@ -56,18 +56,16 @@ private final class ChatSourceBadgeAttachmentCell: NSTextAttachmentCell {
     }
 }
 
-/// Source attachments are the only hover targets; non-citation links stay directly clickable in prose.
+/// Clicking a single-source badge opens its URL directly; clicking a multi-source badge toggles its source list card.
+/// Non-citation links stay directly clickable in prose.
 final class ChatSourceTextView: ChatSelectableTextView, NSTextViewDelegate {
-    private var hoverTask: Task<Void, Never>?
-    private var sourceURL: URL?
     private var sourceTrackingArea: NSTrackingArea?
     private(set) var preview: ChatSourcePopover?
     var openLinkHandler: (URL) -> Bool = { ToolService.openLauncherURL($0) }
     var hasSourceBadges = false {
         didSet {
             guard hasSourceBadges != oldValue else { return }
-            if !hasSourceBadges { cancelPendingHover() }
-            syncScrollGuard()
+            if !hasSourceBadges { preview?.close(); preview = nil }
             if window != nil { updateTrackingAreas() }
         }
     }
@@ -142,7 +140,13 @@ final class ChatSourceTextView: ChatSelectableTextView, NSTextViewDelegate {
     func textView(_ textView: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
         if let sources = textStorage?.attribute(.chatSources, at: charIndex, effectiveRange: nil) as? [URL],
            !sources.isEmpty {
-            openSources(sources, at: charIndex)
+            if sources.count == 1, let single = sources.first {
+                ChatSourcePopover.active?.close()
+                preview = nil
+                openSourceURL(single)
+            } else {
+                toggleSources(sources, at: charIndex)
+            }
             return true
         }
         let url = (link as? URL) ?? (link as? String).flatMap(URL.init(string:))
@@ -158,15 +162,26 @@ final class ChatSourceTextView: ChatSelectableTextView, NSTextViewDelegate {
         return tooltip
     }
 
-    private func openSources(_ sources: [URL], at index: Int) {
+    func openSourceURL(_ url: URL) {
+        guard Self.isDirectOpenableLink(url) else { return }
+        _ = openLinkHandler(url)
+    }
+
+    func clearPreview(_ popover: ChatSourcePopover) {
+        if preview === popover { preview = nil }
+    }
+
+    private func toggleSources(_ sources: [URL], at index: Int) {
+        if let preview, preview.isShown, preview.matches(index: index, sources: sources) {
+            preview.close()
+            self.preview = nil
+            return
+        }
         guard sourceAnchor(at: index) != nil else { return }
-        hoverTask?.cancel()
-        hoverTask = nil
         preview?.close()
-        sourceURL = sources.first
-        let preview = ChatSourcePopover(textView: self, index: index, sources: sources)
-        self.preview = preview
-        preview.show()
+        let popover = ChatSourcePopover(textView: self, index: index, sources: sources)
+        self.preview = popover
+        popover.show()
     }
 
     override func updateTrackingAreas() {
@@ -176,7 +191,7 @@ final class ChatSourceTextView: ChatSelectableTextView, NSTextViewDelegate {
             self.sourceTrackingArea = nil
         }
         guard hasSourceBadges else { return }
-        let area = NSTrackingArea(rect: .zero, options: [.cursorUpdate, .mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self)
+        let area = NSTrackingArea(rect: .zero, options: [.cursorUpdate, .mouseMoved, .activeInKeyWindow, .inVisibleRect], owner: self)
         sourceTrackingArea = area
         addTrackingArea(area)
     }
@@ -194,7 +209,7 @@ final class ChatSourceTextView: ChatSelectableTextView, NSTextViewDelegate {
         return window.convertToScreen(convert(rect, to: nil))
     }
 
-    private func source(at location: NSPoint) -> (index: Int, sources: [URL])? {
+    func source(at location: NSPoint) -> (index: Int, sources: [URL])? {
         guard let manager = layoutManager, let container = textContainer, let storage = textStorage else { return nil }
         var point = convert(location, from: nil)
         point.x -= textContainerOrigin.x
@@ -217,215 +232,16 @@ final class ChatSourceTextView: ChatSelectableTextView, NSTextViewDelegate {
 
     override func mouseMoved(with event: NSEvent) {
         // Tracking areas also receive moves while this text sits behind the
-        // header or an action. Do not set a text cursor or open covered sources.
-        if ActionArrowCursor.applyIfCovered(event, in: window) {
-            cancelPendingHover()
-            return
-        }
+        // header or an action. Do not set a text cursor over covered regions.
+        if ActionArrowCursor.applyIfCovered(event, in: window) { return }
         super.mouseMoved(with: event)
         guard hasSourceBadges else { return }
         cursorUpdate(with: event)
-        guard let window, !ChatSourceScrollGuard.shared.isSuppressed(for: window) else {
-            cancelPendingHover(); return
-        }
-        guard let (index, sources) = source(at: event.locationInWindow), let url = sources.first else {
-            cancelPendingHover(); return
-        }
-        if sourceURL == url, hoverTask != nil || preview?.isShown == true { return }
-        guard let initialAnchor = sourceAnchor(at: index) else {
-            cancelPendingHover(); return
-        }
-        hoverTask?.cancel()
-        preview?.close()
-        sourceURL = url
-        hoverTask = Task { @MainActor [weak self] in
-            do { try await Task.sleep(for: .milliseconds(300)) } catch { return }
-            guard let self, let window = self.window,
-                  !ChatSourceScrollGuard.shared.isSuppressed(for: window),
-                  let currentAnchor = self.sourceAnchor(at: index),
-                  abs(currentAnchor.origin.x - initialAnchor.origin.x) < 1,
-                  abs(currentAnchor.origin.y - initialAnchor.origin.y) < 1 else {
-                self?.cancelPendingHover()
-                return
-            }
-            self.openSources(sources, at: index)
-        }
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        super.mouseExited(with: event)
-        cancelPendingHover()
-    }
-
-    func cancelPendingHover() {
-        hoverTask?.cancel()
-        hoverTask = nil
-        if preview?.isShown != true { sourceURL = nil }
     }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        syncScrollGuard()
-        if window == nil { cancelPendingHover(); preview?.close(); preview = nil; sourceURL = nil }
-    }
-
-    private func syncScrollGuard() {
-        if window != nil && hasSourceBadges {
-            ChatSourceScrollGuard.shared.register(self)
-        } else {
-            ChatSourceScrollGuard.shared.unregister(self)
-        }
-    }
-
-    deinit {
-        MainActor.assumeIsolated { ChatSourceScrollGuard.shared.unregister(self) }
-    }
-}
-
-/// Suppresses citation hover popovers during conversation scrolling and dismisses open cards
-/// so accidental pointer hovers over badges never interrupt scrolling.
-@MainActor
-final class ChatSourceScrollGuard {
-    static let shared = ChatSourceScrollGuard()
-
-    struct WindowScrollState {
-        var activeGesture = false
-        var activeMomentum = false
-        var lastEventTime: TimeInterval = 0
-        var suppressedUntil: TimeInterval = 0
-
-        mutating func record(
-            phase: NSEvent.Phase,
-            momentumPhase: NSEvent.Phase,
-            hasDelta: Bool,
-            at now: TimeInterval
-        ) -> Bool {
-            if !momentumPhase.isEmpty {
-                lastEventTime = now
-                if momentumPhase.contains(.ended) || momentumPhase.contains(.cancelled) {
-                    activeMomentum = false
-                    suppressedUntil = max(suppressedUntil, now + 0.25)
-                } else {
-                    activeMomentum = true
-                    suppressedUntil = max(suppressedUntil, now + 0.35)
-                }
-                return true
-            }
-
-            if !phase.isEmpty {
-                if phase == .mayBegin && !hasDelta { return false }
-                lastEventTime = now
-                if phase.contains(.ended) || phase.contains(.cancelled) {
-                    activeGesture = false
-                    suppressedUntil = max(suppressedUntil, now + 0.3)
-                } else {
-                    activeGesture = true
-                    activeMomentum = false
-                    suppressedUntil = max(suppressedUntil, now + 0.35)
-                }
-                return true
-            }
-
-            guard hasDelta else { return false }
-            activeGesture = false
-            activeMomentum = false
-            lastEventTime = now
-            suppressedUntil = max(suppressedUntil, now + 0.35)
-            return true
-        }
-
-        func isSuppressed(at now: TimeInterval) -> Bool {
-            if now < suppressedUntil { return true }
-            // Safety cap in case AppKit drops an ended/cancelled phase event.
-            if (activeGesture || activeMomentum), now - lastEventTime < 0.6 { return true }
-            return false
-        }
-    }
-
-    private struct Entry { weak var textView: ChatSourceTextView? }
-    private var entries: [Entry] = []
-    private var states: [ObjectIdentifier: WindowScrollState] = [:]
-    nonisolated(unsafe) private var monitor: Any?
-
-    func register(_ textView: ChatSourceTextView) {
-        entries.removeAll { $0.textView == nil || $0.textView === textView }
-        entries.append(Entry(textView: textView))
-        if monitor == nil {
-            monitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
-                let consumed = MainActor.assumeIsolated {
-                    self?.handle(event) ?? false
-                }
-                return consumed ? nil : event
-            }
-        }
-    }
-
-    func unregister(_ textView: ChatSourceTextView) {
-        entries.removeAll { $0.textView == nil || $0.textView === textView }
-        if entries.isEmpty, let monitor {
-            NSEvent.removeMonitor(monitor)
-            self.monitor = nil
-            states.removeAll()
-        }
-    }
-
-    func isSuppressed(for window: NSWindow, at now: TimeInterval = ProcessInfo.processInfo.systemUptime) -> Bool {
-        states[ObjectIdentifier(window)]?.isSuppressed(at: now) ?? false
-    }
-
-    @discardableResult
-    func recordScroll(
-        in window: NSWindow,
-        phase: NSEvent.Phase,
-        momentumPhase: NSEvent.Phase,
-        hasDelta: Bool,
-        at now: TimeInterval = ProcessInfo.processInfo.systemUptime
-    ) -> Bool {
-        var state = states[ObjectIdentifier(window)] ?? WindowScrollState()
-        guard state.record(phase: phase, momentumPhase: momentumPhase, hasDelta: hasDelta, at: now) else {
-            return false
-        }
-        states[ObjectIdentifier(window)] = state
-        if let active = ChatSourcePopover.active, active.isShown, active.parentWindow === window {
-            active.close()
-        }
-        for entry in entries where entry.textView?.window === window {
-            entry.textView?.cancelPendingHover()
-        }
-        return true
-    }
-
-    @discardableResult
-    func handle(_ event: NSEvent, at now: TimeInterval = ProcessInfo.processInfo.systemUptime) -> Bool {
-        entries.removeAll { $0.textView == nil }
-        let hasDelta = event.scrollingDeltaX != 0 || event.scrollingDeltaY != 0 || event.deltaX != 0 || event.deltaY != 0
-
-        if let active = ChatSourcePopover.active, active.isShown, event.window === active.panel {
-            if active.isScrollable { return false }
-            guard let parent = active.parentWindow else { return false }
-            let scroll = active.enclosingScrollView
-            guard recordScroll(in: parent, phase: event.phase, momentumPhase: event.momentumPhase, hasDelta: hasDelta, at: now) else {
-                return false
-            }
-            if let scroll {
-                scroll.scrollWheel(with: event)
-                return true
-            }
-            return false
-        }
-
-        guard let window = event.window else { return false }
-        let hasTarget = entries.contains { $0.textView?.window === window }
-            || (ChatSourcePopover.active?.isShown == true && ChatSourcePopover.active?.parentWindow === window)
-        guard hasTarget else { return false }
-
-        _ = recordScroll(in: window, phase: event.phase, momentumPhase: event.momentumPhase, hasDelta: hasDelta, at: now)
-        return false
-    }
-
-    func resetForTesting(window: NSWindow? = nil) {
-        if let window { states.removeValue(forKey: ObjectIdentifier(window)) }
-        else { states.removeAll() }
+        if window == nil { preview?.close(); preview = nil }
     }
 }
 
@@ -440,7 +256,10 @@ final class ChatSourcePopover {
     private var metadata: [URL: ChatLinkService.Preview] = [:]
     private var host: FirstMouseHostingView<AnyView>?
     private var metadataTask: Task<Void, Never>?
-    private var trackingTask: Task<Void, Never>?
+    nonisolated(unsafe) private var localMonitor: Any?
+    nonisolated(unsafe) private var globalMonitor: Any?
+    nonisolated(unsafe) private var observers: [NSObjectProtocol] = []
+    private var initialScrollOrigin: NSPoint?
     private(set) var isScrollable = false
     var isShown: Bool { panel.isVisible }
     var contentView: NSView? { panel.contentView }
@@ -453,6 +272,14 @@ final class ChatSourcePopover {
         self.sources = sources
     }
 
+    deinit {
+        removeMonitorsAndObservers()
+    }
+
+    func matches(index: Int, sources: [URL]) -> Bool {
+        self.index == index && self.sources == sources
+    }
+
     /// Prefer below the icon within the conversation; flip above before crossing its bottom edge.
     static func frame(size: NSSize, anchor: NSRect, screen: NSRect, viewport: NSRect) -> NSRect {
         let limits = screen.insetBy(dx: 8, dy: 8)
@@ -462,6 +289,15 @@ final class ChatSourcePopover {
         y = min(max(y, limits.minY), limits.maxY - size.height)
         let x = min(max(anchor.midX - size.width / 2, limits.minX), limits.maxX - size.width)
         return NSRect(x: round(x), y: round(y), width: size.width, height: size.height)
+    }
+
+    static func isActiveScroll(_ event: NSEvent) -> Bool {
+        let hasDelta = event.scrollingDeltaX != 0 || event.scrollingDeltaY != 0 || event.deltaX != 0 || event.deltaY != 0
+        if !event.momentumPhase.isEmpty { return true }
+        if !event.phase.isEmpty {
+            return !(event.phase == .mayBegin && !hasDelta)
+        }
+        return hasDelta
     }
 
     func show() {
@@ -506,18 +342,114 @@ final class ChatSourcePopover {
                 }
             }
         }
-        trackingTask = Task { @MainActor [weak self] in
-            var outside = 0
-            while !Task.isCancelled {
-                do { try await Task.sleep(for: .milliseconds(100)) } catch { return }
-                guard let self, self.isShown else { return }
-                guard let anchor = self.reposition() else { self.close(); return }
-                let pointer = NSEvent.mouseLocation
-                if self.panel.frame.insetBy(dx: -8, dy: -8).contains(pointer) || anchor.insetBy(dx: -10, dy: -10).contains(pointer) {
-                    outside = 0
-                } else { outside += 1 }
-                if outside >= 4 { self.close(); return }
+        installDismissalMonitors(for: parent)
+    }
+
+    /// Returns `true` when the event is consumed by the popover (e.g. Escape or forwarded scroll).
+    @discardableResult
+    func handleLocalEvent(_ event: NSEvent) -> Bool {
+        guard isShown else { return false }
+        switch event.type {
+        case .keyDown:
+            if event.keyCode == 53 {
+                close()
+                return true
             }
+            return false
+        case .scrollWheel:
+            if event.window === panel {
+                if isScrollable { return false }
+                guard Self.isActiveScroll(event) else { return false }
+                let scroll = enclosingScrollView
+                close()
+                if let scroll {
+                    scroll.scrollWheel(with: event)
+                    return true
+                }
+                return false
+            }
+            if event.window === parentWindow, Self.isActiveScroll(event) {
+                close()
+            }
+            return false
+        case .leftMouseDown, .rightMouseDown, .otherMouseDown:
+            if event.window === panel { return false }
+            if event.type == .leftMouseDown,
+               event.window === parentWindow,
+               textView?.source(at: event.locationInWindow)?.index == index {
+                // Forward clicks on the same badge so `clickedOnLink` toggles this card closed cleanly.
+                return false
+            }
+            close()
+            return false
+        default:
+            return false
+        }
+    }
+
+    private func installDismissalMonitors(for parent: NSWindow) {
+        removeMonitorsAndObservers()
+        let localMask: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown, .scrollWheel, .keyDown]
+        localMonitor = NSEvent.addLocalMonitorForEvents(matching: localMask) { [weak self] event in
+            let consumed = MainActor.assumeIsolated {
+                self?.handleLocalEvent(event) ?? false
+            }
+            return consumed ? nil : event
+        }
+        let globalMask: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: globalMask) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.close()
+            }
+        }
+        let center = NotificationCenter.default
+        observers.append(center.addObserver(
+            forName: NSWindow.didResignKeyNotification, object: parent, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.close() }
+        })
+        observers.append(center.addObserver(
+            forName: NSWindow.willCloseNotification, object: parent, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.close() }
+        })
+        for name in [NSWindow.didMoveNotification, NSWindow.didResizeNotification] {
+            observers.append(center.addObserver(forName: name, object: parent, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self, self.isShown else { return }
+                    if self.reposition() == nil { self.close() }
+                }
+            })
+        }
+        if let clip = textView?.enclosingScrollView?.contentView {
+            clip.postsBoundsChangedNotifications = true
+            initialScrollOrigin = clip.bounds.origin
+            observers.append(center.addObserver(
+                forName: NSView.boundsDidChangeNotification, object: clip, queue: .main
+            ) { [weak self, weak clip] _ in
+                MainActor.assumeIsolated {
+                    guard let self, self.isShown, let clip, let initial = self.initialScrollOrigin else { return }
+                    if abs(clip.bounds.origin.x - initial.x) > 0.5 || abs(clip.bounds.origin.y - initial.y) > 0.5 {
+                        self.close()
+                    }
+                }
+            })
+        }
+    }
+
+    private nonisolated func removeMonitorsAndObservers() {
+        if let localMonitor {
+            NSEvent.removeMonitor(localMonitor)
+            self.localMonitor = nil
+        }
+        if let globalMonitor {
+            NSEvent.removeMonitor(globalMonitor)
+            self.globalMonitor = nil
+        }
+        if !observers.isEmpty {
+            let center = NotificationCenter.default
+            for observer in observers { center.removeObserver(observer) }
+            observers.removeAll()
         }
     }
 
@@ -538,7 +470,12 @@ final class ChatSourcePopover {
     }
 
     private func update() {
-        let rows = ChatSourcePreview(sources: sources, metadata: metadata)
+        let rows = ChatSourcePreview(sources: sources, metadata: metadata) { [weak self] url in
+            guard let self else { return }
+            let owner = self.textView
+            self.close()
+            owner?.openSourceURL(url)
+        }
         let measured = SurfacePanel.fittingSize(of: rows, maxWidth: ChatSourcePreview.width)
         let available = textView?.window?.screen?.visibleFrame.height ?? 700
         let maxHeight = min(460, available - 32)
@@ -578,9 +515,12 @@ final class ChatSourcePopover {
     func close() {
         if Self.active === self { Self.active = nil }
         metadataTask?.cancel()
-        trackingTask?.cancel()
+        metadataTask = nil
+        removeMonitorsAndObservers()
+        initialScrollOrigin = nil
         panel.remove()
         host = nil
+        textView?.clearPreview(self)
     }
 }
 struct ChatSourcePreview: View {
@@ -590,6 +530,7 @@ struct ChatSourcePreview: View {
     static let rowCornerRadius: CGFloat = cornerRadius - outerPadding
     let sources: [URL]
     var metadata: [URL: ChatLinkService.Preview] = [:]
+    var onOpen: ((URL) -> Void)? = nil
 
     private static let dayParser: DateFormatter = {
         let parser = DateFormatter()
@@ -612,7 +553,13 @@ struct ChatSourcePreview: View {
                     Rectangle().fill(ThemeColor.kBorder).frame(height: 1)
                         .padding(.horizontal, 8).padding(.vertical, 4)
                 }
-                Link(destination: url) {
+                Button {
+                    if let onOpen {
+                        onOpen(url)
+                    } else {
+                        _ = ToolService.openLauncherURL(url)
+                    }
+                } label: {
                     VStack(alignment: .leading, spacing: 4) {
                         HStack(spacing: 6) {
                             ChatSourceFavicon(data: metadata[url]?.favicon)

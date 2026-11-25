@@ -1002,24 +1002,6 @@ enum AgentReplyRegression {
         let directOnly = try AttributedString(markdown: "百度官网是 [https://www.baidu.com](https://www.baidu.com) 或 [百度官网](https://www.baidu.com)")
         precondition(ChatSourceTextView.sources(in: directOnly).isEmpty, "Non-citation links must not produce trailing source badges")
 
-        var scrollState = ChatSourceScrollGuard.WindowScrollState()
-        precondition(!scrollState.record(phase: .mayBegin, momentumPhase: [], hasDelta: false, at: 10.0),
-                     "Resting fingers without movement must not suppress hover")
-        precondition(!scrollState.isSuppressed(at: 10.0))
-        precondition(scrollState.record(phase: .began, momentumPhase: [], hasDelta: true, at: 10.1))
-        precondition(scrollState.isSuppressed(at: 10.2))
-        precondition(scrollState.record(phase: .ended, momentumPhase: [], hasDelta: false, at: 10.3))
-        precondition(scrollState.isSuppressed(at: 10.55), "Cooldown must bridge finger lift to momentum")
-        precondition(scrollState.record(phase: [], momentumPhase: .began, hasDelta: true, at: 10.4))
-        precondition(scrollState.record(phase: [], momentumPhase: .ended, hasDelta: false, at: 10.6))
-        precondition(scrollState.isSuppressed(at: 10.8))
-        precondition(!scrollState.isSuppressed(at: 11.0), "Hover must resume after momentum cooldown")
-        precondition(scrollState.record(phase: [], momentumPhase: [], hasDelta: true, at: 20.0))
-        precondition(scrollState.isSuppressed(at: 20.3))
-        precondition(!scrollState.isSuppressed(at: 20.4), "Discrete wheel cooldown must expire")
-        precondition(scrollState.record(phase: .began, momentumPhase: [], hasDelta: true, at: 30.0))
-        precondition(!scrollState.isSuppressed(at: 31.0), "Dropped end event must not stick suppression forever")
-
         let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 640, height: 440),
                               styleMask: [.titled], backing: .buffered, defer: false)
         window.title = "Asky Source Preview"
@@ -1036,10 +1018,10 @@ enum AgentReplyRegression {
             """).padding(28).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .background(scheme == .dark ? Color(white: 0.15) : .white).environment(\.colorScheme, scheme))
             if scheme == .dark {
-                // Exercise a real clip-view offset and a source close to the viewport bottom.
+                // Exercise a real clip-view offset and a multi-source badge close to the viewport bottom.
                 let document = NSHostingView(rootView: VStack(spacing: 0) {
                     Color.clear.frame(height: 500)
-                    ChatMarkdownView(text: "Wikipedia：Moonshot AI：Kimi 通过网页、API 和移动端提供服务，并支持图像和视频等多模态输入。[来源](https://devin.ai/)")
+                    ChatMarkdownView(text: "Wikipedia：Moonshot AI：Kimi 通过网页、API 和移动端提供服务，并支持图像和视频等多模态输入。[1](https://devin.ai/) [2](https://example.com/security)")
                         .padding(28)
                     Color.clear.frame(height: 300)
                 }.frame(width: 640, alignment: .topLeading).background(Color(white: 0.15)).environment(\.colorScheme, .dark))
@@ -1056,7 +1038,8 @@ enum AgentReplyRegression {
             try await Task.sleep(for: .milliseconds(500))
             view.layoutSubtreeIfNeeded()
             var badges = 0
-            var sourceText: ChatSourceTextView?
+            var multiSourceText: ChatSourceTextView?
+            var singleSourceText: ChatSourceTextView?
             var directLinkText: ChatSourceTextView?
             func inspect(_ node: NSView) {
                 if let text = node as? ChatSourceTextView, let storage = text.textStorage {
@@ -1066,12 +1049,16 @@ enum AgentReplyRegression {
                               storage.attribute(.chatSelectionText, at: range.location, effectiveRange: nil) == nil else { return }
                         precondition(attachment.image == nil && attachment.attachmentCell != nil,
                                      "Source badge must draw via vector attachment cell rather than resampled NSImage")
-                        if sourceText == nil { sourceText = text }
                         badges += 1
                         if firstSource == nil { firstSource = range.location }
                         precondition(storage.attribute(.link, at: range.location, effectiveRange: nil) as? URL != nil)
                         let sources = storage.attribute(.chatSources, at: range.location, effectiveRange: nil) as! [URL]
-                        if sources.count > 1 { precondition(sources.count == 4, "One tag must retain all four sources") }
+                        if sources.count > 1 {
+                            if multiSourceText == nil { multiSourceText = text }
+                            if scheme == .light { precondition(sources.count == 4, "One tag must retain all four sources") }
+                        } else if sources.count == 1, singleSourceText == nil {
+                            singleSourceText = text
+                        }
                     }
                     if storage.string.contains("打开官网") && storage.string.contains("https://www.baidu.com") {
                         directLinkText = text
@@ -1116,7 +1103,7 @@ enum AgentReplyRegression {
             guard let bitmap = surface.bitmapImageRepForCachingDisplay(in: surface.bounds) else { fatalError("capture") }
             surface.cacheDisplay(in: surface.bounds, to: bitmap)
             try bitmap.representation(using: .png, properties: [:])!.write(to: URL(filePath: "build/sources-" + name + ".png"))
-            if let text = sourceText, let storage = text.textStorage, let manager = text.layoutManager, let container = text.textContainer {
+            if let text = multiSourceText, let storage = text.textStorage, let manager = text.layoutManager, let container = text.textContainer {
                 var linkRange = NSRange()
                 // Target the source attachment, not an earlier heading or ordinary inline link.
                 storage.enumerateAttribute(.chatSources, in: NSRange(location: 0, length: storage.length)) { value, range, stop in
@@ -1125,10 +1112,22 @@ enum AgentReplyRegression {
                 let rect = manager.boundingRect(forGlyphRange: manager.glyphRange(forCharacterRange: linkRange, actualCharacterRange: nil), in: container)
                 let local = NSPoint(x: rect.midX + text.textContainerOrigin.x, y: rect.midY + text.textContainerOrigin.y)
                 let point = text.convert(local, to: nil)
-                let event = NSEvent.mouseEvent(with: .mouseMoved, location: point, modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 0, pressure: 0)!
-                text.mouseMoved(with: event)
+                let hoverEvent = NSEvent.mouseEvent(with: .mouseMoved, location: point, modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 0, pressure: 0)!
+                text.mouseMoved(with: hoverEvent)
                 try await Task.sleep(for: .milliseconds(450))
-                precondition(text.preview?.isShown == true, "Hovering a source must open its card")
+                precondition(text.preview?.isShown != true, "Hovering a source badge must not open its card")
+                precondition(text.textView(text, willDisplayToolTip: "https://devin.ai/", forCharacterAt: linkRange.location) == nil,
+                             "Source tag must suppress the default raw URL tooltip")
+
+                var multiOpened: [URL] = []
+                text.openLinkHandler = { url in multiOpened.append(url); return true }
+                precondition(text.textView(text, clickedOnLink: URL(string: "https://devin.ai/")!, at: linkRange.location),
+                             "Clicking a grouped source tag opens its list rather than navigating to the first URL")
+                precondition(multiOpened.isEmpty, "Clicking a multi-source tag must open the list instead of navigating directly")
+                precondition(text.preview?.isShown == true, "Clicking a multi-source tag must open its card")
+                try await Task.sleep(for: .milliseconds(500))
+                precondition(text.preview?.isShown == true, "Click-triggered source card must stay open without pointer hover")
+
                 let anchor = text.sourceAnchor(at: linkRange.location)!
                 let cardFrame = text.preview!.panel.frame
                 if scheme == .dark { precondition(cardFrame.minY >= anchor.maxY + 7, "Scrolled low source must open upward") }
@@ -1140,55 +1139,60 @@ enum AgentReplyRegression {
                     card.cacheDisplay(in: card.bounds, to: bitmap)
                     try bitmap.representation(using: .png, properties: [:])!.write(to: URL(filePath: "build/source-card-" + name + ".png"))
                 }
-                text.preview?.close()
-                precondition(text.textView(text, willDisplayToolTip: "https://devin.ai/", forCharacterAt: linkRange.location) == nil,
-                             "Source tag must suppress the default raw URL tooltip")
-                precondition(text.textView(text, clickedOnLink: URL(string: "https://devin.ai/")!, at: linkRange.location),
-                             "Clicking a grouped source tag opens its list rather than navigating to the first URL")
+
+                // Clicking the same multi-source badge again toggles the card closed.
+                let sameBadgeDown = NSEvent.mouseEvent(with: .leftMouseDown, location: point, modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+                precondition(text.preview?.handleLocalEvent(sameBadgeDown) == false,
+                             "Local monitor must let same-badge clicks reach clickedOnLink to toggle")
+                precondition(text.preview?.isShown == true, "Same-badge mouseDown must not prematurely dismiss before clickedOnLink")
+                precondition(text.textView(text, clickedOnLink: URL(string: "https://devin.ai/")!, at: linkRange.location))
+                precondition(text.preview?.isShown != true, "Clicking the same multi-source badge again must close its card")
+
+                // Re-open and verify Escape and outside click dismiss the card cleanly.
+                precondition(text.textView(text, clickedOnLink: URL(string: "https://devin.ai/")!, at: linkRange.location))
                 precondition(text.preview?.isShown == true)
-                if scheme == .dark {
-                    // Scrolling the parent conversation window immediately dismisses an open source card.
-                    ChatSourceScrollGuard.shared.recordScroll(in: window, phase: .began, momentumPhase: [], hasDelta: true)
-                    precondition(text.preview?.isShown != true, "Conversation scroll must dismiss an open source card")
+                let escEvent = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber, context: nil, characters: "\u{1b}", charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 53)!
+                precondition(text.preview?.handleLocalEvent(escEvent) == true, "Escape must be consumed by the open source card")
+                precondition(text.preview?.isShown != true, "Escape must dismiss an open source card")
 
-                    // Hovering during active scroll suppression must not open the card.
-                    text.mouseMoved(with: event)
-                    try await Task.sleep(for: .milliseconds(450))
-                    precondition(text.preview?.isShown != true, "Hover during scroll must not open source card")
+                precondition(text.textView(text, clickedOnLink: URL(string: "https://devin.ai/")!, at: linkRange.location))
+                precondition(text.preview?.isShown == true)
+                let outsideDown = NSEvent.mouseEvent(with: .leftMouseDown, location: NSPoint(x: 4, y: 4), modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+                _ = text.preview?.handleLocalEvent(outsideDown)
+                precondition(text.preview?.isShown != true, "Clicking outside must dismiss an open source card")
 
-                    // Explicit click still opens the card even right after scrolling.
-                    ChatSourceScrollGuard.shared.recordScroll(in: window, phase: [], momentumPhase: [], hasDelta: true)
-                    precondition(text.textView(text, clickedOnLink: URL(string: "https://devin.ai/")!, at: linkRange.location))
-                    precondition(text.preview?.isShown == true, "Explicit click must still open source card after scroll")
-                    text.preview?.close()
-                    ChatSourceScrollGuard.shared.resetForTesting(window: window)
-
-                    // A scroll arriving mid-hover cancels the pending 300ms timer.
-                    text.mouseMoved(with: event)
-                    try await Task.sleep(for: .milliseconds(100))
-                    ChatSourceScrollGuard.shared.recordScroll(in: window, phase: .began, momentumPhase: [], hasDelta: true)
-                    try await Task.sleep(for: .milliseconds(350))
-                    precondition(text.preview?.isShown != true, "Mid-hover scroll must cancel pending source popover")
-                    ChatSourceScrollGuard.shared.resetForTesting(window: window)
-
-                    // Moving the scroll viewport without a scrollWheel event (e.g. scrollbar drag) also aborts hover.
-                    if let enclosingScroll = text.enclosingScrollView {
-                        let beforeOrigin = enclosingScroll.contentView.bounds.origin
-                        text.mouseMoved(with: event)
-                        try await Task.sleep(for: .milliseconds(100))
-                        enclosingScroll.contentView.scroll(to: NSPoint(x: beforeOrigin.x, y: beforeOrigin.y + 40))
-                        enclosingScroll.reflectScrolledClipView(enclosingScroll.contentView)
-                        try await Task.sleep(for: .milliseconds(350))
-                        precondition(text.preview?.isShown != true, "Anchor shift during hover delay must abort source popover")
-                        enclosingScroll.contentView.scroll(to: beforeOrigin)
-                        enclosingScroll.reflectScrolledClipView(enclosingScroll.contentView)
+                if scheme == .light, let singleText = singleSourceText, let singleStorage = singleText.textStorage {
+                    var singleRange = NSRange()
+                    singleStorage.enumerateAttribute(.chatSources, in: NSRange(location: 0, length: singleStorage.length)) { value, range, stop in
+                        if value != nil { singleRange = range; stop.pointee = true }
                     }
+                    // Open multi-source card first, then click a single-source badge: must close card and open URL directly.
+                    precondition(text.textView(text, clickedOnLink: URL(string: "https://devin.ai/")!, at: linkRange.location))
+                    precondition(text.preview?.isShown == true)
 
-                    // After scrolling settles, hovering the same badge works again.
-                    ChatSourceScrollGuard.shared.resetForTesting(window: window)
-                    text.mouseMoved(with: event)
-                    try await Task.sleep(for: .milliseconds(450))
-                    precondition(text.preview?.isShown == true, "Hover must work again after scroll settles")
+                    var singleOpened: [URL] = []
+                    singleText.openLinkHandler = { url in singleOpened.append(url); return true }
+                    precondition(singleText.textView(singleText, clickedOnLink: URL(string: "https://devin.ai/")!, at: singleRange.location))
+                    precondition(singleOpened == [URL(string: "https://devin.ai/")!],
+                                 "Clicking a single-source badge must navigate directly to its URL")
+                    precondition(singleText.preview?.isShown != true, "Single-source badge must never open a preview card")
+                    precondition(text.preview?.isShown != true, "Clicking a single-source badge must close any other open source card")
+                }
+
+                if scheme == .dark, let enclosingScroll = text.enclosingScrollView {
+                    precondition(text.textView(text, clickedOnLink: URL(string: "https://devin.ai/")!, at: linkRange.location))
+                    precondition(text.preview?.isShown == true)
+                    let beforeOrigin = enclosingScroll.contentView.bounds.origin
+                    enclosingScroll.contentView.scroll(to: NSPoint(x: beforeOrigin.x, y: beforeOrigin.y + 40))
+                    enclosingScroll.reflectScrolledClipView(enclosingScroll.contentView)
+                    try await Task.sleep(for: .milliseconds(50))
+                    precondition(text.preview?.isShown != true, "Conversation scroll must dismiss an open source card")
+                    enclosingScroll.contentView.scroll(to: beforeOrigin)
+                    enclosingScroll.reflectScrolledClipView(enclosingScroll.contentView)
+
+                    // Clicking opens the card again right after scrolling.
+                    precondition(text.textView(text, clickedOnLink: URL(string: "https://devin.ai/")!, at: linkRange.location))
+                    precondition(text.preview?.isShown == true, "Explicit click must open source card after scroll")
                 }
                 text.preview?.close()
             }
@@ -3180,7 +3184,7 @@ enum AgentReplyRegression {
         precondition(quotes == 0 && text.selectedRange().length == 12, "Hover must preserve selection without invoking actions")
         menu.orderOut(nil)
         window.contentView = NSHostingView(rootView: ChatMarkdownView(
-            text: "这是可选择的正文 [来源](https://example.com/kimi)")
+            text: "这是可选择的正文 [1](https://example.com/kimi) [2](https://example.com/docs)")
             .padding(24).frame(width: 600, height: 300, alignment: .topLeading))
         try await Task.sleep(for: .milliseconds(400))
         let sourceText = descendants(window.contentView!).compactMap { $0 as? ChatSourceTextView }.first!
@@ -3200,8 +3204,10 @@ enum AgentReplyRegression {
             precondition(NSCursor.current == .arrow, "Source tag must show arrow through native event dispatch")
         }
         try await Task.sleep(for: .milliseconds(350))
+        precondition(sourceText.preview?.isShown != true, "Hovering a source tag must not open its card")
+        precondition(sourceText.textView(sourceText, clickedOnLink: URL(string: "https://example.com/kimi")!, at: sourceIndex))
         let card = sourceText.preview!.panel
-        precondition(card.isVisible && card.frame.width == 300, "Source hover opens compact card")
+        precondition(card.isVisible && card.frame.width == 300, "Clicking multi-source tag opens compact card")
         movePointer(card.convertPoint(toScreen: NSPoint(x: 24, y: card.frame.height / 2)))
         try await Task.sleep(for: .milliseconds(150))
         precondition(NSCursor.current == .arrow, "Source card row must retain the action cursor")
