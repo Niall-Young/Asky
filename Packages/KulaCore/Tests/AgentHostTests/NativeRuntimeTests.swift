@@ -583,10 +583,16 @@ server.serve_forever()
         await agent.shutdown()
     }
 
-    @Test func customSystemPromptUpdatesLiveAndRevertsToDefault() async throws {
+    @Test func promptStyleAndCustomInstructionsUpdateLive() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
-        let script = ModelScript([NativeCompletion(text: "一"), NativeCompletion(text: "二"), NativeCompletion(text: "三"), NativeCompletion(text: "四")])
+        let script = ModelScript([
+            NativeCompletion(text: "一"),
+            NativeCompletion(text: "二"),
+            NativeCompletion(text: "三"),
+            NativeCompletion(text: "四"),
+            NativeCompletion(text: "五")
+        ])
         let promptBox = PromptBox()
         let storage = AgentSessionStorage(root: root)
         let agent = AgentHost(
@@ -594,48 +600,63 @@ server.serve_forever()
             configProvider: { RuntimeLaunchConfig(baseURL: "https://example.test/v1", model: "mock", apiKey: "secret") },
             toolsProvider: { [] },
             guidanceProvider: { ["插件附加说明"] },
-            systemPromptProvider: { await promptBox.value },
+            promptConfigProvider: { await promptBox.value },
             toolHandler: { .failure($0.requestID, .adapterFailure, "unexpected tool") }
         )
 
         _ = await collect(agent, AgentRequest(sessionID: "s1", text: "第一轮"))
-        await promptBox.set("你是精简版个人助理。")
+        await promptBox.set(AgentPromptConfiguration(style: .rigorous, customInstructions: nil))
         _ = await collect(agent, AgentRequest(sessionID: "s2", text: "第二轮"))
-        await promptBox.set("   \n  ")
+        await promptBox.set(AgentPromptConfiguration(style: .rigorous, customInstructions: "叫我 Alex，回答控制在三句以内。"))
         _ = await collect(agent, AgentRequest(sessionID: "s3", text: "第三轮"))
-        await promptBox.set(nil)
+        await promptBox.set(AgentPromptConfiguration(style: .friendly, customInstructions: "   \n  "))
         _ = await collect(agent, AgentRequest(sessionID: "s4", text: "第四轮"))
+        await promptBox.set(.default)
+        _ = await collect(agent, AgentRequest(sessionID: "s5", text: "第五轮"))
         await agent.shutdown()
 
         let requests = await script.requests
-        try #require(requests.count == 4)
+        try #require(requests.count == 5)
         let systems = requests.compactMap { $0["messages"]?.arrayValue?.first?["content"]?.stringValue }
-        try #require(systems.count == 4)
-        let expectedDefault = NativeAgentPrompt.system(guidance: ["插件附加说明"])
-        let expectedCustom = NativeAgentPrompt.runtimeProtocolPrompt + "\n插件附加说明\n你是精简版个人助理。"
-        #expect(!NativeAgentPrompt.defaultSystemPrompt.contains("asky-form"))
-        #expect(!NativeAgentPrompt.defaultSystemPrompt.contains("<asky-reaction>"))
-        #expect(!NativeAgentPrompt.defaultSystemPrompt.contains("web_read_page"))
-        #expect(!NativeAgentPrompt.defaultSystemPrompt.contains("calendar_list_calendars"))
-        #expect(!NativeAgentPrompt.defaultSystemPrompt.contains("memory_save"))
-        #expect(systems[0] == expectedDefault)
-        #expect(systems[0].hasSuffix(NativeAgentPrompt.defaultSystemPrompt))
-        #expect(systems[1] == expectedCustom)
-        #expect(systems[1].contains("asky-form"))
-        #expect(systems[1].contains("<asky-reaction>"))
-        #expect(systems[1].hasSuffix("你是精简版个人助理。"))
-        #expect(systems[2] == expectedDefault)
-        #expect(systems[3] == expectedDefault)
-
-        let legacyCustom = "自定义人设\n```asky-form\n<asky-reaction>"
-        let legacyAssembled = NativeAgentPrompt.system(basePrompt: legacyCustom, guidance: ["插件附加说明"])
-        #expect(legacyAssembled == "插件附加说明\n" + legacyCustom)
+        try #require(systems.count == 5)
+        let expectedFriendly = NativeAgentPrompt.system(promptConfig: .default, guidance: ["插件附加说明"])
+        let expectedRigorous = NativeAgentPrompt.system(promptConfig: AgentPromptConfiguration(style: .rigorous), guidance: ["插件附加说明"])
+        let expectedRigorousCustom = NativeAgentPrompt.system(
+            promptConfig: AgentPromptConfiguration(style: .rigorous, customInstructions: "叫我 Alex，回答控制在三句以内。"),
+            guidance: ["插件附加说明"]
+        )
+        for style in AgentPromptStyle.allCases {
+            let persona = NativeAgentPrompt.personaPrompt(for: style)
+            #expect(!persona.contains("asky-form"))
+            #expect(!persona.contains("<asky-reaction>"))
+            #expect(!persona.contains("<asky-split/>"))
+            #expect(!persona.contains("web_search"))
+            #expect(!persona.contains("web_read_page"))
+            #expect(!persona.contains("calendar_list_calendars"))
+            #expect(!persona.contains("memory_save"))
+        }
+        #expect(NativeAgentPrompt.friendlySystemPrompt != NativeAgentPrompt.rigorousSystemPrompt)
+        #expect(NativeAgentPrompt.rigorousSystemPrompt.contains("客观、冷静、严谨"))
+        #expect(systems[0] == expectedFriendly)
+        #expect(systems[0].hasSuffix(NativeAgentPrompt.friendlySystemPrompt))
+        #expect(systems[1] == expectedRigorous)
+        #expect(systems[1].hasSuffix(NativeAgentPrompt.rigorousSystemPrompt))
+        #expect(systems[2] == expectedRigorousCustom)
+        #expect(systems[2].contains("asky-form"))
+        #expect(systems[2].contains("<asky-reaction>"))
+        #expect(systems[2].contains(NativeAgentPrompt.rigorousSystemPrompt))
+        #expect(systems[2].hasSuffix("叫我 Alex，回答控制在三句以内。"))
+        #expect(systems[3] == expectedFriendly)
+        #expect(systems[4] == expectedFriendly)
     }
 
     @Test func webCitationGuidancePreservedAcrossFormattingAndTerminalImages() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
-        let assembled = NativeAgentPrompt.system(basePrompt: "你是精简版个人助理。", guidance: [])
+        let assembled = NativeAgentPrompt.system(
+            promptConfig: AgentPromptConfiguration(style: .rigorous, customInstructions: "保持极简。"),
+            guidance: []
+        )
         #expect(NativeAgentPrompt.runtimeProtocolPrompt.contains("渲染为来源标签"))
         #expect(NativeAgentPrompt.runtimeProtocolPrompt.contains("可直接点击跳转的正文链接"))
         #expect(NativeAgentPrompt.runtimeProtocolPrompt.contains("无需对同一地址重复附 [来源](URL)"))
@@ -666,11 +687,14 @@ server.serve_forever()
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         #expect(!NativeAgentPrompt.defaultSystemPrompt.contains("web_search"))
+        #expect(!NativeAgentPrompt.rigorousSystemPrompt.contains("web_search"))
         #expect(NativeAgentPrompt.webSearchCapabilities(hasWebSearch: false) == nil)
         let reminder = try #require(NativeAgentPrompt.webSearchCapabilities(hasWebSearch: true))
-        let assembled = NativeAgentPrompt.system(basePrompt: "自定义人设。", guidance: [], hasWebSearch: true)
+        let config = AgentPromptConfiguration(style: .rigorous, customInstructions: "称呼我为陈工。")
+        let customBlock = try #require(NativeAgentPrompt.customInstructionsBlock(config.customInstructions))
+        let assembled = NativeAgentPrompt.system(promptConfig: config, guidance: [], hasWebSearch: true)
         #expect(assembled.contains(reminder))
-        #expect(assembled.hasSuffix(reminder + "\n自定义人设。"))
+        #expect(assembled.hasSuffix(reminder + "\n" + NativeAgentPrompt.rigorousSystemPrompt + "\n" + customBlock))
 
         let script = ModelScript([NativeCompletion(text: "ok")])
         let definition = ToolDefinition(name: "web_search", summary: "search", source: .web, effect: .read, confirmation: .never, externallyExposable: false)
@@ -680,7 +704,7 @@ server.serve_forever()
             configProvider: { RuntimeLaunchConfig(baseURL: "https://example.test/v1", model: "mock", apiKey: "secret") },
             toolsProvider: { [definition] },
             guidanceProvider: { [] },
-            systemPromptProvider: { "自定义人设。" },
+            promptConfigProvider: { config },
             toolHandler: { ExecutionResult(requestID: $0.requestID, status: .completed) }
         )
         _ = await collect(agent, AgentRequest(sessionID: "s", text: "我觉得 6.2 反馈很差"))
@@ -688,15 +712,18 @@ server.serve_forever()
 
         let system = try #require(await script.requests.first?["messages"]?.arrayValue?.first?["content"]?.stringValue)
         #expect(system.contains(reminder))
-        #expect(system.hasSuffix(reminder + "\n自定义人设。"))
+        #expect(system.hasSuffix(reminder + "\n" + NativeAgentPrompt.rigorousSystemPrompt + "\n" + customBlock))
     }
 
     @Test func antiDefensiveDisclaimerGuidancePresentAcrossLayers() throws {
-        #expect(NativeAgentPrompt.defaultSystemPrompt.contains("直接为自己的判断负责"))
-        #expect(NativeAgentPrompt.defaultSystemPrompt.contains("我得先承认"))
-        #expect(NativeAgentPrompt.defaultSystemPrompt.contains("私密群聊"))
-        #expect(NativeAgentPrompt.defaultSystemPrompt.contains("不是查证结论"))
-        #expect(!NativeAgentPrompt.defaultSystemPrompt.contains("信息不全或不确定时坦白说不清楚"))
+        for style in AgentPromptStyle.allCases {
+            let persona = NativeAgentPrompt.personaPrompt(for: style)
+            #expect(persona.contains("直接为自己的判断负责"))
+            #expect(persona.contains("我得先承认"))
+            #expect(persona.contains("私密群聊"))
+            #expect(persona.contains("不是查证结论"))
+            #expect(!persona.contains("信息不全或不确定时坦白说不清楚"))
+        }
         #expect(!NativeAgentPrompt.runtimeProtocolPrompt.contains("区分来源事实、推断和未核实内容"))
         #expect(NativeAgentPrompt.runtimeProtocolPrompt.contains("这是判断不是结论"))
         let reminder = try #require(NativeAgentPrompt.webSearchCapabilities(hasWebSearch: true))
@@ -718,10 +745,15 @@ server.serve_forever()
         #expect(protocolPrompt.contains(#"\text{收入} = \text{有效播放} \times \text{eCPM} \times \text{填充率}"#))
         #expect(protocolPrompt.contains("一律用 LaTeX 写出"))
         #expect(protocolPrompt.contains("单个数字、金额、比例保持纯文本"))
-        let personaPrompt = NativeAgentPrompt.defaultSystemPrompt
-        #expect(personaPrompt.contains("LaTeX"))
-        #expect(personaPrompt.contains("别口语平铺"))
-        let customAssembled = NativeAgentPrompt.system(basePrompt: "自定义人设。", guidance: [])
+        for style in AgentPromptStyle.allCases {
+            let personaPrompt = NativeAgentPrompt.personaPrompt(for: style)
+            #expect(personaPrompt.contains("LaTeX"))
+            #expect(personaPrompt.contains("别口语平铺"))
+        }
+        let customAssembled = NativeAgentPrompt.system(
+            promptConfig: AgentPromptConfiguration(style: .rigorous, customInstructions: "用中文回复。"),
+            guidance: []
+        )
         #expect(customAssembled.contains("LaTeX 公式："))
     }
 
@@ -734,6 +766,9 @@ server.serve_forever()
         #expect(NativeAgentPrompt.defaultSystemPrompt.contains("简短的 ### 主题小标题"))
         #expect(NativeAgentPrompt.defaultSystemPrompt.contains("不写一句一行"))
         #expect(NativeAgentPrompt.defaultSystemPrompt.contains("介绍人物、景点、动植物或外观视觉差异时，记得配上真实照片"))
+        #expect(NativeAgentPrompt.rigorousSystemPrompt.contains("简短的 ### 主题小标题"))
+        #expect(NativeAgentPrompt.rigorousSystemPrompt.contains("优先在单条消息内完整呈现分析与结论"))
+        #expect(NativeAgentPrompt.rigorousSystemPrompt.contains("介绍人物、景点、动植物或外观视觉差异时，记得配上真实照片"))
         #expect(!NativeAgentPrompt.defaultSystemPrompt.contains("250–450"))
         #expect(!NativeAgentPrompt.defaultSystemPrompt.contains("80–130"))
         #expect(!NativeAgentPrompt.defaultSystemPrompt.contains("<asky-split/>"))
@@ -860,8 +895,8 @@ server.serve_forever()
 }
 
 private actor PromptBox {
-    var value: String?
-    func set(_ next: String?) { value = next }
+    var value: AgentPromptConfiguration = .default
+    func set(_ next: AgentPromptConfiguration) { value = next }
 }
 
 private actor WebOverlapProbe {

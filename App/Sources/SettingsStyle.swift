@@ -711,6 +711,8 @@ struct SettingsRadioGroup: NSViewRepresentable {
 
 private final class SettingsPromptTextView: NSTextView {
     var focusChanged: (Bool) -> Void = { _ in }
+    var placeholder: String = "" { didSet { if oldValue != placeholder { needsDisplay = true } } }
+    var placeholderColor: NSColor = .placeholderTextColor { didSet { if oldValue != placeholderColor { needsDisplay = true } } }
 
     override func becomeFirstResponder() -> Bool {
         let accepted = super.becomeFirstResponder()
@@ -722,6 +724,25 @@ private final class SettingsPromptTextView: NSTextView {
         let accepted = super.resignFirstResponder()
         if accepted { focusChanged(false) }
         return accepted
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        guard string.isEmpty, !hasMarkedText(), !placeholder.isEmpty else { return }
+        let padding = textContainer?.lineFragmentPadding ?? 0
+        let origin = textContainerOrigin
+        let insetWidth = (textContainer?.containerSize.width ?? bounds.width) - padding * 2
+        let rect = NSRect(x: origin.x + padding,
+                          y: origin.y,
+                          width: max(0, insetWidth),
+                          height: max(0, bounds.height - origin.y * 2))
+        let paragraph = (defaultParagraphStyle?.mutableCopy() as? NSMutableParagraphStyle) ?? NSMutableParagraphStyle()
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font ?? NSFont.systemFont(ofSize: 14),
+            .foregroundColor: placeholderColor,
+            .paragraphStyle: paragraph
+        ]
+        (placeholder as NSString).draw(with: rect, options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: attributes)
     }
 }
 
@@ -736,6 +757,7 @@ final class SettingsPassthroughScrollView: NSScrollView {
 struct SettingsMultilineTextEditor: NSViewRepresentable {
     @Binding var text: String
     @Binding var isFocused: Bool
+    var placeholder: String = ""
     var accessibilityLabel: String
     var accessibilityIdentifier: String = ""
     @Environment(\.colorScheme) private var colorScheme
@@ -814,7 +836,7 @@ struct SettingsMultilineTextEditor: NSViewRepresentable {
 
     /// Sizes the editor to its full text height so the surrounding Settings page owns scrolling.
     func sizeThatFits(_ proposal: ProposedViewSize, nsView scroll: NSScrollView, context: Context) -> CGSize? {
-        guard let editor = scroll.documentView as? NSTextView,
+        guard let editor = scroll.documentView as? SettingsPromptTextView,
               let container = editor.textContainer,
               let layout = editor.layoutManager else { return nil }
         let width = proposal.width ?? scroll.frame.width
@@ -830,7 +852,7 @@ struct SettingsMultilineTextEditor: NSViewRepresentable {
         return CGSize(width: width, height: max(minHeight, contentHeight))
     }
 
-    private func applyStyling(to editor: NSTextView, replacingText: Bool, refreshStorageAttributes: Bool) {
+    private func applyStyling(to editor: SettingsPromptTextView, replacingText: Bool, refreshStorageAttributes: Bool) {
         let font = NSFont.systemFont(ofSize: 14)
         let color = NSColor(ThemeColor.kText.color(for: colorScheme))
         let paragraph = NSMutableParagraphStyle()
@@ -846,6 +868,9 @@ struct SettingsMultilineTextEditor: NSViewRepresentable {
         editor.insertionPointColor = color
         editor.defaultParagraphStyle = paragraph
         editor.typingAttributes = attributes
+        editor.placeholder = placeholder
+        editor.placeholderColor = NSColor(ThemeColor.kTextSubtlest.color(for: colorScheme))
+        editor.setAccessibilityPlaceholderValue(placeholder.isEmpty ? nil : placeholder)
 
         if replacingText {
             editor.string = text

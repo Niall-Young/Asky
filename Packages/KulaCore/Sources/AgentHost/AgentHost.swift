@@ -61,7 +61,7 @@ public actor AgentHost {
     private let configProvider: @Sendable () async throws -> RuntimeLaunchConfig?
     private let toolsProvider: @Sendable () async -> [ToolDefinition]
     private let guidanceProvider: @Sendable () async -> [String]
-    private let systemPromptProvider: @Sendable () async -> String?
+    private let promptConfigProvider: @Sendable () async -> AgentPromptConfiguration
     private var toolTasks: [String: Task<Void, Never>] = [:]
     private let config: AgentHostConfig
 
@@ -89,7 +89,7 @@ public actor AgentHost {
                 configProvider: @escaping @Sendable () async throws -> RuntimeLaunchConfig?,
                 toolsProvider: @escaping @Sendable () async -> [ToolDefinition],
                 guidanceProvider: @escaping @Sendable () async -> [String] = { [] },
-                systemPromptProvider: @escaping @Sendable () async -> String? = { nil },
+                promptConfigProvider: @escaping @Sendable () async -> AgentPromptConfiguration = { .default },
                 toolHandler: @escaping ToolHandler) {
         self.config = config
         self.launcher = launcher
@@ -97,7 +97,7 @@ public actor AgentHost {
         self.toolsProvider = toolsProvider
         self.toolHandler = toolHandler
         self.guidanceProvider = guidanceProvider
-        self.systemPromptProvider = systemPromptProvider
+        self.promptConfigProvider = promptConfigProvider
     }
 
     public var runningPID: Int32? { process.flatMap { $0.pid > 0 ? $0.pid : nil } }
@@ -154,7 +154,7 @@ public actor AgentHost {
             guard tasks[request.taskID] != nil else { return }
             let resources = HostMessage.resources(tools: await toolsProvider(),
                                                   pluginGuidance: await guidanceProvider(),
-                                                  systemPrompt: await systemPromptProvider())
+                                                  promptConfig: await promptConfigProvider())
             guard tasks[request.taskID] != nil else { return }
             state = .busy
             try p.write(resources.encoded())
@@ -193,7 +193,7 @@ public actor AgentHost {
             try p.write(HostMessage.configure(baseURL: cfg.baseURL, model: cfg.model, apiKey: cfg.apiKey,
                                               tools: tools, maxToolRounds: config.maxToolRounds,
                                               pluginGuidance: await guidanceProvider(),
-                                              systemPrompt: await systemPromptProvider()).encoded())
+                                              promptConfig: await promptConfigProvider()).encoded())
         } catch {
             await stopProcess()
             throw error

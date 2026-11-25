@@ -79,7 +79,7 @@ private actor NativeAgentEngine {
     var config: RuntimeLaunchConfig?
     var tools: [ToolDefinition] = []
     var guidance: [String] = []
-    var systemPrompt: String?
+    var promptConfig: AgentPromptConfiguration = .default
     var maxToolCalls = 50
     var jobs: [String: Task<Void, Never>] = [:]
     var pending: [String: CheckedContinuation<JSONValue, Never>] = [:]
@@ -132,10 +132,10 @@ private actor NativeAgentEngine {
             case "prompt":
                 let request = try JSONDecoder().decode(AgentRequest.self, from: (value["request"] ?? [:]).canonicalData())
                 guard let config else { throw AgentHostError.notConfigured }
-                let catalogue = tools, guidance = guidance, systemPrompt = systemPrompt, limit = maxToolCalls
+                let catalogue = tools, guidance = guidance, promptConfig = promptConfig, limit = maxToolCalls
                 jobs[request.taskID] = Task {
                     await run(request, legacy: value["sessionFile"]?.stringValue, config: config,
-                              catalogue: catalogue, guidance: guidance, systemPrompt: systemPrompt, limit: limit)
+                              catalogue: catalogue, guidance: guidance, promptConfig: promptConfig, limit: limit)
                     jobs[request.taskID] = nil
                 }
             case "toolResult":
@@ -149,7 +149,9 @@ private actor NativeAgentEngine {
     func resources(_ value: JSONValue) throws {
         tools = try JSONDecoder().decode([ToolDefinition].self, from: (value["tools"] ?? []).canonicalData()).filter(\.agentExposable)
         guidance = value["pluginGuidance"]?.arrayValue?.compactMap(\.stringValue) ?? []
-        systemPrompt = value["systemPrompt"]?.stringValue
+        let style = value["promptStyle"]?.stringValue.flatMap(AgentPromptStyle.init(rawValue:)) ?? .friendly
+        let custom = value["customInstructions"]?.stringValue
+        promptConfig = AgentPromptConfiguration(style: style, customInstructions: custom)
     }
     func cancel(_ id: String) {
         jobs[id]?.cancel()
@@ -164,7 +166,7 @@ private actor NativeAgentEngine {
         let active = Array(jobs.values)
         for id in Array(jobs.keys) { cancel(id) }
         for job in active { await job.value }
-        config = nil; tools = []; guidance = []; systemPrompt = nil
+        config = nil; tools = []; guidance = []; promptConfig = .default
         stopped = true
         events.finish()
         exitWaiters.forEach { $0.resume(returning: 0) }; exitWaiters.removeAll()
@@ -197,7 +199,7 @@ private actor NativeAgentEngine {
             "tool": call["function"]?["name"] ?? "", "arguments": .object(params), "intent": "aiSuggested"], id: callID)
     }
 
-    func run(_ request: AgentRequest, legacy: String?, config: RuntimeLaunchConfig, catalogue: [ToolDefinition], guidance: [String], systemPrompt: String?, limit: Int) async {
+    func run(_ request: AgentRequest, legacy: String?, config: RuntimeLaunchConfig, catalogue: [ToolDefinition], guidance: [String], promptConfig: AgentPromptConfiguration, limit: Int) async {
         let id = request.taskID
         var messages: [JSONValue] = []
         var file: String?
@@ -209,8 +211,8 @@ private actor NativeAgentEngine {
             state(id, .running, file: file)
             let hasWebSearch = catalogue.contains { $0.name == "web_search" }
             let hasPageReader = catalogue.contains { $0.name == "web_read_page" }
-            let system: JSONValue = ["role": "system", "content": .string(NativeAgentPrompt.system(basePrompt: systemPrompt, guidance: guidance, hasWebSearch: hasWebSearch, hasPageReader: hasPageReader))]
-            let compactionSystem: JSONValue = ["role": "system", "content": .string(NativeAgentPrompt.system(basePrompt: systemPrompt, guidance: guidance))]
+            let system: JSONValue = ["role": "system", "content": .string(NativeAgentPrompt.system(promptConfig: promptConfig, guidance: guidance, hasWebSearch: hasWebSearch, hasPageReader: hasPageReader))]
+            let compactionSystem: JSONValue = ["role": "system", "content": .string(NativeAgentPrompt.system(promptConfig: promptConfig, guidance: guidance))]
             let available = definitions(catalogue)
             let isMidRunFollowUp = request.context.contains { $0.sourceID == "mid-run-followup" }
             var phase = ModelRequestPhase.initial

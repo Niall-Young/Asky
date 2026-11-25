@@ -944,12 +944,17 @@
 
 "模型配置" = "Model Configuration";
 "智能体" = "Agent";
-"提示词" = "Prompt";
-"系统提示词" = "System Prompt";
-"使用默认提示词" = "Using default prompt";
-"已自定义" = "Customized";
-"收起" = "Collapse";
-"提示词不能为空" = "Prompt cannot be empty.";
+"个性化" = "Personalization";
+"回复风格" = "Response Style";
+"亲和" = "Friendly";
+"严谨" = "Rigorous";
+"自然轻松，像靠谱的朋友一样直接聊天" = "Warm and approachable, chatting naturally like a reliable friend";
+"客观克制、条理清晰，注重事实与逻辑" = "Objective, restrained, and structured with a focus on facts and logic";
+"自定义提示词" = "Custom Prompt";
+"补充称呼、回答偏好或背景信息，叠加在所选风格之上" = "Add your preferred name, reply habits, or background; applied on top of the selected style";
+"例如：叫我 Alex；技术问题优先给 Swift 示例；回答尽量简短" = "e.g. Call me Alex; prefer Swift examples for technical questions; keep replies concise";
+"可选，留空仅使用所选风格" = "Optional; leave empty to use only the selected style";
+"已保存自定义提示词" = "Custom prompt saved";
 
 /* Reply reference navigation */
 "查看原回复" = "View original reply";

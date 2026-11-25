@@ -898,61 +898,106 @@ private struct MemorySettings: View {
 
 private struct AgentPromptSettings: View {
     @Bindable var app: AppModel
-    @State private var isEditing = false
     @State private var draft = ""
     @State private var loadedDraft = false
     @State private var editorFocused = false
     @State private var saved = false
     @Environment(\.colorScheme) private var scheme
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private var savedPrompt: String {
-        app.settings.effectiveAgentSystemPrompt
+    private var savedInstructions: String {
+        app.settings.agentPromptConfiguration.normalizedCustomInstructions ?? ""
+    }
+
+    private var normalizedDraft: String {
+        draft.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private var hasUnsavedChanges: Bool {
-        loadedDraft && draft != savedPrompt
+        loadedDraft && normalizedDraft != savedInstructions
     }
 
-    private var isDraftBlank: Bool {
-        draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    private var canClear: Bool {
+        !draft.isEmpty || app.settings.hasCustomAgentInstructions
     }
 
-    private var canSave: Bool {
-        hasUnsavedChanges && !isDraftBlank
-    }
-
-    private var canRestoreDefault: Bool {
-        app.settings.hasCustomAgentSystemPrompt || (loadedDraft && draft != NativeAgentPrompt.defaultSystemPrompt)
+    private var styleDescription: String {
+        switch app.settings.agentPromptStyle {
+        case .friendly:
+            NSLocalizedString("自然轻松，像靠谱的朋友一样直接聊天", comment: "")
+        case .rigorous:
+            NSLocalizedString("客观克制、条理清晰，注重事实与逻辑", comment: "")
+        }
     }
 
     private var statusText: String {
         if hasUnsavedChanges { return NSLocalizedString("有未保存的更改", comment: "") }
-        return NSLocalizedString(app.settings.hasCustomAgentSystemPrompt ? "已自定义" : "使用默认提示词", comment: "")
+        if app.settings.hasCustomAgentInstructions { return NSLocalizedString("已保存自定义提示词", comment: "") }
+        return NSLocalizedString("可选，留空仅使用所选风格", comment: "")
     }
 
     var body: some View {
-        Section(NSLocalizedString("提示词", comment: "")) {
+        Section(NSLocalizedString("个性化", comment: "")) {
             LabeledContent {
-                SettingsButton(NSLocalizedString(isEditing ? "收起" : "编辑", comment: "")) {
-                    toggleEditing()
-                }
+                SettingsChoice(selection: $app.settings.agentPromptStyle, options: [
+                    (.friendly, NSLocalizedString("亲和", comment: "")),
+                    (.rigorous, NSLocalizedString("严谨", comment: ""))
+                ]).fixedSize()
             } label: {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(NSLocalizedString("系统提示词", comment: ""))
-                    Text(statusText)
+                    Text(NSLocalizedString("回复风格", comment: ""))
+                    Text(styleDescription)
                         .foregroundStyle(.secondary)
+                }
+            }
+            VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(NSLocalizedString("自定义提示词", comment: ""))
+                    Text(NSLocalizedString("补充称呼、回答偏好或背景信息，叠加在所选风格之上", comment: ""))
+                        .foregroundStyle(.secondary)
+                }
+                SettingsMultilineTextEditor(
+                    text: $draft,
+                    isFocused: $editorFocused,
+                    placeholder: NSLocalizedString("例如：叫我 Alex；技术问题优先给 Swift 示例；回答尽量简短", comment: ""),
+                    accessibilityLabel: NSLocalizedString("自定义提示词", comment: ""),
+                    accessibilityIdentifier: "agentCustomInstructionsEditor",
+                    minHeight: 96
+                )
+                .fixedSize(horizontal: false, vertical: true)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .settingsInputChrome(scheme: scheme, focused: editorFocused, cornerRadius: 10)
+                HStack(spacing: 12) {
+                    Text(statusText)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    if canClear {
+                        SettingsButton(NSLocalizedString("清空", comment: "")) {
+                            clear()
+                        }
+                    }
+                    if hasUnsavedChanges {
+                        SettingsButton(NSLocalizedString("取消", comment: "")) {
+                            draft = savedInstructions
+                            saved = false
+                        }
+                    }
+                    SettingsButton(NSLocalizedString("保存", comment: ""), isComplete: saved) {
+                        save()
+                    }
+                    .disabled(!hasUnsavedChanges || saved)
+                    .accessibilityLabel(saved ? NSLocalizedString("已保存", comment: "") : NSLocalizedString("保存", comment: ""))
                 }
             }
             .onAppear {
                 if !loadedDraft {
-                    draft = savedPrompt
+                    draft = savedInstructions
                     loadedDraft = true
                 }
             }
-            .onChange(of: app.settings.agentSystemPrompt) { _, _ in
-                if !isEditing {
-                    draft = savedPrompt
+            .onChange(of: app.settings.agentCustomInstructions) { _, _ in
+                if !editorFocused {
+                    draft = savedInstructions
                     loadedDraft = true
                 }
             }
@@ -964,67 +1009,21 @@ private struct AgentPromptSettings: View {
                 do { try await Task.sleep(for: .milliseconds(1500)); saved = false }
                 catch { }
             }
-            if isEditing {
-                VStack(alignment: .leading, spacing: 12) {
-                    SettingsMultilineTextEditor(text: $draft, isFocused: $editorFocused,
-                                                accessibilityLabel: NSLocalizedString("系统提示词", comment: ""),
-                                                accessibilityIdentifier: "agentSystemPromptEditor",
-                                                minHeight: 176)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                        .settingsInputChrome(scheme: scheme, focused: editorFocused, cornerRadius: 10)
-                    if isDraftBlank {
-                        Text(NSLocalizedString("提示词不能为空", comment: ""))
-                            .font(.system(size: 12))
-                            .foregroundStyle(ThemeColor.kTextNegative)
-                    }
-                    HStack(spacing: 12) {
-                        SettingsButton(NSLocalizedString("恢复默认", comment: "")) {
-                            restoreDefault()
-                        }
-                        .disabled(!canRestoreDefault)
-                        Spacer()
-                        if hasUnsavedChanges {
-                            SettingsButton(NSLocalizedString("取消", comment: "")) {
-                                draft = savedPrompt
-                                saved = false
-                            }
-                        }
-                        SettingsButton(NSLocalizedString("保存", comment: ""), isComplete: saved) {
-                            save()
-                        }
-                        .disabled(!canSave || saved)
-                        .accessibilityLabel(saved ? NSLocalizedString("已保存", comment: "") : NSLocalizedString("保存", comment: ""))
-                    }
-                }
-            }
-        }
-    }
-
-    private func toggleEditing() {
-        if !isEditing, !hasUnsavedChanges {
-            draft = savedPrompt
-            loadedDraft = true
-        }
-        if reduceMotion {
-            isEditing.toggle()
-        } else {
-            withAnimation(.easeInOut(duration: 0.18)) {
-                isEditing.toggle()
-            }
         }
     }
 
     private func save() {
-        guard canSave else { return }
-        app.settings.agentSystemPrompt = draft == NativeAgentPrompt.defaultSystemPrompt ? nil : draft
+        guard hasUnsavedChanges else { return }
+        let normalized = normalizedDraft
+        app.settings.agentCustomInstructions = normalized.isEmpty ? nil : normalized
+        draft = normalized
         saved = true
     }
 
-    private func restoreDefault() {
-        draft = NativeAgentPrompt.defaultSystemPrompt
+    private func clear() {
+        draft = ""
         loadedDraft = true
-        app.settings.agentSystemPrompt = nil
+        app.settings.agentCustomInstructions = nil
         saved = false
     }
 }

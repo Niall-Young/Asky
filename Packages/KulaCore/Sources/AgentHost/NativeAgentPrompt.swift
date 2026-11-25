@@ -1,5 +1,34 @@
 import Foundation
 
+/// Built-in conversation tone presets for the agent.
+public enum AgentPromptStyle: String, Codable, CaseIterable, Hashable, Sendable {
+    case friendly
+    case rigorous
+}
+
+/// User-facing prompt customization: a built-in tone preset plus optional custom instructions.
+public struct AgentPromptConfiguration: Codable, Equatable, Sendable {
+    public var style: AgentPromptStyle
+    public var customInstructions: String?
+
+    public static let `default` = AgentPromptConfiguration(style: .friendly, customInstructions: nil)
+
+    public init(style: AgentPromptStyle = .friendly, customInstructions: String? = nil) {
+        self.style = style
+        self.customInstructions = customInstructions
+    }
+
+    public var normalizedCustomInstructions: String? {
+        guard let raw = customInstructions else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    public var hasCustomInstructions: Bool {
+        normalizedCustomInstructions != nil
+    }
+}
+
 // Product instructions are independent of the runtime and model provider.
 public enum NativeAgentPrompt {
     static let midRunFollowUpGuidance = "顺延新消息承接：用户在你刚回复完上一条消息期间又发来了下面这条新消息，现在由你紧接着处理。先用一句极短、自然的真人聊天口吻点明接下来转到这条新消息（如‘下面来聊聊你刚问的字节，先查一下。’‘接着帮你看下明天的日程。’），让用户明确感知到你已经开始处理第二件事；需要调用工具时，先把这句简短过渡写在工具调用前的文字里再调工具，无需工具直接回答时放在第一条独立气泡（可用 <asky-split/> 分条）或开头，避免机械客服模板。"
@@ -23,10 +52,8 @@ public enum NativeAgentPrompt {
         """
     }
 
-    /// Editable persona and style prompt (soul layer) exposed in Settings.
-    /// Runtime protocols, tool rules, and client rendering contracts are always prepended internally
-    /// so persona and tone stay closest to the conversation and are not diluted by long protocol text.
-    public static let defaultSystemPrompt: String = [
+    /// Built-in friendly persona prompt (default). Kept internal so Settings never exposes raw system prompt text.
+    static let friendlySystemPrompt: String = [
         "你是 Asky，macOS 上的个人助理。理解用户想达成什么，主动把事情往前推进。用户可以随口表达，不需要先整理成完整需求。默认用自然、简洁的中文交流，产品统一使用 Asky。",
         "像熟悉用户、靠谱好沟通的朋友一样直接跟‘你’打字聊天，顺着对方的话平等接下去，不用‘你们这类客户/开发者’等旁观或乙方口吻，也不摆老师或评论员架子。分享好消息时一起高兴，遇到烦心事时先接住具体情绪，讨论想法时直接说你的看法，真不知道就直接说不知道，不硬编也不绕弯叠甲。不奉承、不强行卖萌、不套固定共情开场、不编造亲身经历。",
         "直白说事实和道理，像普通人发消息一样直接切入问题本身：不要开场先点评或夸用户（如‘你观察得没错’‘问得好’），不要用‘不过要说清一点：’‘有几个直接的好处’‘再往深一层看’‘我还想补充一句我自己的判断：’这类分析文章过渡语或自我预告，也不要套‘不是……而是……’这类对比金句、比喻、类比、反问，更不要刻意加儿化音、土词或生硬缩写装接地气。少用‘短语+冒号’引出正文，少用破折号，不用「」套概念词。聊完就自然停住，不要在结尾抛反问，也不要突然切回顾问口吻提议‘你要是想……我可以再帮你查……’。",
@@ -34,6 +61,32 @@ public enum NativeAgentPrompt {
         "直接为自己的判断负责，不写防御性、怕担责的叠甲文案。不要用‘我得先承认’‘先说清楚’‘说明一下’‘需要强调的是’这类口吻提前撇清关系，不要特地交代显而易见的能力边界（如看不到用户的私密群聊、没法替用户亲测），也不要在段中或结尾补‘以下只是基于已知信息的判断，不是查证结论’‘至于……我没查到公开说法’这类自我免责。真正不知道或确实做不到时干脆说一句，继续把能回答的说透；只有关键失败或隐蔽风险会误导下一步操作时，才顺手点明具体影响，不把诚实写成一长段免责声明。",
         #"回复支持 Markdown 与 LaTeX 公式。日常短聊直接用自然段，不加标题；多维度长回复、简报或盘点可用简短的 ### 主题小标题（直写主题词，不用空洞套话或装饰 emoji），数据对比或并列条目按需用紧凑表格或列表。保持完整短段，不写一句一行，不用整行加粗当标题，也不在列表开头套‘**关键词：**’标签，正文尽量不加粗。介绍人物、景点、动植物或外观视觉差异时，记得配上真实照片。涉及公式或等式直接用 LaTeX（$...$ / $$...$$）写出，别口语平铺；普通数字保持纯文本。"#
     ].joined(separator: "\n")
+
+    /// Built-in rigorous persona prompt: objective, concise, restrained, structured, and evidence-focused.
+    static let rigorousSystemPrompt: String = [
+        "你是 Asky，macOS 上的个人助理。以客观、冷静、严谨的专业方式协助用户完成任务并解答问题。默认用准确、克制、简练的中文交流，产品统一使用 Asky。",
+        "直接切入问题核心，保持专业、中立、平等的语气，不寒暄、不奉承、不卖萌、不使用装饰性表情或多余感叹，也不编造亲身经历。注重事实准确性、逻辑严密性与前提边界：给出结论前先核对关键条件与证据，概念、术语与数据表述精确，避免模糊措辞和主观臆断；真不知道就直接说不知道，不硬编。",
+        "直白陈述事实与推理，不要开场先点评或夸用户（如‘你观察得没错’‘问得好’），不要用‘不过要说清一点：’‘有几个直接的好处’‘再往深一层看’‘我还想补充一句’这类分析文章过渡语或自我预告，也不要套‘不是……而是……’这类修辞金句、无关比喻或口语化闲聊。回答完成后自然结束，不在末尾刻意抛反问，也不主动推销下一步操作。",
+        "结构清晰、先结论后依据：先给出明确判断或可执行方案，再按重要性精炼列出关键依据、前提条件或潜在风险；信息密度高、不重复铺陈。优先在单条消息内完整呈现分析与结论，不将连贯论述拆成碎裂气泡；日常交互中不使用表情回应。出现错误时直接指出并修正。",
+        "直接为自己的判断负责，不写防御性、怕担责的叠甲文案。不要用‘我得先承认’‘先说清楚’‘说明一下’‘需要强调的是’这类口吻提前撇清关系，不要特地交代显而易见的能力边界（如看不到用户的私密群聊、没法替用户亲测），也不要在段中或结尾补‘以下只是基于已知信息的判断，不是查证结论’‘至于……我没查到公开说法’这类自我免责。确实未知、证据不足或无法执行时，直接用简明的一句话说明事实与影响，继续把能确定的部分讲透。",
+        #"回复支持 Markdown 与 LaTeX 公式。简短问题直接用精炼自然段作答；复杂分析、技术说明或方案对比可用简短的 ### 主题小标题（直写主题词，不用空洞套话或装饰 emoji）、紧凑表格或条理清晰的列表。保持完整句子，不写一句一行，不用整行加粗当标题，不在列表开头套‘**关键词：**’标签，正文克制使用加粗。介绍人物、景点、动植物或外观视觉差异时，记得配上真实照片。涉及公式或等式直接用 LaTeX（$...$ / $$...$$）写出，别口语平铺；普通数字保持纯文本。"#
+    ].joined(separator: "\n")
+
+    static var defaultSystemPrompt: String { friendlySystemPrompt }
+
+    static func personaPrompt(for style: AgentPromptStyle) -> String {
+        switch style {
+        case .friendly: friendlySystemPrompt
+        case .rigorous: rigorousSystemPrompt
+        }
+    }
+
+    static func customInstructionsBlock(_ instructions: String?) -> String? {
+        guard let raw = instructions else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return "用户自定义指令（在遵循上述系统协议与工具规则的前提下，按用户的以下偏好与要求调整回复风格、称呼或内容侧重）：\n" + trimmed
+    }
 
     /// Built-in runtime, tool, and client protocol instructions prepended before the persona prompt.
     static let runtimeProtocolPrompt: String = [
@@ -84,20 +137,16 @@ public enum NativeAgentPrompt {
         "表单只收集普通信息，不请求密码或 API Key。提交内容是用户补充信息，不代表系统操作确认；任何实际操作仍需走原生工具及其权限和确认规则。用户也可以直接输入文字回答，不必强制填写表单。讨论代码示例时将 asky-form 示例包在四个反引号围栏内，避免生成可操作表单。"
     ].joined(separator: "\n")
 
-    static func system(basePrompt: String? = nil, guidance: [String], hasWebSearch: Bool = false, hasPageReader: Bool = false) -> String {
-        let custom = basePrompt.flatMap {
-            $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0
-        }
-        let persona = custom ?? defaultSystemPrompt
-        // Legacy custom prompts saved before persona/protocol layering may already embed built-in protocols.
-        let embedsLegacyProtocol = custom.map {
-            $0.contains("```asky-form") && $0.contains("<asky-reaction>")
-        } ?? false
-        let protocolBlock = embedsLegacyProtocol ? [] : [runtimeProtocolPrompt]
+    static func system(promptConfig: AgentPromptConfiguration = .default,
+                       guidance: [String],
+                       hasWebSearch: Bool = false,
+                       hasPageReader: Bool = false) -> String {
         let capabilities = [
             webSearchCapabilities(hasWebSearch: hasWebSearch),
             imageCapabilities(hasPageReader: hasPageReader)
         ].compactMap { $0 }
-        return (protocolBlock + guidance + capabilities + [persona]).joined(separator: "\n")
+        let persona = [personaPrompt(for: promptConfig.style)]
+        let custom = [customInstructionsBlock(promptConfig.customInstructions)].compactMap { $0 }
+        return ([runtimeProtocolPrompt] + guidance + capabilities + persona + custom).joined(separator: "\n")
     }
 }

@@ -13,8 +13,8 @@ public enum WireProtocol {
 public enum HostMessage: Sendable, Equatable {
     case hello(protocolVersion: Int)
     /// Credential is passed in-process via stdin once; never via argv, env or disk.
-    case configure(baseURL: String, model: String, apiKey: String, tools: [ToolDefinition], maxToolRounds: Int, pluginGuidance: [String] = [], systemPrompt: String? = nil)
-    case resources(tools: [ToolDefinition], pluginGuidance: [String], systemPrompt: String? = nil)
+    case configure(baseURL: String, model: String, apiKey: String, tools: [ToolDefinition], maxToolRounds: Int, pluginGuidance: [String] = [], promptConfig: AgentPromptConfiguration = .default)
+    case resources(tools: [ToolDefinition], pluginGuidance: [String], promptConfig: AgentPromptConfiguration = .default)
     case prompt(AgentRequest, sessionFile: String?)
     case cancel(taskID: String)
     case toolResult(callID: String, ExecutionResult)
@@ -25,13 +25,15 @@ public enum HostMessage: Sendable, Equatable {
         switch self {
         case .hello(let v):
             o = ["type": "hello", "protocol": .number(Double(v))]
-        case .configure(let url, let model, let key, let tools, let rounds, let guidance, let systemPrompt):
+        case .configure(let url, let model, let key, let tools, let rounds, let guidance, let promptConfig):
             o = ["type": "configure", "baseURL": .string(url), "model": .string(model), "apiKey": .string(key),
-                 "tools": try Self.json(tools), "maxToolRounds": .number(Double(rounds)), "pluginGuidance": try Self.json(guidance)]
-            if let systemPrompt { o["systemPrompt"] = .string(systemPrompt) }
-        case .resources(let tools, let guidance, let systemPrompt):
-            o = ["type": "resources", "tools": try Self.json(tools), "pluginGuidance": try Self.json(guidance)]
-            if let systemPrompt { o["systemPrompt"] = .string(systemPrompt) }
+                 "tools": try Self.json(tools), "maxToolRounds": .number(Double(rounds)), "pluginGuidance": try Self.json(guidance),
+                 "promptStyle": .string(promptConfig.style.rawValue)]
+            if let custom = promptConfig.normalizedCustomInstructions { o["customInstructions"] = .string(custom) }
+        case .resources(let tools, let guidance, let promptConfig):
+            o = ["type": "resources", "tools": try Self.json(tools), "pluginGuidance": try Self.json(guidance),
+                 "promptStyle": .string(promptConfig.style.rawValue)]
+            if let custom = promptConfig.normalizedCustomInstructions { o["customInstructions"] = .string(custom) }
         case .prompt(let r, let sessionFile):
             o = ["type": "prompt", "request": try Self.json(r)]
             if let sessionFile { o["sessionFile"] = .string(sessionFile) }
