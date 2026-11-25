@@ -1232,8 +1232,39 @@ enum AgentReplyRegression {
                     guard let url = value as? URL else { return }
                     let segment = (storage.string as NSString).substring(with: range)
                     let underline = storage.attribute(.underlineStyle, at: range.location, effectiveRange: nil) as? Int
+                    let cursor = storage.attribute(.cursor, at: range.location, effectiveRange: nil) as? NSCursor
                     precondition(underline == NSUnderlineStyle.single.rawValue, "Direct link must show underline")
+                    precondition(cursor == .pointingHand, "Direct link must declare pointingHand on its own run")
                     directLinks.append((segment, url))
+                }
+                precondition(directText.linkTextAttributes?[.cursor] == nil,
+                             "linkTextAttributes must not override per-run .cursor attributes")
+                if let directManager = directText.layoutManager, let directContainer = directText.textContainer {
+                    let namedRange = (storage.string as NSString).range(of: "打开官网")
+                    let namedGlyphs = directManager.glyphRange(forCharacterRange: namedRange, actualCharacterRange: nil)
+                    let namedRect = directManager.boundingRect(forGlyphRange: namedGlyphs, in: directContainer)
+                    let namedWinPt = directText.convert(
+                        NSPoint(x: namedRect.midX + directText.textContainerOrigin.x,
+                                y: namedRect.midY + directText.textContainerOrigin.y),
+                        to: nil
+                    )
+                    let moveEvent = NSEvent.mouseEvent(with: .mouseMoved, location: namedWinPt, modifierFlags: [],
+                        timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                        context: nil, eventNumber: 0, clickCount: 0, pressure: 0)!
+                    let curEvent = NSEvent.enterExitEvent(with: .cursorUpdate, location: namedWinPt, modifierFlags: [],
+                        timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                        context: nil, eventNumber: 0, trackingNumber: 0, userData: nil)!
+                    NSCursor.arrow.set()
+                    directText.cursorUpdate(with: curEvent)
+                    precondition(NSCursor.current == .pointingHand, "Direct link must show pointingHand on cursorUpdate")
+                    NSCursor.arrow.set()
+                    directText.mouseMoved(with: moveEvent)
+                    if window.isKeyWindow {
+                        precondition(NSCursor.current == .pointingHand, "Direct link must show pointingHand on mouseMoved")
+                    } else {
+                        precondition(NSCursor.current == .pointingHand || NSCursor.current == .arrow,
+                                     "Inactive window mouseMoved must not install an unexpected cursor on a direct link")
+                    }
                 }
                 precondition(directLinks.contains { $0.0 == "打开官网" && $0.1.absoluteString == "https://devin.ai/" },
                              "Named inline link must stay clickable in prose")
@@ -1259,6 +1290,53 @@ enum AgentReplyRegression {
                 let rect = manager.boundingRect(forGlyphRange: manager.glyphRange(forCharacterRange: linkRange, actualCharacterRange: nil), in: container)
                 let local = NSPoint(x: rect.midX + text.textContainerOrigin.x, y: rect.midY + text.textContainerOrigin.y)
                 let point = text.convert(local, to: nil)
+                precondition(text.linkTextAttributes?[.cursor] == nil,
+                             "Source text view must not override badge .cursor via linkTextAttributes")
+                // Sweep all four edges of the source badge at 0.25pt increments: mouseMoved and cursorUpdate
+                // must agree everywhere with a single clean iBeam <-> arrow transition and never set pointingHand.
+                let edgeSweeps: [(String, [NSPoint])] = [
+                    ("left", stride(from: -2.0, through: 2.0, by: 0.25).map { NSPoint(x: rect.minX + $0, y: rect.midY) }),
+                    ("right", stride(from: -2.0, through: 2.0, by: 0.25).map { NSPoint(x: rect.maxX + $0, y: rect.midY) }),
+                    ("top", stride(from: -2.0, through: 2.0, by: 0.25).map { NSPoint(x: rect.midX, y: rect.minY + $0) }),
+                    ("bottom", stride(from: -2.0, through: 2.0, by: 0.25).map { NSPoint(x: rect.midX, y: rect.maxY + $0) })
+                ]
+                for (edge, containerPoints) in edgeSweeps {
+                    var transitions = 0
+                    var previousCursor: NSCursor?
+                    for containerPoint in containerPoints {
+                        let winPt = text.convert(
+                            NSPoint(x: containerPoint.x + text.textContainerOrigin.x,
+                                    y: containerPoint.y + text.textContainerOrigin.y),
+                            to: nil
+                        )
+                        let moveEvt = NSEvent.mouseEvent(with: .mouseMoved, location: winPt, modifierFlags: [],
+                            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                            context: nil, eventNumber: 0, clickCount: 0, pressure: 0)!
+                        let curEvt = NSEvent.enterExitEvent(with: .cursorUpdate, location: winPt, modifierFlags: [],
+                            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                            context: nil, eventNumber: 0, trackingNumber: 0, userData: nil)!
+                        let expected: NSCursor = text.source(at: winPt) != nil ? .arrow : .iBeam
+                        NSCursor.crosshair.set()
+                        text.cursorUpdate(with: curEvt)
+                        let afterUpdate = NSCursor.current
+                        precondition(afterUpdate == expected,
+                                     "Source badge \(edge) edge cursorUpdate mismatch at \(containerPoint)")
+                        NSCursor.crosshair.set()
+                        text.mouseMoved(with: moveEvt)
+                        let afterMove = NSCursor.current
+                        if window.isKeyWindow {
+                            precondition(afterMove == expected,
+                                         "Source badge \(edge) edge mouseMoved mismatch at \(containerPoint)")
+                        } else {
+                            precondition(afterMove == expected || afterMove == .crosshair,
+                                         "Source badge \(edge) edge mouseMoved set conflicting cursor at \(containerPoint)")
+                        }
+                        if let previousCursor, previousCursor != afterUpdate { transitions += 1 }
+                        previousCursor = afterUpdate
+                    }
+                    precondition(transitions == 1,
+                                 "Source badge \(edge) edge must have exactly one cursor transition, got \(transitions)")
+                }
                 let hoverEvent = NSEvent.mouseEvent(with: .mouseMoved, location: point, modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 0, pressure: 0)!
                 text.mouseMoved(with: hoverEvent)
                 try await Task.sleep(for: .milliseconds(450))

@@ -59,14 +59,12 @@ private final class ChatSourceBadgeAttachmentCell: NSTextAttachmentCell {
 /// Clicking a single-source badge opens its URL directly; clicking a multi-source badge toggles its source list card.
 /// Non-citation links stay directly clickable in prose.
 final class ChatSourceTextView: ChatSelectableTextView, NSTextViewDelegate {
-    private var sourceTrackingArea: NSTrackingArea?
     private(set) var preview: ChatSourcePopover?
     var openLinkHandler: (URL) -> Bool = { ToolService.openLauncherURL($0) }
     var hasSourceBadges = false {
         didSet {
             guard hasSourceBadges != oldValue else { return }
             if !hasSourceBadges { preview?.close(); preview = nil }
-            if window != nil { updateTrackingAreas() }
         }
     }
 
@@ -184,18 +182,6 @@ final class ChatSourceTextView: ChatSelectableTextView, NSTextViewDelegate {
         popover.show()
     }
 
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let sourceTrackingArea {
-            removeTrackingArea(sourceTrackingArea)
-            self.sourceTrackingArea = nil
-        }
-        guard hasSourceBadges else { return }
-        let area = NSTrackingArea(rect: .zero, options: [.cursorUpdate, .mouseMoved, .activeInKeyWindow, .inVisibleRect], owner: self)
-        sourceTrackingArea = area
-        addTrackingArea(area)
-    }
-
     /// Convert the actual attachment glyph, never the paragraph's wrapping link range.
     func sourceAnchor(at index: Int) -> NSRect? {
         guard let window, let manager = layoutManager, let container = textContainer,
@@ -223,20 +209,6 @@ final class ChatSourceTextView: ChatSelectableTextView, NSTextViewDelegate {
               let sources = storage.attribute(.chatSources, at: index, effectiveRange: nil) as? [URL],
               !sources.isEmpty else { return nil }
         return (index, sources)
-    }
-
-    override func cursorUpdate(with event: NSEvent) {
-        if hasSourceBadges, source(at: event.locationInWindow) != nil { NSCursor.arrow.set() }
-        else { super.cursorUpdate(with: event) }
-    }
-
-    override func mouseMoved(with event: NSEvent) {
-        // Tracking areas also receive moves while this text sits behind the
-        // header or an action. Do not set a text cursor over covered regions.
-        if ActionArrowCursor.applyIfCovered(event, in: window) { return }
-        super.mouseMoved(with: event)
-        guard hasSourceBadges else { return }
-        cursorUpdate(with: event)
     }
 
     override func viewDidMoveToWindow() {

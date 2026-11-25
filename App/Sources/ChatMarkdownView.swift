@@ -935,10 +935,11 @@ private struct ChatInlineNativeText: NSViewRepresentable {
             selectionGroup?.register(selectable)
             selectable.selectedTextAttributes = [.backgroundColor: NSColor(selectionColor).withAlphaComponent(0.45)]
         }
+        // Keep link cursors on individual runs (pointingHand for direct links, arrow for source badges);
+        // putting .cursor in linkTextAttributes overrides .cursor on source badge attachments.
         view.linkTextAttributes = [
             .foregroundColor: linkColor,
-            .underlineStyle: NSUnderlineStyle.single.rawValue,
-            .cursor: NSCursor.pointingHand
+            .underlineStyle: NSUnderlineStyle.single.rawValue
         ]
         let renderKey = Measurement.RenderKey(
             content: content, monospaced: monospaced, monospacedDigits: monospacedDigits,
@@ -988,6 +989,7 @@ private struct ChatInlineNativeText: NSViewRepresentable {
                 attributes[.link] = link
                 attributes[.foregroundColor] = linkColor
                 attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue
+                attributes[.cursor] = NSCursor.pointingHand
             }
             if intent.contains(.strikethrough) { attributes[.strikethroughStyle] = NSUnderlineStyle.single.rawValue }
             if let url = run.imageURL {
