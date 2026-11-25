@@ -537,8 +537,11 @@ private struct InlineTagPopoverContent: View {
                 }
                 Spacer(minLength: 0)
                 if let onRemove {
-                    Button(NSLocalizedString("移除", comment: ""), role: .destructive, action: onRemove)
-                        .controlSize(.small)
+                    Button(action: onRemove) {
+                        Text(NSLocalizedString("移除", comment: ""))
+                            .foregroundStyle(ThemeColor.kTextNegative)
+                    }
+                    .controlSize(.small)
                 }
             }
         }

@@ -289,10 +289,12 @@ final class HotKeyRecorderField: NSView {
             ? NSColor(srgbRed: 0.95, green: 0.95, blue: 0.97, alpha: 1)
             : NSColor(srgbRed: 0.09, green: 0.095, blue: 0.11, alpha: 1)
 
+        let warningColor = NSColor(ThemeColor.kTextNegative.color(for: isDark ? .dark : .light))
+
         // Outer soft focus ring when recording
         if recording {
             let haloRect = pillRect.insetBy(dx: -1.5, dy: -1.5)
-            let haloColor = (rejected ? NSColor.systemRed : ink).withAlphaComponent(isDark ? 0.22 : 0.14)
+            let haloColor = (rejected ? warningColor : ink).withAlphaComponent(isDark ? 0.22 : 0.14)
             haloColor.setStroke()
             let haloPath = NSBezierPath(roundedRect: haloRect, xRadius: cornerRadius + 1.5, yRadius: cornerRadius + 1.5)
             haloPath.lineWidth = 3
@@ -309,7 +311,7 @@ final class HotKeyRecorderField: NSView {
 
         // Pill border
         let borderColor: NSColor = recording
-            ? (rejected ? .systemRed : ink.withAlphaComponent(isDark ? 0.72 : 0.65))
+            ? (rejected ? warningColor : ink.withAlphaComponent(isDark ? 0.72 : 0.65))
             : (isDark ? NSColor.white.withAlphaComponent(0.15) : NSColor.black.withAlphaComponent(0.13))
         borderColor.setStroke()
         path.lineWidth = recording ? 1.5 : 1
@@ -402,7 +404,7 @@ private struct GeneralSettings: View {
                     }
                 } else if loginStatus == .notFound || loginStatus == .unknown {
                     Text(NSLocalizedString("无法确认登录项状态，请在系统设置中检查。", comment: ""))
-                        .foregroundStyle(ThemeColor.kTextNegative)
+                        .foregroundStyle(ThemeColor.kWarning)
                     SettingsButton(NSLocalizedString("打开登录项设置…", comment: "")) {
                         ToolService.openLoginItemSettings()
                     }
@@ -627,7 +629,7 @@ private struct SourceSettings: View {
                 }
                 .padding(.vertical, 4)
                 if let folderError {
-                    Text(folderError).foregroundStyle(.red)
+                    Text(folderError).foregroundStyle(ThemeColor.kTextNegative)
                     SettingsButton(NSLocalizedString("打开自动化权限设置…", comment: "")) {
                         do { try SystemPermissions.openSettings(.automation) }
                         catch { self.folderError = error.localizedDescription }
@@ -861,7 +863,7 @@ private struct ConversationHistorySettings: View {
                 }
             }
             if let error = app.conversationCleanupError {
-                Text(error).foregroundStyle(.red)
+                Text(error).foregroundStyle(ThemeColor.kTextNegative)
             }
         }
     }

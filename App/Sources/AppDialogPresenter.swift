@@ -268,9 +268,7 @@ struct AppDialogActionButton: NSViewRepresentable {
 
         switch role {
         case .destructive:
-            button.bezelColor = scheme == .dark
-                ? NSColor(srgbRed: 0.88, green: 0.25, blue: 0.24, alpha: 1)
-                : NSColor(srgbRed: 0.86, green: 0.21, blue: 0.20, alpha: 1)
+            button.bezelColor = NSColor(ThemeColor.kBackgroundNegative.color(for: scheme))
         case .prominent:
             button.bezelColor = NSColor(SettingsPalette.monochromeTint(scheme))
         case .neutral:

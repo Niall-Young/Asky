@@ -46,11 +46,11 @@ struct AliasSettings: View {
     }
 
     private func aliasMenu(_ item: LauncherAlias) -> some View {
-        SettingsMoreMenu {
-            Button(label("编辑")) { editor = AliasDraft(item) }
-            Divider()
-            Button(label("删除"), role: .destructive) { app.preferences.aliases.removeAll { $0.id == item.id } }
-        }
+        SettingsMoreMenu(items: [
+            .action(label("编辑")) { editor = AliasDraft(item) },
+            .divider,
+            .action(label("删除"), destructive: true) { app.preferences.aliases.removeAll { $0.id == item.id } }
+        ])
         .accessibilityLabel(label("更多操作") + " " + item.alias).help(label("更多操作"))
     }
 }

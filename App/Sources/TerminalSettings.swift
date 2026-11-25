@@ -1,6 +1,7 @@
 import SwiftUI
 import DirectActions
 import Router
+import Theme
 import ToolService
 
 struct TerminalSettings: View {
@@ -20,7 +21,7 @@ struct TerminalSettings: View {
                     }
                 }
                 if let keywordProblem {
-                    Text(keywordProblem).foregroundStyle(.red)
+                    Text(keywordProblem).foregroundStyle(ThemeColor.kTextNegative)
                 }
             }
             Section(NSLocalizedString("终端", comment: "")) {

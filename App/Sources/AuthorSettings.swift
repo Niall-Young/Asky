@@ -34,7 +34,7 @@ struct AuthorSettings: View {
                 }
                 if openingFailed {
                     Text(NSLocalizedString("无法打开链接，请检查默认浏览器或邮件应用。", comment: ""))
-                        .foregroundStyle(.red)
+                        .foregroundStyle(ThemeColor.kTextNegative)
                 }
             }
         }

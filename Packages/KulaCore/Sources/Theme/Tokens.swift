@@ -28,6 +28,11 @@ public enum Palette {
             v["white\(s)"] = RGBA(hex: whiteHex, alpha: Double(s) / 100)
         }
         v["red"] = RGBA(hex: 0xFF0730, alpha: 1)
+        v["warningLight"] = RGBA(hex: 0xAD690B, alpha: 1)
+        v["warningDark"] = RGBA(hex: 0xE8AD52, alpha: 1)
+        v["negativeLight"] = RGBA(hex: 0xB84542, alpha: 1)
+        v["negativeDark"] = RGBA(hex: 0xDC726E, alpha: 1)
+        v["negativeFillDark"] = RGBA(hex: 0xB54B48, alpha: 1)
         v["green"] = RGBA(hex: 0x28EEA5, alpha: 1)
         return v
     }()
@@ -42,7 +47,8 @@ public enum SemanticColors {
         "textDisabled": ("Palette/black30", "Palette/white30"),
         "textInverted": ("Palette/white100", "Palette/black100"),
         "textPrimary": ("Palette/black90", "Palette/white90"),
-        "textNegative": ("Palette/red", "Palette/red"),
+        "textWarning": ("Palette/warningLight", "Palette/warningDark"),
+        "textNegative": ("Palette/negativeLight", "Palette/negativeDark"),
         "textPositive": ("Palette/green", "Palette/green"),
         "textSelected": ("Colors/textPrimary", "Colors/textPrimary"),
         "icon": ("Palette/black80", "Palette/white80"),
@@ -51,13 +57,13 @@ public enum SemanticColors {
         "iconDisabled": ("Palette/black30", "Palette/white30"),
         "iconInverted": ("Palette/white100", "Palette/black100"),
         "iconPrimary": ("Palette/black80", "Palette/white80"),
-        "iconNegative": ("Palette/red", "Palette/red"),
+        "iconNegative": ("Palette/negativeLight", "Palette/negativeDark"),
         "iconPositive": ("Palette/green", "Palette/green"),
         "iconSelected": ("Colors/iconPrimary", "Colors/iconPrimary"),
         "border": ("Palette/black8", "Palette/white8"),
         "borderIntense": ("Palette/black10", "Palette/white10"),
         "borderPrimary": ("Palette/black20", "Palette/white20"),
-        "borderNegative": ("Palette/red", "Palette/red"),
+        "borderNegative": ("Palette/negativeLight", "Palette/negativeDark"),
         "borderPositive": ("Palette/green", "Palette/green"),
         "borderSelected": ("Colors/borderPrimary", "Colors/borderPrimary"),
         "borderFocused": ("Colors/borderPrimary", "Colors/borderPrimary"),
@@ -66,7 +72,7 @@ public enum SemanticColors {
         "backgroundPrimary": ("Palette/black100", "Palette/white100"),
         "backgroundPrimaryHover": ("Palette/black80", "Palette/white80"),
         "backgroundPrimarySubtle": ("Palette/black6", "Palette/white6"),
-        "backgroundNegative": ("Palette/red", "Palette/red"),
+        "backgroundNegative": ("Palette/negativeLight", "Palette/negativeFillDark"),
         "backgroundPositive": ("Palette/green", "Palette/green"),
         "backgroundNeutral": ("Palette/black6", "Palette/white6"),
         "backgroundNeutralHover": ("Palette/black8", "Palette/white8"),

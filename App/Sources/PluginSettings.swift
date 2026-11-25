@@ -284,25 +284,26 @@ struct PluginSettings: View {
                 Text(String(format: NSLocalizedString("%d 个命令", tableName: "Plugins", comment: ""), commands.count))
                     .foregroundStyle(.secondary)
             }
-            if plugin.needsConfiguration { Text(label("需要配置")).foregroundStyle(.orange) }
+            if plugin.needsConfiguration { Text(label("需要配置")).foregroundStyle(ThemeColor.kWarning) }
         }
         .help(plugin.isOfficial ? "" : plugin.repository)
     }
     private func pluginMenu(_ plugin: InstalledPlugin) -> some View {
-        SettingsMoreMenu {
-            if !(plugin.manifest.configuration ?? []).isEmpty {
-                Button(label("配置")) { editing = plugin }
-            }
-            Button(label("更新")) { perform("更新插件") { try await manager.install(repository: plugin.repository) } }
-            Button(label("回退")) { perform("回退插件") { try await manager.rollback(plugin.id) } }
-                .disabled(plugin.previousCommit == nil)
-            if let url = URL(string: plugin.repository) {
-                Button(label("在 GitHub 查看项目")) { _ = ToolService.openLauncherURL(url) }
-            }
-            Divider()
-            Button(label("卸载"), role: .destructive) { perform("卸载插件") { try await manager.uninstall(plugin.id) } }
+        var items: [SettingsMoreMenuItem] = []
+        if !(plugin.manifest.configuration ?? []).isEmpty {
+            items.append(.action(label("配置")) { editing = plugin })
         }
-        .accessibilityLabel(label("更多操作")).help(label("更多操作")).disabled(busy)
+        items.append(.action(label("更新")) { perform("更新插件") { try await manager.install(repository: plugin.repository) } })
+        items.append(.action(label("回退"), disabled: plugin.previousCommit == nil) {
+            perform("回退插件") { try await manager.rollback(plugin.id) }
+        })
+        if let url = URL(string: plugin.repository) {
+            items.append(.action(label("在 GitHub 查看项目")) { _ = ToolService.openLauncherURL(url) })
+        }
+        items.append(.divider)
+        items.append(.action(label("卸载"), destructive: true) { perform("卸载插件") { try await manager.uninstall(plugin.id) } })
+        return SettingsMoreMenu(items: items)
+            .accessibilityLabel(label("更多操作")).help(label("更多操作")).disabled(busy)
     }
     private func pluginIcon(repository: String) -> some View {
         Group {

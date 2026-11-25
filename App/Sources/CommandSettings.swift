@@ -1,5 +1,6 @@
 import SwiftUI
 import DirectActions
+import Theme
 
 struct CommandSettings: View {
     @Bindable var app: AppModel
@@ -155,7 +156,7 @@ private struct CommandKeywordEditor: View {
                     .onSubmit(save)
                 SettingsButton(NSLocalizedString("恢复默认", comment: "")) { reset() }
             }
-            if let error { Text(error).font(.caption).foregroundStyle(.red) }
+            if let error { Text(error).font(.caption).foregroundStyle(ThemeColor.kTextNegative) }
         }
         .onAppear { draft = app.commandKeyword(id) }
         .onChange(of: focused) { _, isFocused in if !isFocused { save() } }

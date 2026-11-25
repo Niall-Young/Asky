@@ -4,12 +4,12 @@ extension RGBA {
     public var color: Color { Color(.sRGB, red: red, green: green, blue: blue, opacity: alpha) }
 }
 
-/// Persistent full-access status uses amber adapted to each appearance.
+/// Persistent full-access status shares the unified warning/alert tint (`#AD690B` light, `#E8AD52` dark).
 public struct FullAccessTint: ShapeStyle {
     public init() {}
 
     public func resolve(in environment: EnvironmentValues) -> Color {
-        RGBA(hex: environment.colorScheme == .dark ? 0xE8AD52 : 0xAD690B, alpha: 1).color
+        ThemeColor.kWarning.resolve(in: environment)
     }
 }
 
@@ -35,6 +35,7 @@ extension ShapeStyle where Self == ThemeColor {
     public static var kText: ThemeColor { ThemeColor("text") }
     public static var kTextSubtle: ThemeColor { ThemeColor("textSubtle") }
     public static var kTextSubtlest: ThemeColor { ThemeColor("textSubtlest") }
+    public static var kWarning: ThemeColor { ThemeColor("textWarning") }
     public static var kTextNegative: ThemeColor { ThemeColor("textNegative") }
     public static var kTextPositive: ThemeColor { ThemeColor("textPositive") }
     public static var kIcon: ThemeColor { ThemeColor("icon") }
@@ -46,6 +47,7 @@ extension ShapeStyle where Self == ThemeColor {
     public static var kBackgroundSelected: ThemeColor { ThemeColor("backgroundSelected") }
     public static var kBackgroundNeutral: ThemeColor { ThemeColor("backgroundNeutral") }
     public static var kBackgroundPrimary: ThemeColor { ThemeColor("backgroundPrimary") }
+    public static var kBackgroundNegative: ThemeColor { ThemeColor("backgroundNegative") }
     public static var kInput: ThemeColor { ThemeColor("input") }
     public static var kInteractionHover: ThemeColor { ThemeColor("interactionHover") }
 }

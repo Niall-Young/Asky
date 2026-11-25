@@ -265,40 +265,89 @@ private struct SettingsRegularGlass: NSViewRepresentable {
     }
 }
 
-/// Shared icon button for row actions; keeps the native menu and its keyboard behavior.
-struct SettingsMoreMenu<Content: View>: View {
-    @ViewBuilder var content: Content
+enum SettingsMoreMenuItem {
+    case action(String, disabled: Bool = false, destructive: Bool = false, () -> Void)
+    case divider
+}
+
+@MainActor
+private final class SettingsMoreMenuTarget: NSObject {
+    @objc func invoke(_ sender: NSMenuItem) {
+        (sender.representedObject as? () -> Void)?()
+    }
+}
+
+@MainActor
+private final class SettingsMoreMenuAnchorBox {
+    weak var view: NSView?
+    var activeTarget: SettingsMoreMenuTarget?
+}
+
+private struct SettingsMoreMenuAnchor: NSViewRepresentable {
+    let box: SettingsMoreMenuAnchorBox
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        box.view = view
+        return view
+    }
+    func updateNSView(_ view: NSView, context: Context) {
+        box.view = view
+    }
+}
+
+/// Shared icon button for row actions; keeps the native NSMenu and its keyboard behavior
+/// while rendering destructive items in the desaturated negative tint.
+struct SettingsMoreMenu: View {
+    let items: [SettingsMoreMenuItem]
     @State private var hovered = false
+    @State private var anchorBox = SettingsMoreMenuAnchorBox()
     @Environment(\.isEnabled) private var enabled
     @Environment(\.colorScheme) private var scheme
 
-    private var icon: NSImage {
-        // The native borderless menu can draw a custom label image in its asset color.
-        let mask = MingCute.image("ellipsis.vertical", size: 15, canvas: 28)
-        let tint = NSColor(ThemeColor.kIconSubtle.color(for: scheme))
-        return NSImage(size: mask.size, flipped: false) { bounds in
-            mask.draw(in: bounds)
-            tint.setFill()
-            bounds.fill(using: .sourceIn)
-            return true
-        }
-    }
-
     var body: some View {
-        Menu {
-            content
-        } label: {
-            // Pad the glyph into the hit target itself; the borderless menu only accepts
-            // clicks on the label's image, not on a surrounding frame.
-            Image(nsImage: icon).renderingMode(.original)
+        Button(action: showMenu) {
+            Image(nsImage: MingCute.image("ellipsis.vertical", size: 15, canvas: 28))
+                .renderingMode(.template)
+                .foregroundStyle(ThemeColor.kIconSubtle)
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
+        .buttonStyle(.plain)
         .frame(width: 28, height: 28)
         .contentShape(Capsule())
+        .background(SettingsMoreMenuAnchor(box: anchorBox).allowsHitTesting(false))
         .settingsRowHoverFill(hovered && enabled)
         .onHover { hovered = $0 }
+    }
+
+    private func showMenu() {
+        guard let anchor = anchorBox.view else { return }
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        let target = SettingsMoreMenuTarget()
+        let destructiveColor = NSColor(ThemeColor.kTextNegative.color(for: scheme))
+        for item in items {
+            switch item {
+            case .divider:
+                menu.addItem(.separator())
+            case .action(let title, let disabled, let destructive, let handler):
+                let menuItem = NSMenuItem(title: title,
+                                          action: #selector(SettingsMoreMenuTarget.invoke(_:)),
+                                          keyEquivalent: "")
+                menuItem.target = target
+                menuItem.representedObject = handler
+                menuItem.isEnabled = !disabled
+                if destructive {
+                    menuItem.attributedTitle = NSAttributedString(string: title, attributes: [
+                        .font: NSFont.menuFont(ofSize: 0),
+                        .foregroundColor: disabled ? destructiveColor.withAlphaComponent(0.45) : destructiveColor
+                    ])
+                }
+                menu.addItem(menuItem)
+            }
+        }
+        anchorBox.activeTarget = target
+        let origin = NSPoint(x: 0, y: anchor.isFlipped ? anchor.bounds.maxY + 4 : -4)
+        menu.popUp(positioning: nil, at: origin, in: anchor)
+        anchorBox.activeTarget = nil
     }
 }
 
@@ -410,6 +459,7 @@ private struct SettingsPushButton: NSViewRepresentable {
     @Environment(\.controlSize) private var controlSize
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.colorScheme) private var scheme
     func makeCoordinator() -> Coordinator { Coordinator(action: action) }
     func makeNSView(context: Context) -> NSButton {
         let button = NSButton(title: title, target: context.coordinator, action: #selector(Coordinator.press))
@@ -448,7 +498,8 @@ private struct SettingsPushButton: NSViewRepresentable {
             if #available(macOS 26, *) { button.borderShape = .automatic }
         }
         button.controlSize = isBordered || controlSize == .large || controlSize == .extraLarge ? .large : .regular
-        button.contentTintColor = role == .destructive ? .systemRed : nil
+        let destructiveColor = NSColor(ThemeColor.kTextNegative.color(for: scheme))
+        button.contentTintColor = role == .destructive ? destructiveColor : nil
         button.isBordered = isBordered
     }
     private func applyContent(to button: NSButton, title: String?, systemImage: String?, assetImage: String?) {
@@ -457,9 +508,10 @@ private struct SettingsPushButton: NSViewRepresentable {
         if text.isEmpty {
             button.attributedTitle = NSAttributedString()
         } else {
+            let destructiveColor = NSColor(ThemeColor.kTextNegative.color(for: scheme))
             button.attributedTitle = NSAttributedString(string: text, attributes: [
                 .font: NSFont.systemFont(ofSize: 14),
-                .foregroundColor: role == .destructive ? NSColor.systemRed :
+                .foregroundColor: role == .destructive ? destructiveColor :
                     enabled ? NSColor.controlTextColor : NSColor.disabledControlTextColor
             ])
         }
