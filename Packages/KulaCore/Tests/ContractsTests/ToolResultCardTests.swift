@@ -455,4 +455,74 @@ struct ToolResultCardTests {
         #expect(legacyReminderList.rows[0].trailing == "09:00")
         #expect(legacyReminderList.rows[1].trailing == "18:00")
     }
+
+    @Test("Formats English cards with 24-hour time and abbreviated month/weekday")
+    func englishCardFormatting() {
+        let calResult = ExecutionResult(
+            requestID: "req-en-cal",
+            status: .completed,
+            readback: [
+                "id": "ev-en",
+                "title": "Design Review",
+                "start": "2026-11-30T14:30:00+08:00",
+                "end": "2026-11-30T15:30:00+08:00",
+                "allDay": false,
+                "calendar": "Work",
+                "location": "Room 302"
+            ]
+        )
+        let calCard = ToolResultCard.from(tool: "calendar_create_event", result: calResult, calendar: fixedCalendar, language: "en")
+        #expect(calCard?.categoryTitle == "Work Calendar")
+        #expect(calCard?.headline == "14:30 – 15:30")
+        #expect(calCard?.subtitle == "Nov 30, Mon · Work")
+        #expect(calCard?.action?.label == "View Calendar")
+
+        let allDayResult = ExecutionResult(
+            requestID: "req-en-allday",
+            status: .completed,
+            readback: [
+                "id": "ev-en-all",
+                "title": "Company Anniversary",
+                "start": "2026-11-28T00:00:00+08:00",
+                "allDay": true,
+                "calendar": "Work"
+            ]
+        )
+        let allDayCard = ToolResultCard.from(tool: "calendar_create_event", result: allDayResult, calendar: fixedCalendar, language: "en")
+        #expect(allDayCard?.headline == "Nov 28, Sat")
+        #expect(allDayCard?.subtitle == "All Day · Work")
+
+        let remResult = ExecutionResult(
+            requestID: "req-en-rem",
+            status: .completed,
+            readback: [
+                "id": "r-en",
+                "title": "Submit Q4 retrospective",
+                "due": "2026-11-30T09:00:00+08:00",
+                "list": "Work"
+            ]
+        )
+        let remCard = ToolResultCard.from(tool: "reminders_create", result: remResult, calendar: fixedCalendar, language: "en")
+        #expect(remCard?.categoryTitle == "Work Reminders")
+        #expect(remCard?.headline == "09:00")
+        #expect(remCard?.subtitle == "Nov 30, Mon · Work")
+        #expect(remCard?.action?.label == "View Reminders")
+
+        let routeResult = ExecutionResult(
+            requestID: "req-en-route",
+            status: .completed,
+            output: [
+                "origin": ["name": "Office", "latitude": 39.9, "longitude": 116.4],
+                "destination": ["name": "Airport", "latitude": 40.08, "longitude": 116.58],
+                "routes": [
+                    ["mode": "driving", "durationSeconds": 2400, "distanceMeters": 28500, "suggestedDepartureTime": "2026-11-30T14:20:00+08:00"]
+                ]
+            ]
+        )
+        let routeCard = ToolResultCard.from(tool: "maps_routes", result: routeResult, calendar: fixedCalendar, language: "en")
+        #expect(routeCard?.categoryTitle == "Routes")
+        #expect(routeCard?.rows.first?.title == "Drive")
+        #expect(routeCard?.rows.first?.subtitle == "28.5 km · Leave at 14:20")
+        #expect(routeCard?.rows.first?.trailing == "40 min")
+    }
 }

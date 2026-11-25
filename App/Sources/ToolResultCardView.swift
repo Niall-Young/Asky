@@ -11,6 +11,8 @@ struct ToolResultCardView: View {
     @State private var actionHovered = false
 
     private static let cardCornerRadius: CGFloat = 24
+    private static let bodyLineHeight: CGFloat = 22
+    private static let headingLineHeight: CGFloat = 24
 
     private var displayCard: ToolResultCard {
         card.normalizedForDisplay()
@@ -56,6 +58,7 @@ struct ToolResultCardView: View {
                 .font(.system(size: 14, weight: .regular))
                 .foregroundStyle(ThemeColor.kText)
                 .lineLimit(1)
+                .frame(minHeight: Self.bodyLineHeight, alignment: .leading)
             Spacer(minLength: 0)
         }
         .padding(.top, 12)
@@ -144,14 +147,20 @@ struct ToolResultCardView: View {
                     Text(displayCard.headline)
                         .font(.system(size: 14, weight: .medium))
                         .foregroundStyle(ThemeColor.kTextSubtle)
+                        .lineSpacing(5)
                         .lineLimit(2)
+                        .truncationMode(.tail)
+                        .frame(maxWidth: .infinity, minHeight: Self.bodyLineHeight, alignment: .leading)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 if let subtitle = displayCard.subtitle, !subtitle.isEmpty {
                     Text(subtitle)
                         .font(.system(size: 14, weight: .regular))
                         .foregroundStyle(ThemeColor.kTextSubtlest)
+                        .lineSpacing(5)
                         .lineLimit(2)
+                        .truncationMode(.tail)
+                        .frame(maxWidth: .infinity, minHeight: Self.bodyLineHeight, alignment: .leading)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -174,13 +183,18 @@ struct ToolResultCardView: View {
                         Text(row.title)
                             .font(.system(size: 14, weight: .medium))
                             .foregroundStyle(ThemeColor.kTextSubtle)
+                            .lineSpacing(5)
                             .lineLimit(2)
+                            .truncationMode(.tail)
+                            .frame(maxWidth: .infinity, minHeight: Self.bodyLineHeight, alignment: .leading)
                             .fixedSize(horizontal: false, vertical: true)
                         if let listName = row.badge, !listName.isEmpty {
                             Text(listName)
                                 .font(.system(size: 14, weight: .regular))
                                 .foregroundStyle(ThemeColor.kTextSubtlest)
                                 .lineLimit(1)
+                                .truncationMode(.tail)
+                                .frame(maxWidth: .infinity, minHeight: Self.bodyLineHeight, alignment: .leading)
                         }
                     }
                 }
@@ -194,7 +208,10 @@ struct ToolResultCardView: View {
                 Text(title)
                     .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(ThemeColor.kTextSubtle)
+                    .lineSpacing(5)
                     .lineLimit(2)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: .infinity, minHeight: Self.bodyLineHeight, alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
@@ -208,6 +225,7 @@ struct ToolResultCardView: View {
                             .monospacedDigit()
                             .foregroundStyle(ThemeColor.kText)
                             .lineLimit(1)
+                            .minimumScaleFactor(0.85)
                             .fixedSize(horizontal: true, vertical: false)
                     }
                     if hasTime && hasDate {
@@ -219,16 +237,22 @@ struct ToolResultCardView: View {
                             .monospacedDigit()
                             .foregroundStyle(ThemeColor.kText)
                             .lineLimit(1)
+                            .minimumScaleFactor(0.85)
                             .truncationMode(.tail)
                     }
+                    Spacer(minLength: 0)
                 }
+                .frame(height: Self.headingLineHeight)
             }
 
             if let location, !location.isEmpty {
                 Text(location)
                     .font(.system(size: 14, weight: .regular))
                     .foregroundStyle(ThemeColor.kTextSubtlest)
+                    .lineSpacing(5)
                     .lineLimit(2)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: .infinity, minHeight: Self.bodyLineHeight, alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -238,22 +262,27 @@ struct ToolResultCardView: View {
     // MARK: - Summary (Notes, Messages Draft, Shortcut, Memory)
 
     private var summaryContent: some View {
-        let bodyText = !displayCard.title.isEmpty ? displayCard.title : (displayCard.subtitle ?? "")
+        let rawBody = !displayCard.title.isEmpty ? displayCard.title : (displayCard.subtitle ?? "")
+        let bodyText = Self.collapseLineBreaks(rawBody)
         return VStack(alignment: .leading, spacing: 4) {
             if !displayCard.headline.isEmpty {
                 Text(displayCard.headline)
                     .font(.system(size: 16, weight: .medium))
                     .foregroundStyle(ThemeColor.kText)
+                    .lineSpacing(4)
                     .lineLimit(2)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: .infinity, minHeight: Self.headingLineHeight, alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)
             }
             if !bodyText.isEmpty {
                 Text(bodyText)
                     .font(.system(size: 14, weight: .regular))
                     .foregroundStyle(ThemeColor.kTextSubtlest)
-                    .lineSpacing(3)
+                    .lineSpacing(5)
                     .lineLimit(2)
                     .truncationMode(.tail)
+                    .frame(maxWidth: .infinity, minHeight: Self.bodyLineHeight, alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -268,11 +297,12 @@ struct ToolResultCardView: View {
 
             ForEach(displayCard.rows) { row in
                 HStack(alignment: .top, spacing: 16) {
-                    VStack(alignment: .leading, spacing: 2) {
+                    VStack(alignment: .leading, spacing: 0) {
                         Text(row.title)
                             .font(.system(size: 14, weight: .medium))
                             .foregroundStyle(ThemeColor.kText)
                             .lineLimit(1)
+                            .frame(maxWidth: .infinity, minHeight: Self.bodyLineHeight, alignment: .leading)
 
                         let segments = splitSubtitleParts(row.subtitle)
                         if !segments.isEmpty {
@@ -286,8 +316,11 @@ struct ToolResultCardView: View {
                                         .monospacedDigit()
                                         .foregroundStyle(ThemeColor.kTextSubtlest)
                                         .lineLimit(1)
+                                        .minimumScaleFactor(0.88)
                                 }
+                                Spacer(minLength: 0)
                             }
+                            .frame(height: Self.bodyLineHeight)
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -299,6 +332,7 @@ struct ToolResultCardView: View {
                             .foregroundStyle(ThemeColor.kText)
                             .lineLimit(1)
                             .fixedSize(horizontal: true, vertical: false)
+                            .frame(height: Self.bodyLineHeight)
                     }
                 }
             }
@@ -315,20 +349,28 @@ struct ToolResultCardView: View {
                     .font(.system(size: 16, weight: .medium))
                     .foregroundStyle(ThemeColor.kText)
                     .lineLimit(1)
+                    .truncationMode(.tail)
                 Text(NSLocalizedString("至", comment: ""))
                     .font(.system(size: 16, weight: .regular))
                     .foregroundStyle(ThemeColor.kTextSubtlest)
                     .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
                 Text(components[1])
                     .font(.system(size: 16, weight: .medium))
                     .foregroundStyle(ThemeColor.kText)
                     .lineLimit(1)
+                    .truncationMode(.tail)
+                Spacer(minLength: 0)
             }
+            .frame(height: Self.headingLineHeight)
         } else if !displayCard.headline.isEmpty {
             Text(displayCard.headline)
                 .font(.system(size: 16, weight: .medium))
                 .foregroundStyle(ThemeColor.kText)
+                .lineSpacing(4)
                 .lineLimit(2)
+                .truncationMode(.tail)
+                .frame(maxWidth: .infinity, minHeight: Self.headingLineHeight, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -348,13 +390,19 @@ struct ToolResultCardView: View {
                     Text(place.name)
                         .font(.system(size: 16, weight: .medium))
                         .foregroundStyle(ThemeColor.kText)
+                        .lineSpacing(4)
                         .lineLimit(2)
+                        .truncationMode(.tail)
+                        .frame(maxWidth: .infinity, minHeight: Self.headingLineHeight, alignment: .leading)
                         .fixedSize(horizontal: false, vertical: true)
                     if let address = place.address, !address.isEmpty {
                         Text(address)
                             .font(.system(size: 14, weight: .regular))
                             .foregroundStyle(ThemeColor.kTextSubtlest)
+                            .lineSpacing(5)
                             .lineLimit(2)
+                            .truncationMode(.tail)
+                            .frame(maxWidth: .infinity, minHeight: Self.bodyLineHeight, alignment: .leading)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -372,6 +420,7 @@ struct ToolResultCardView: View {
             Text(action.label)
                 .font(.system(size: 14, weight: .medium))
                 .foregroundStyle(actionHovered ? ThemeColor.kText : ThemeColor.kTextSubtle)
+                .lineLimit(1)
                 .frame(maxWidth: .infinity)
                 .frame(height: 40)
                 .background {
@@ -439,6 +488,14 @@ struct ToolResultCardView: View {
         return lower == "全天" || lower == "all day"
     }
 
+    private static func collapseLineBreaks(_ text: String) -> String {
+        text
+            .replacingOccurrences(of: "\r\n", with: " ")
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\r", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     private static func normalizeTimeRange(_ raw: String) -> String {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.contains("–") else { return trimmed }
@@ -447,27 +504,43 @@ struct ToolResultCardView: View {
         return "\(parts[0]) - \(parts[1])"
     }
 
+    private static let englishShortMonths: Set<String> = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+    ]
+
     private static func stripLeadingShortDate(_ raw: String?) -> (date: String?, rest: String?) {
         guard let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {
             return (nil, nil)
         }
+        // Chinese short date prefix: "11月28日 ..."
         let monthDigits = trimmed.prefix { $0.isASCII && $0.isNumber }
-        guard (1...2).contains(monthDigits.count),
-              let month = Int(monthDigits), (1...12).contains(month) else {
-            return (nil, trimmed)
+        if (1...2).contains(monthDigits.count),
+           let month = Int(monthDigits), (1...12).contains(month) {
+            let afterMonth = trimmed.dropFirst(monthDigits.count)
+            if afterMonth.first == "月" {
+                let afterMonthMark = afterMonth.dropFirst()
+                let dayDigits = afterMonthMark.prefix { $0.isASCII && $0.isNumber }
+                if (1...2).contains(dayDigits.count),
+                   let day = Int(dayDigits), (1...31).contains(day) {
+                    let afterDay = afterMonthMark.dropFirst(dayDigits.count)
+                    if afterDay.first == "日" {
+                        let dateStr = "\(month)月\(day)日"
+                        let rest = String(afterDay.dropFirst()).trimmingCharacters(in: .whitespacesAndNewlines)
+                        return (dateStr, rest.isEmpty ? nil : rest)
+                    }
+                }
+            }
         }
-        let afterMonth = trimmed.dropFirst(monthDigits.count)
-        guard afterMonth.first == "月" else { return (nil, trimmed) }
-        let afterMonthMark = afterMonth.dropFirst()
-        let dayDigits = afterMonthMark.prefix { $0.isASCII && $0.isNumber }
-        guard (1...2).contains(dayDigits.count),
-              let day = Int(dayDigits), (1...31).contains(day) else {
-            return (nil, trimmed)
+        // English short date prefix: "Nov 28 ..."
+        let tokens = trimmed.split(separator: " ", maxSplits: 2, omittingEmptySubsequences: true)
+        if tokens.count >= 2,
+           englishShortMonths.contains(String(tokens[0])),
+           let day = Int(tokens[1]), (1...31).contains(day) {
+            let dateStr = "\(tokens[0]) \(day)"
+            let rest = tokens.count == 3 ? String(tokens[2]).trimmingCharacters(in: .whitespacesAndNewlines) : ""
+            return (dateStr, rest.isEmpty ? nil : rest)
         }
-        let afterDay = afterMonthMark.dropFirst(dayDigits.count)
-        guard afterDay.first == "日" else { return (nil, trimmed) }
-        let dateStr = "\(month)月\(day)日"
-        let rest = String(afterDay.dropFirst()).trimmingCharacters(in: .whitespacesAndNewlines)
-        return (dateStr, rest.isEmpty ? nil : rest)
+        return (nil, trimmed)
     }
 }

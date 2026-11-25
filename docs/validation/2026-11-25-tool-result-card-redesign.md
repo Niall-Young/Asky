@@ -17,7 +17,12 @@
 
 ## 实际执行的验证
 
-1. `cd Packages/KulaCore && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test`：通过（全部 13 个测试目标共计 473 项测试全部通过）。
+1. `cd Packages/KulaCore && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test`：通过（全部 13 个测试目标共计 474 项测试全部通过，含新增的英文 24 小时制与月/周缩写单测）。
 2. `xcodegen generate && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project Asky.xcodeproj -scheme Asky -configuration Debug -derivedDataPath build/DerivedData build`：通过（`** BUILD SUCCEEDED **`）。
-3. `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer python3 App/Tests/run-agent-reply-regression.py --tool-result-cards`：通过，已目视核验新构建实窗截图 `build/tool-result-cards-light.png` 与 `build/tool-result-cards-dark.png`，确认亮暗模式下头图尺寸、竖线分割、柔和按钮及历史卡片兼容渲染符合设计稿。
+3. `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer python3 App/Tests/run-agent-reply-regression.py --tool-result-cards`：通过，已目视核验新构建实窗截图 `build/tool-result-cards-light.png` 与 `build/tool-result-cards-dark.png`，确认亮暗模式下 `22 pt` / `24 pt` 行高间距、竖线分割、柔和按钮及历史卡片兼容渲染与 Figma 对齐。
 4. `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer build/AgentReplyRegression.app/Contents/MacOS/AgentReplyRegression --bubble-chain`：通过（`Rendered linked gaps: assistant=4.0 pt, user=4.0 pt`），已目视核验 `build/bubble-chain-light.png` 与 `build/bubble-chain-dark.png` 中的连体气泡衔接与新卡片视觉一致。
+
+## 后续打磨（间距、英文 24h 与 2 行截断）
+
+- [ToolResultCardView.swift](../../App/Sources/ToolResultCardView.swift)：为 14pt / 16pt 文本行显式对齐 Figma `22 pt` / `24 pt` 行高框与行距（`lineSpacing(5)` / `lineSpacing(4)`），修正标题与时间行间距偏小问题；时间与日期行严格单行防折行；摘要类卡片（备忘录、信息草稿、快捷指令、记忆）折叠换行并限制最多 2 行末尾省略。
+- [ToolResultCard.swift](../../Packages/KulaCore/Sources/Contracts/ToolResultCard.swift)、[CoreLocalization.swift](../../Packages/KulaCore/Sources/Contracts/CoreLocalization.swift)、[en.lproj/Core.strings](../../Packages/KulaCore/Sources/Contracts/Resources/en.lproj/Core.strings)、[zh-Hans.lproj/Core.strings](../../Packages/KulaCore/Sources/Contracts/Resources/zh-Hans.lproj/Core.strings)、[en.lproj/Localizable.strings](../../App/Resources/en.lproj/Localizable.strings)、[zh-Hans.lproj/Localizable.strings](../../App/Resources/zh-Hans.lproj/Localizable.strings)：补齐英文状态卡片文案、24 小时制时间、英文月份缩写与星期缩写（如 `Nov 30, Mon`、`Nov 28, Sat`）及分组标题（如 `Work Calendar` / `Work Reminders`）。

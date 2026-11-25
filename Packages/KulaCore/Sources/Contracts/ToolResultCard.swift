@@ -96,7 +96,8 @@ public struct ToolResultCard: Sendable, Hashable, Codable, Identifiable {
         arguments: JSONValue? = nil,
         result: ExecutionResult,
         now: Date = Date(),
-        calendar: Calendar = .current
+        calendar: Calendar = .current,
+        language: String? = nil
     ) -> ToolResultCard? {
         guard result.status == .completed else { return nil }
         let payload = result.readback ?? result.output
@@ -105,30 +106,30 @@ public struct ToolResultCard: Sendable, Hashable, Codable, Identifiable {
         switch tool {
         case "calendar_create_event", "calendar_update_event":
             return calendarEventCard(id: id, isUpdate: tool == "calendar_update_event",
-                                     payload: payload, calendar: calendar)
+                                     payload: payload, calendar: calendar, language: language)
         case "calendar_search_events":
-            return calendarScheduleCard(id: id, payload: result.output, calendar: calendar)
+            return calendarScheduleCard(id: id, payload: result.output, calendar: calendar, language: language)
         case "reminders_create":
             return reminderCard(id: id, payload: payload, output: result.output,
-                                arguments: arguments, calendar: calendar)
+                                arguments: arguments, calendar: calendar, language: language)
         case "reminders_list":
-            return reminderListCard(id: id, payload: result.output, calendar: calendar)
+            return reminderListCard(id: id, payload: result.output, calendar: calendar, language: language)
         case "notes_create", "notes_append":
             return noteCard(id: id, isAppend: tool == "notes_append",
                             payload: payload, output: result.output,
-                            arguments: arguments, targets: result.targets)
+                            arguments: arguments, targets: result.targets, language: language)
         case "messages_prepare_draft":
             return messagesDraftCard(id: id, output: result.output,
-                                     arguments: arguments, targets: result.targets)
+                                     arguments: arguments, targets: result.targets, language: language)
         case "maps_routes":
-            return mapRoutesCard(id: id, output: result.output, calendar: calendar)
+            return mapRoutesCard(id: id, output: result.output, calendar: calendar, language: language)
         case "maps_search_places":
-            return mapPlacesCard(id: id, output: result.output)
+            return mapPlacesCard(id: id, output: result.output, language: language)
         case "shortcuts_run":
-            return shortcutCard(id: id, payload: payload, arguments: arguments)
+            return shortcutCard(id: id, payload: payload, arguments: arguments, language: language)
         case "memory_save", "memory_correct", "memory_forget":
             return memoryCard(id: id, tool: tool, output: result.output,
-                              arguments: arguments, targets: result.targets)
+                              arguments: arguments, targets: result.targets, language: language)
         default:
             return nil
         }
@@ -282,7 +283,7 @@ public struct ToolResultCard: Sendable, Hashable, Codable, Identifiable {
     // MARK: - Builders
 
     private static func calendarEventCard(
-        id: String, isUpdate: Bool, payload: JSONValue?, calendar: Calendar
+        id: String, isUpdate: Bool, payload: JSONValue?, calendar: Calendar, language: String?
     ) -> ToolResultCard? {
         guard let payload, let title = nonEmpty(payload["title"]?.stringValue) else { return nil }
         let startISO = payload["start"]?.stringValue
@@ -297,14 +298,14 @@ public struct ToolResultCard: Sendable, Hashable, Codable, Identifiable {
         let headline: String
         var subtitleParts: [String] = []
         if allDay {
-            headline = startDate.map { formatMonthDayWeekday($0, calendar: calendar) } ?? CoreLocalization.text("全天")
-            if startDate != nil { subtitleParts.append(CoreLocalization.text("全天")) }
+            headline = startDate.map { formatMonthDayWeekday($0, calendar: calendar, language: language) } ?? CoreLocalization.text("全天", language: language)
+            if startDate != nil { subtitleParts.append(CoreLocalization.text("全天", language: language)) }
         } else if let startDate, let endDate {
             headline = "\(formatTime(startDate, calendar: calendar)) – \(formatTime(endDate, calendar: calendar))"
-            subtitleParts.append(formatMonthDayWeekday(startDate, calendar: calendar))
+            subtitleParts.append(formatMonthDayWeekday(startDate, calendar: calendar, language: language))
         } else if let startDate {
             headline = formatTime(startDate, calendar: calendar)
-            subtitleParts.append(formatMonthDayWeekday(startDate, calendar: calendar))
+            subtitleParts.append(formatMonthDayWeekday(startDate, calendar: calendar, language: language))
         } else {
             headline = title
         }
@@ -317,17 +318,17 @@ public struct ToolResultCard: Sendable, Hashable, Codable, Identifiable {
             id: id,
             kind: .calendarEvent,
             source: .calendar,
-            categoryTitle: calendarCategoryTitle(groupName: calName, isUpdate: isUpdate),
+            categoryTitle: calendarCategoryTitle(groupName: calName, isUpdate: isUpdate, language: language),
             headline: headline,
             title: title,
             subtitle: subtitleParts.isEmpty ? nil : subtitleParts.joined(separator: " · "),
             metadata: meta,
-            action: Action(kind: .openCalendar, label: CoreLocalization.text("查看日历"), target: startISO)
+            action: Action(kind: .openCalendar, label: CoreLocalization.text("查看日历", language: language), target: startISO)
         )
     }
 
     private static func calendarScheduleCard(
-        id: String, payload: JSONValue?, calendar: Calendar
+        id: String, payload: JSONValue?, calendar: Calendar, language: String?
     ) -> ToolResultCard? {
         guard let items = payload?.arrayValue, !items.isEmpty else { return nil }
         let shownItems = Array(items.prefix(5))
@@ -338,7 +339,7 @@ public struct ToolResultCard: Sendable, Hashable, Codable, Identifiable {
         }()
         let headline: String = {
             guard let earliest = dates.min(), let latest = dates.max() else { return "" }
-            return formatDateRange(earliest, latest, calendar: calendar)
+            return formatDateRange(earliest, latest, calendar: calendar, language: language)
         }()
 
         let rows: [DetailRow] = shownItems.enumerated().compactMap { index, item in
@@ -350,7 +351,7 @@ public struct ToolResultCard: Sendable, Hashable, Codable, Identifiable {
 
             let timePart: String?
             if allDay {
-                timePart = CoreLocalization.text("全天")
+                timePart = CoreLocalization.text("全天", language: language)
             } else if let start, let end, singleDay {
                 timePart = "\(formatTime(start, calendar: calendar))–\(formatTime(end, calendar: calendar))"
             } else if let start {
@@ -363,16 +364,16 @@ public struct ToolResultCard: Sendable, Hashable, Codable, Identifiable {
             if singleDay {
                 trailing = timePart
             } else if let start, let timePart {
-                trailing = "\(formatShortDate(start, calendar: calendar)) \(timePart)"
+                trailing = "\(formatShortDate(start, calendar: calendar, language: language)) \(timePart)"
             } else if let start {
-                trailing = formatShortDate(start, calendar: calendar)
+                trailing = formatShortDate(start, calendar: calendar, language: language)
             } else {
                 trailing = timePart
             }
 
             let fullTimeRange: String?
             if allDay {
-                fullTimeRange = CoreLocalization.text("全天")
+                fullTimeRange = CoreLocalization.text("全天", language: language)
             } else if let start, let end {
                 fullTimeRange = "\(formatTime(start, calendar: calendar)) - \(formatTime(end, calendar: calendar))"
             } else if let start {
@@ -387,7 +388,7 @@ public struct ToolResultCard: Sendable, Hashable, Codable, Identifiable {
                 subtitle: location,
                 trailing: trailing,
                 badge: fullTimeRange,
-                dateLabel: start.map { formatMonthDayWeekday($0, calendar: calendar) }
+                dateLabel: start.map { formatMonthDayWeekday($0, calendar: calendar, language: language) }
             )
         }
         guard !rows.isEmpty else { return nil }
@@ -399,15 +400,15 @@ public struct ToolResultCard: Sendable, Hashable, Codable, Identifiable {
             id: id,
             kind: .calendarSchedule,
             source: .calendar,
-            categoryTitle: calendarCategoryTitle(groupName: sharedCalendar, isUpdate: false, fallback: CoreLocalization.text("日历日程")),
+            categoryTitle: calendarCategoryTitle(groupName: sharedCalendar, isUpdate: false, fallback: CoreLocalization.text("日历日程", language: language), language: language),
             headline: headline,
             rows: rows,
-            action: Action(kind: .openCalendar, label: CoreLocalization.text("查看日历"), target: firstStart)
+            action: Action(kind: .openCalendar, label: CoreLocalization.text("查看日历", language: language), target: firstStart)
         )
     }
 
     private static func reminderCard(
-        id: String, payload: JSONValue?, output: JSONValue?, arguments: JSONValue?, calendar: Calendar
+        id: String, payload: JSONValue?, output: JSONValue?, arguments: JSONValue?, calendar: Calendar, language: String?
     ) -> ToolResultCard? {
         let title = nonEmpty(payload?["title"]?.stringValue)
             ?? nonEmpty(output?["title"]?.stringValue)
@@ -425,23 +426,23 @@ public struct ToolResultCard: Sendable, Hashable, Codable, Identifiable {
         let displayTitle = dueDate != nil ? title : ""
 
         var subParts: [String] = []
-        if let dueDate { subParts.append(formatMonthDayWeekday(dueDate, calendar: calendar)) }
+        if let dueDate { subParts.append(formatMonthDayWeekday(dueDate, calendar: calendar, language: language)) }
         if let listName, !isDefaultReminderList(listName) { subParts.append(listName) }
 
         return ToolResultCard(
             id: id,
             kind: .reminder,
             source: .reminders,
-            categoryTitle: reminderCategoryTitle(groupName: listName),
+            categoryTitle: reminderCategoryTitle(groupName: listName, language: language),
             headline: headline,
             title: displayTitle,
             subtitle: subParts.isEmpty ? nil : subParts.joined(separator: " · "),
-            action: Action(kind: .openReminders, label: CoreLocalization.text("查看事项"))
+            action: Action(kind: .openReminders, label: CoreLocalization.text("查看事项", language: language))
         )
     }
 
     private static func reminderListCard(
-        id: String, payload: JSONValue?, calendar: Calendar
+        id: String, payload: JSONValue?, calendar: Calendar, language: String?
     ) -> ToolResultCard? {
         guard let items = payload?.arrayValue, !items.isEmpty else { return nil }
         let shownItems = Array(items.prefix(5))
@@ -453,7 +454,7 @@ public struct ToolResultCard: Sendable, Hashable, Codable, Identifiable {
         }()
         let headline: String = {
             guard allHaveDue, let earliest = dueDates.min(), let latest = dueDates.max() else { return "" }
-            return formatDateRange(earliest, latest, calendar: calendar)
+            return formatDateRange(earliest, latest, calendar: calendar, language: language)
         }()
 
         let rows: [DetailRow] = shownItems.enumerated().compactMap { index, item in
@@ -463,7 +464,7 @@ public struct ToolResultCard: Sendable, Hashable, Codable, Identifiable {
             if let due {
                 trailing = singleDay
                     ? formatTime(due, calendar: calendar)
-                    : "\(formatShortDate(due, calendar: calendar)) \(formatTime(due, calendar: calendar))"
+                    : "\(formatShortDate(due, calendar: calendar, language: language)) \(formatTime(due, calendar: calendar))"
             } else {
                 trailing = nil
             }
@@ -474,7 +475,7 @@ public struct ToolResultCard: Sendable, Hashable, Codable, Identifiable {
                 title: title,
                 trailing: trailing,
                 badge: customList,
-                dateLabel: due.map { formatMonthDayWeekday($0, calendar: calendar) }
+                dateLabel: due.map { formatMonthDayWeekday($0, calendar: calendar, language: language) }
             )
         }
         guard !rows.isEmpty else { return nil }
@@ -485,21 +486,21 @@ public struct ToolResultCard: Sendable, Hashable, Codable, Identifiable {
             id: id,
             kind: .reminderList,
             source: .reminders,
-            categoryTitle: reminderCategoryTitle(groupName: sharedList),
+            categoryTitle: reminderCategoryTitle(groupName: sharedList, language: language),
             headline: headline,
             rows: rows,
-            action: Action(kind: .openReminders, label: CoreLocalization.text("查看事项"))
+            action: Action(kind: .openReminders, label: CoreLocalization.text("查看事项", language: language))
         )
     }
 
     private static func noteCard(
         id: String, isAppend: Bool, payload: JSONValue?, output: JSONValue?,
-        arguments: JSONValue?, targets: [TargetRef]
+        arguments: JSONValue?, targets: [TargetRef], language: String?
     ) -> ToolResultCard? {
         let title = nonEmpty(payload?["name"]?.stringValue)
             ?? nonEmpty(output?["name"]?.stringValue)
             ?? nonEmpty(arguments?["title"]?.stringValue)
-            ?? CoreLocalization.text("备忘录")
+            ?? CoreLocalization.text("备忘录", language: language)
         let excerpt = nonEmpty(arguments?["body"]?.stringValue)
             ?? nonEmpty(arguments?["text"]?.stringValue)
         let noteID = nonEmpty(payload?["id"]?.stringValue)
@@ -510,15 +511,15 @@ public struct ToolResultCard: Sendable, Hashable, Codable, Identifiable {
             id: id,
             kind: .note,
             source: .notes,
-            categoryTitle: isAppend ? CoreLocalization.text("已追加备忘录") : CoreLocalization.text("备忘录"),
+            categoryTitle: isAppend ? CoreLocalization.text("已追加备忘录", language: language) : CoreLocalization.text("备忘录", language: language),
             headline: title,
             title: excerpt.map { truncate($0, limit: 120) } ?? "",
-            action: Action(kind: .openNotes, label: CoreLocalization.text("打开备忘录"), target: noteID)
+            action: Action(kind: .openNotes, label: CoreLocalization.text("打开备忘录", language: language), target: noteID)
         )
     }
 
     private static func messagesDraftCard(
-        id: String, output: JSONValue?, arguments: JSONValue?, targets: [TargetRef]
+        id: String, output: JSONValue?, arguments: JSONValue?, targets: [TargetRef], language: String?
     ) -> ToolResultCard? {
         guard let output else { return nil }
         let recipient = nonEmpty(output["recipient"]?.stringValue) ?? targets.first?.identifier
@@ -530,20 +531,20 @@ public struct ToolResultCard: Sendable, Hashable, Codable, Identifiable {
             id: id,
             kind: .messagesDraft,
             source: .messages,
-            categoryTitle: CoreLocalization.text("信息草稿"),
+            categoryTitle: CoreLocalization.text("信息草稿", language: language),
             headline: recipient,
             title: truncate(body, limit: 160),
-            action: Action(kind: .openMessagesDraft, label: CoreLocalization.text("在信息中打开"),
+            action: Action(kind: .openMessagesDraft, label: CoreLocalization.text("在信息中打开", language: language),
                            target: handle, detail: body)
         )
     }
 
     private static func mapRoutesCard(
-        id: String, output: JSONValue?, calendar: Calendar
+        id: String, output: JSONValue?, calendar: Calendar, language: String?
     ) -> ToolResultCard? {
         guard let output, let routes = output["routes"]?.arrayValue, !routes.isEmpty else { return nil }
-        let origin = nonEmpty(output["origin"]?["name"]?.stringValue) ?? CoreLocalization.text("起点")
-        let dest = nonEmpty(output["destination"]?["name"]?.stringValue) ?? CoreLocalization.text("终点")
+        let origin = nonEmpty(output["origin"]?["name"]?.stringValue) ?? CoreLocalization.text("起点", language: language)
+        let dest = nonEmpty(output["destination"]?["name"]?.stringValue) ?? CoreLocalization.text("终点", language: language)
         let destLat = output["destination"]?["latitude"]?.numberValue
         let destLon = output["destination"]?["longitude"]?.numberValue
         let coordTarget = (destLat != nil && destLon != nil) ? "\(destLat!),\(destLon!)" : nil
@@ -558,14 +559,14 @@ public struct ToolResultCard: Sendable, Hashable, Codable, Identifiable {
             var subParts: [String] = []
             if let meters, meters > 0 { subParts.append(formatDistance(meters)) }
             if let departDate {
-                subParts.append(CoreLocalization.format("建议 %@ 出发", formatTime(departDate, calendar: calendar)))
+                subParts.append(CoreLocalization.format("建议 %@ 出发", language: language, formatTime(departDate, calendar: calendar)))
             }
 
             return DetailRow(
                 id: "\(id)-\(mode)-\(index)",
-                title: transportLabel(mode),
+                title: transportLabel(mode, language: language),
                 subtitle: subParts.isEmpty ? nil : subParts.joined(separator: " · "),
-                trailing: formatDuration(seconds)
+                trailing: formatDuration(seconds, language: language)
             )
         }
         guard !rows.isEmpty else { return nil }
@@ -574,15 +575,15 @@ public struct ToolResultCard: Sendable, Hashable, Codable, Identifiable {
             id: id,
             kind: .mapRoutes,
             source: .maps,
-            categoryTitle: CoreLocalization.text("路线规划"),
+            categoryTitle: CoreLocalization.text("路线规划", language: language),
             headline: "\(origin) → \(dest)",
             rows: rows,
-            action: Action(kind: .openMaps, label: CoreLocalization.text("在地图中查看"),
+            action: Action(kind: .openMaps, label: CoreLocalization.text("在地图中查看", language: language),
                            target: coordTarget, detail: dest)
         )
     }
 
-    private static func mapPlacesCard(id: String, output: JSONValue?) -> ToolResultCard? {
+    private static func mapPlacesCard(id: String, output: JSONValue?, language: String?) -> ToolResultCard? {
         guard let places = output?["places"]?.arrayValue, !places.isEmpty else { return nil }
         let rows: [DetailRow] = places.prefix(4).enumerated().compactMap { index, place in
             guard let name = nonEmpty(place["name"]?.stringValue) else { return nil }
@@ -597,24 +598,24 @@ public struct ToolResultCard: Sendable, Hashable, Codable, Identifiable {
         let firstName = nonEmpty(first?["name"]?.stringValue)
 
         let headline = places.count == 1
-            ? (firstName ?? CoreLocalization.text("地点"))
+            ? (firstName ?? CoreLocalization.text("地点", language: language))
             : ""
 
         return ToolResultCard(
             id: id,
             kind: .mapPlaces,
             source: .maps,
-            categoryTitle: CoreLocalization.text("地点"),
+            categoryTitle: CoreLocalization.text("地点", language: language),
             headline: headline,
             subtitle: places.count == 1 ? nonEmpty(first?["address"]?.stringValue) : nil,
             rows: places.count == 1 ? [] : rows,
-            action: Action(kind: .openMaps, label: CoreLocalization.text("在地图中查看"),
+            action: Action(kind: .openMaps, label: CoreLocalization.text("在地图中查看", language: language),
                            target: coordTarget, detail: firstName)
         )
     }
 
     private static func shortcutCard(
-        id: String, payload: JSONValue?, arguments: JSONValue?
+        id: String, payload: JSONValue?, arguments: JSONValue?, language: String?
     ) -> ToolResultCard? {
         let name = nonEmpty(payload?["name"]?.stringValue) ?? nonEmpty(arguments?["name"]?.stringValue)
         guard let name else { return nil }
@@ -623,15 +624,15 @@ public struct ToolResultCard: Sendable, Hashable, Codable, Identifiable {
             id: id,
             kind: .shortcut,
             source: .shortcuts,
-            categoryTitle: CoreLocalization.text("快捷指令"),
+            categoryTitle: CoreLocalization.text("快捷指令", language: language),
             headline: name,
-            subtitle: out.map { truncate($0, limit: 120) } ?? CoreLocalization.text("已运行完成"),
-            action: Action(kind: .openShortcuts, label: CoreLocalization.text("打开快捷指令"))
+            subtitle: out.map { truncate($0, limit: 120) } ?? CoreLocalization.text("已运行完成", language: language),
+            action: Action(kind: .openShortcuts, label: CoreLocalization.text("打开快捷指令", language: language))
         )
     }
 
     private static func memoryCard(
-        id: String, tool: String, output: JSONValue?, arguments: JSONValue?, targets: [TargetRef]
+        id: String, tool: String, output: JSONValue?, arguments: JSONValue?, targets: [TargetRef], language: String?
     ) -> ToolResultCard? {
         let file = nonEmpty(output?["file"]?.stringValue)
             ?? targets.first?.identifier
@@ -644,17 +645,17 @@ public struct ToolResultCard: Sendable, Hashable, Codable, Identifiable {
         let headline: String
         switch tool {
         case "memory_save":
-            categoryTitle = CoreLocalization.text("记忆")
-            headline = CoreLocalization.text("已记住")
+            categoryTitle = CoreLocalization.text("记忆", language: language)
+            headline = CoreLocalization.text("已记住", language: language)
         case "memory_correct":
-            categoryTitle = CoreLocalization.text("更新记忆")
-            headline = CoreLocalization.text("记忆已更新")
+            categoryTitle = CoreLocalization.text("更新记忆", language: language)
+            headline = CoreLocalization.text("记忆已更新", language: language)
         case "memory_forget":
-            categoryTitle = CoreLocalization.text("记忆")
-            headline = CoreLocalization.text("已移除记忆")
+            categoryTitle = CoreLocalization.text("记忆", language: language)
+            headline = CoreLocalization.text("已移除记忆", language: language)
         default:
-            categoryTitle = CoreLocalization.text("记忆")
-            headline = CoreLocalization.text("记忆")
+            categoryTitle = CoreLocalization.text("记忆", language: language)
+            headline = CoreLocalization.text("记忆", language: language)
         }
 
         return ToolResultCard(
@@ -664,7 +665,7 @@ public struct ToolResultCard: Sendable, Hashable, Codable, Identifiable {
             categoryTitle: categoryTitle,
             headline: headline,
             title: truncate(content, limit: 160),
-            action: Action(kind: .openMemoryFile, label: CoreLocalization.text("查看记忆"), target: file)
+            action: Action(kind: .openMemoryFile, label: CoreLocalization.text("查看记忆", language: language), target: file)
         )
     }
 
@@ -673,29 +674,45 @@ public struct ToolResultCard: Sendable, Hashable, Codable, Identifiable {
     private static func calendarCategoryTitle(
         groupName: String?,
         isUpdate: Bool,
-        fallback: String? = nil
+        fallback: String? = nil,
+        language: String? = nil
     ) -> String {
+        let isEn = CoreLocalization.isEnglish(language)
         if let raw = nonEmpty(groupName) {
             let lower = raw.lowercased()
-            if lower != "日历" && lower != "calendar" && lower != "日程" {
+            if lower != "日历" && lower != "calendar" && lower != "日程" && lower != "events" {
+                if isEn {
+                    if lower.hasSuffix("calendar") || lower.hasSuffix("schedule") || lower.hasSuffix("events") {
+                        return raw
+                    }
+                    return "\(raw) Calendar"
+                }
                 if raw.hasSuffix("日程") {
                     return raw
                 }
-                return "\(raw)\(CoreLocalization.text("日程"))"
+                return "\(raw)日程"
             }
         }
         if let fallback { return fallback }
-        return isUpdate ? CoreLocalization.text("已更新日程") : CoreLocalization.text("日历日程")
+        return isUpdate ? CoreLocalization.text("已更新日程", language: language) : CoreLocalization.text("日历日程", language: language)
     }
 
-    private static func reminderCategoryTitle(groupName: String?) -> String {
+    private static func reminderCategoryTitle(groupName: String?, language: String? = nil) -> String {
+        let isEn = CoreLocalization.isEnglish(language)
         if let raw = nonEmpty(groupName), !isDefaultReminderList(raw) {
+            let lower = raw.lowercased()
+            if isEn {
+                if lower.hasSuffix("reminders") || lower.hasSuffix("reminder") {
+                    return raw
+                }
+                return "\(raw) Reminders"
+            }
             if raw.hasSuffix("事项提醒") || raw.hasSuffix("提醒事项") || raw.hasSuffix("提醒") {
                 return raw
             }
-            return "\(raw)\(CoreLocalization.text("事项提醒"))"
+            return "\(raw)事项提醒"
         }
-        return CoreLocalization.text("提醒事项")
+        return CoreLocalization.text("提醒事项", language: language)
     }
 
     private static func isDefaultReminderList(_ name: String) -> Bool {
@@ -755,16 +772,19 @@ public struct ToolResultCard: Sendable, Hashable, Codable, Identifiable {
         return "\(start.month)月\(start.day)日 – \(end.month)月\(end.day)日"
     }
 
-    private static func formatDateRange(_ start: Date, _ end: Date, calendar: Calendar) -> String {
+    private static func formatDateRange(_ start: Date, _ end: Date, calendar: Calendar, language: String? = nil) -> String {
         if calendar.isDate(start, inSameDayAs: end) {
-            return formatMonthDayWeekday(start, calendar: calendar)
+            return formatMonthDayWeekday(start, calendar: calendar, language: language)
         }
         let s = calendar.dateComponents([.year, .month, .day], from: start)
         let e = calendar.dateComponents([.year, .month, .day], from: end)
         if s.year == e.year, s.month == e.month, let eDay = e.day {
-            return "\(formatShortDate(start, calendar: calendar)) – \(eDay)日"
+            if CoreLocalization.isEnglish(language) {
+                return "\(formatShortDate(start, calendar: calendar, language: language)) – \(eDay)"
+            }
+            return "\(formatShortDate(start, calendar: calendar, language: language)) – \(eDay)日"
         }
-        return "\(formatShortDate(start, calendar: calendar)) – \(formatShortDate(end, calendar: calendar))"
+        return "\(formatShortDate(start, calendar: calendar, language: language)) – \(formatShortDate(end, calendar: calendar, language: language))"
     }
 
     private static func nonEmpty(_ value: String?) -> String? {
@@ -790,28 +810,54 @@ public struct ToolResultCard: Sendable, Hashable, Codable, Identifiable {
         return basic.date(from: raw)
     }
 
+    /// Always 24-hour `HH:mm` across both Chinese and English locales.
     private static func formatTime(_ date: Date, calendar: Calendar) -> String {
         let comps = calendar.dateComponents([.hour, .minute], from: date)
         return String(format: "%02d:%02d", comps.hour ?? 0, comps.minute ?? 0)
     }
 
-    private static func formatShortDate(_ date: Date, calendar: Calendar) -> String {
+    private static let englishShortMonths = [
+        "", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+    ]
+
+    private static let englishShortWeekdays = [
+        "", "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"
+    ]
+
+    private static func formatShortDate(_ date: Date, calendar: Calendar, language: String? = nil) -> String {
         let comps = calendar.dateComponents([.month, .day], from: date)
-        return "\(comps.month ?? 0)月\(comps.day ?? 0)日"
+        let m = comps.month ?? 0
+        let d = comps.day ?? 0
+        if CoreLocalization.isEnglish(language), (1...12).contains(m) {
+            return "\(englishShortMonths[m]) \(d)"
+        }
+        return "\(m)月\(d)日"
     }
 
-    private static func formatMonthDayWeekday(_ date: Date, calendar: Calendar) -> String {
+    private static func formatMonthDayWeekday(_ date: Date, calendar: Calendar, language: String? = nil) -> String {
         let comps = calendar.dateComponents([.month, .day, .weekday], from: date)
+        let m = comps.month ?? 0
+        let d = comps.day ?? 0
+        let wd = comps.weekday ?? 0
+        if CoreLocalization.isEnglish(language), (1...12).contains(m) {
+            let wdLabel = (1...7).contains(wd) ? englishShortWeekdays[wd] : ""
+            return wdLabel.isEmpty ? "\(englishShortMonths[m]) \(d)" : "\(englishShortMonths[m]) \(d), \(wdLabel)"
+        }
         let weekdays = ["", "周日", "周一", "周二", "周三", "周四", "周五", "周六"]
-        let wd = (comps.weekday ?? 0)
         let wdLabel = (1...7).contains(wd) ? weekdays[wd] : ""
-        return "\(comps.month ?? 0)月\(comps.day ?? 0)日 \(wdLabel)".trimmingCharacters(in: .whitespaces)
+        return "\(m)月\(d)日 \(wdLabel)".trimmingCharacters(in: .whitespaces)
     }
 
-    private static func formatDuration(_ seconds: Double) -> String {
+    private static func formatDuration(_ seconds: Double, language: String? = nil) -> String {
         let totalMinutes = max(1, Int((seconds / 60).rounded()))
         let hours = totalMinutes / 60
         let mins = totalMinutes % 60
+        if CoreLocalization.isEnglish(language) {
+            if hours > 0 && mins > 0 { return "\(hours) h \(mins) min" }
+            if hours > 0 { return "\(hours) h" }
+            return "\(mins) min"
+        }
         if hours > 0 && mins > 0 { return "\(hours) 小时 \(mins) 分钟" }
         if hours > 0 { return "\(hours) 小时" }
         return "\(mins) 分钟"
@@ -824,11 +870,11 @@ public struct ToolResultCard: Sendable, Hashable, Codable, Identifiable {
         return "\(Int(meters.rounded())) m"
     }
 
-    private static func transportLabel(_ mode: String) -> String {
+    private static func transportLabel(_ mode: String, language: String? = nil) -> String {
         switch mode {
-        case "walking": CoreLocalization.text("步行")
-        case "transit": CoreLocalization.text("公交")
-        case "driving": CoreLocalization.text("驾车")
+        case "walking": CoreLocalization.text("步行", language: language)
+        case "transit": CoreLocalization.text("公交", language: language)
+        case "driving": CoreLocalization.text("驾车", language: language)
         default: mode
         }
     }

@@ -15,6 +15,12 @@ public enum CoreLocalization {
         return Bundle.preferredLocalizations(from: Bundle.module.localizations, forPreferences: preferences).first ?? "zh-Hans"
     }()
 
+    public static var currentLanguage: String { launchLanguage }
+
+    public static func isEnglish(_ language: String? = nil) -> Bool {
+        (language ?? launchLanguage).lowercased().hasPrefix("en")
+    }
+
     public static func text(_ key: String, language: String? = nil) -> String {
         let bundle: Bundle
         if let path = Bundle.module.path(forResource: language ?? launchLanguage, ofType: "lproj"),
@@ -28,5 +34,9 @@ public enum CoreLocalization {
 
     public static func format(_ key: String, _ arguments: CVarArg...) -> String {
         String(format: text(key), arguments: arguments)
+    }
+
+    public static func format(_ key: String, language: String?, _ arguments: CVarArg...) -> String {
+        String(format: text(key, language: language), arguments: arguments)
     }
 }
