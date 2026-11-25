@@ -95,6 +95,153 @@ enum AgentReplyRegression {
         print("Composer tag height regression passed: empty=\(emptyScrollHeight), tagOnly=\(tagOnlyHeight), plain=\(plainTextHeight), text+tag=\(textWithTagHeight), baseline=\(plainBaseline)->\(textWithTagBaseline), twoLine=\(twoLinePlainHeight)->\(twoLineTagHeight)")
     }
 
+    static func composerInlineTagStylesRegression(app: AppModel, capturePrefix: String?) async throws {
+        let tmpDir = FileManager.default.temporaryDirectory.appending(path: "Asky-tag-styles-\(UUID())")
+        try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let imgFile = tmpDir.appending(path: "screenshot-2026.png")
+        let sampleImg = NSImage(size: NSSize(width: 64, height: 64), flipped: false) { rect in
+            NSGradient(starting: NSColor(calibratedRed: 0.25, green: 0.58, blue: 0.96, alpha: 1),
+                       ending: NSColor(calibratedRed: 0.52, green: 0.32, blue: 0.92, alpha: 1))?
+                .draw(in: rect, angle: -45)
+            NSColor.white.withAlphaComponent(0.85).setFill()
+            NSBezierPath(ovalIn: rect.insetBy(dx: 16, dy: 16)).fill()
+            return true
+        }
+        if let tiff = sampleImg.tiffRepresentation,
+           let rep = NSBitmapImageRep(data: tiff),
+           let png = rep.representation(using: .png, properties: [:]) {
+            try png.write(to: imgFile)
+        }
+        let docFile = tmpDir.appending(path: "Q4-Product-Roadmap-Final.pdf")
+        try Data("sample".utf8).write(to: docFile)
+
+        // Verify hover does NOT alter the pill fill color in light or dark mode.
+        let pastedSnippet = MessagePastedText(id: "hover-p1", text: String(repeating: "测试文本", count: 120))
+        let quoteItem = MessageQuote(id: "hover-q1", sourceMessageID: "src-1", text: "这是一段划词引用内容，检查样式与截断", kind: .selection)
+        precondition(!InlineTagKind.selection(quoteItem).label.hasPrefix("“"),
+                     "Selection tag label should not wrap text in full-width Chinese quotes")
+        for scheme in [ColorScheme.light, ColorScheme.dark] {
+            let appearance = InlineTagAppearance(colorScheme: scheme, inBubble: false, reduceTransparency: false)
+            let att = InlineTagAttachment(kind: .pastedText(pastedSnippet), appearance: appearance)
+            let idleRep = NSBitmapImageRep(data: att.image!.tiffRepresentation!)!
+            let sampleX = idleRep.pixelsWide - Int(InlineTagAttachment.horizontalMargin) - 3
+            let sampleY = idleRep.pixelsHigh / 2
+            let idleColor = idleRep.colorAt(x: sampleX, y: sampleY)!
+            att.setHovered(true)
+            let hoveredRep = NSBitmapImageRep(data: att.image!.tiffRepresentation!)!
+            let hoveredColor = hoveredRep.colorAt(x: sampleX, y: sampleY)!
+            precondition(
+                abs(idleColor.redComponent - hoveredColor.redComponent) < 0.005 &&
+                abs(idleColor.greenComponent - hoveredColor.greenComponent) < 0.005 &&
+                abs(idleColor.blueComponent - hoveredColor.blueComponent) < 0.005 &&
+                abs(idleColor.alphaComponent - hoveredColor.alphaComponent) < 0.005,
+                "Hovering composer tag must not change pill background color in \(scheme): idle=\(idleColor), hovered=\(hoveredColor)"
+            )
+        }
+
+        let store = ConversationStore(app.store)
+        let cid = try store.create(title: "Inline tag styles")
+        let sentImg = AttachmentRef(id: "s-img", kind: .image, path: imgFile.path, mimeType: "image/png", byteSize: 4096, temporary: false)
+        let sentFile = AttachmentRef(id: "s-file", kind: .file, path: docFile.path, mimeType: "application/pdf", byteSize: 2048, temporary: false)
+        let sentPasted = MessagePastedText(id: "s-pasted", text: String(repeating: "内容", count: 480))
+        let sentSelection = MessageQuote(id: "s-sel", sourceMessageID: "a-1", text: "选中的重点段落内容示例", kind: .selection)
+        let sentReply = MessageQuote(id: "s-rep", sourceMessageID: "a-1", text: "之前的回复摘要内容说明", kind: .reply)
+        let sentSegments: [MessageSegment] = [
+            .quote(id: sentReply.id),
+            .text("帮我结合"),
+            .attachment(id: sentImg.id),
+            .attachment(id: sentFile.id),
+            .text("和"),
+            .pastedText(id: sentPasted.id),
+            .quote(id: sentSelection.id),
+            .text("整理一份要点")
+        ]
+        let sentPresentation = MessagePresentation(
+            quotes: [sentReply, sentSelection],
+            pastedTexts: [sentPasted],
+            segments: sentSegments
+        )
+        try store.append(
+            conversationID: cid,
+            role: "user",
+            text: MessagePresentation.promptText(
+                segments: sentSegments,
+                quotes: [sentReply, sentSelection],
+                attachments: [sentImg, sentFile],
+                pastedTexts: [sentPasted]
+            ),
+            attachments: [sentImg, sentFile],
+            presentation: sentPresentation
+        )
+
+        let model = AgentModel(app: app)
+        model.open(cid)
+        let controller = AgentWindowController(model: model, presentation: WindowPresentation())
+        controller.show()
+        let window = NSApp.windows.first { $0.title == "Asky AI" }!
+        defer { window.orderOut(nil) }
+        try await Task.sleep(for: .milliseconds(500))
+
+        guard let editor = window.firstResponder as? NSTextView else {
+            preconditionFailure("Expected focused ComposerTextView")
+        }
+
+        // Insert all 5 tag types + mixed Chinese/English text into the composer.
+        model.addQuote("之前的回复摘要内容说明", sourceMessageID: "a-1", kind: .reply)
+        for _ in 0..<100 where !model.pendingTagInsertions.isEmpty { try await Task.sleep(for: .milliseconds(20)) }
+        editor.insertText("帮我对比", replacementRange: editor.selectedRange())
+        model.attach(fileURL: imgFile)
+        model.attach(fileURL: docFile)
+        for _ in 0..<100 where !model.pendingTagInsertions.isEmpty { try await Task.sleep(for: .milliseconds(20)) }
+        editor.insertText("以及", replacementRange: editor.selectedRange())
+        if let pastedKind = model.collapsePastedTextIfNeeded(String(repeating: "长文段落", count: 150)) {
+            model.pendingTagInsertions.append(ComposerTagInsertion(kind: pastedKind, atStart: false))
+            for _ in 0..<100 where !model.pendingTagInsertions.isEmpty { try await Task.sleep(for: .milliseconds(20)) }
+        }
+        model.addQuote("选中的重点段落内容示例", sourceMessageID: "a-1")
+        for _ in 0..<100 where !model.pendingTagInsertions.isEmpty { try await Task.sleep(for: .milliseconds(20)) }
+        editor.insertText("输出总结", replacementRange: editor.selectedRange())
+        try await Task.sleep(for: .milliseconds(450))
+
+        func capture(_ suffix: String) throws {
+            guard let capturePrefix, let view = window.contentView else { return }
+            if let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
+                view.cacheDisplay(in: view.bounds, to: rep)
+                if let png = rep.representation(using: .png, properties: [:]) {
+                    try png.write(to: URL(filePath: "\(capturePrefix)-\(suffix).png"))
+                }
+            }
+        }
+
+        window.appearance = NSAppearance(named: .aqua)
+        try await Task.sleep(for: .milliseconds(350))
+        try capture("light")
+
+        // Simulate hovering a composer tag and capture light hovered state to verify zero background shift.
+        if let storage = editor.textStorage {
+            for i in 0..<storage.length {
+                if let tag = storage.attribute(.attachment, at: i, effectiveRange: nil) as? InlineTagAttachment {
+                    if case .file = tag.kind {
+                        tag.setHovered(true)
+                        editor.layoutManager?.invalidateDisplay(forCharacterRange: NSRange(location: i, length: 1))
+                        editor.needsDisplay = true
+                        break
+                    }
+                }
+            }
+        }
+        try await Task.sleep(for: .milliseconds(200))
+        try capture("light-hovered")
+
+        window.appearance = NSAppearance(named: .darkAqua)
+        try await Task.sleep(for: .milliseconds(350))
+        try capture("dark-hovered")
+
+        print("Composer inline tag styles regression passed")
+    }
+
     static func composerIMELineWrapRegression(app: AppModel) async throws {
         let model = AgentModel(app: app)
         let controller = AgentWindowController(model: model, presentation: WindowPresentation())
@@ -3662,6 +3809,12 @@ enum AgentReplyRegression {
             let captureIdx = CommandLine.arguments.firstIndex(of: "--capture-prefix").map { $0 + 1 }
             let capturePrefix = captureIdx.flatMap { $0 < CommandLine.arguments.count ? CommandLine.arguments[$0] : nil }
             try await composerTagHeightRegression(app: app, capturePrefix: capturePrefix)
+            return
+        }
+        if CommandLine.arguments.contains("--composer-inline-tag-styles") {
+            let captureIdx = CommandLine.arguments.firstIndex(of: "--capture-prefix").map { $0 + 1 }
+            let capturePrefix = captureIdx.flatMap { $0 < CommandLine.arguments.count ? CommandLine.arguments[$0] : nil }
+            try await composerInlineTagStylesRegression(app: app, capturePrefix: capturePrefix)
             return
         }
         if CommandLine.arguments.contains("--composer-ime-wrap") {

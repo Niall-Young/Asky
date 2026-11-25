@@ -1,4 +1,5 @@
 import AppKit
+import CoreText
 import SwiftUI
 import Contracts
 import LocalStore
@@ -43,9 +44,20 @@ enum InlineTagKind: Equatable {
             return String(format: NSLocalizedString("粘贴文本 · %d 字", comment: ""), snippet.text.count)
         case .selection(let quote):
             let clean = Self.singleLinePreview(quote.text)
-            return "“\(clean)”"
+            return clean.isEmpty ? NSLocalizedString("划词引用", comment: "") : clean
         case .reply(let quote):
-            return Self.replyPlainPreview(quote.text)
+            let preview = Self.replyPlainPreview(quote.text)
+            return preview.isEmpty ? NSLocalizedString("回复消息", comment: "") : preview
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .image: "photo"
+        case .file: "doc"
+        case .pastedText: "doc.on.clipboard"
+        case .selection: "text.bubble"
+        case .reply: "arrow.turn.down.left"
         }
     }
 
@@ -111,18 +123,12 @@ struct InlineTagAppearance: Equatable {
     let reduceTransparency: Bool
 }
 
-enum InlineTagHoverState: Equatable {
-    case none
-    case pill
-    case closeButton
-}
-
 @MainActor
 final class InlineTagAttachment: NSTextAttachment {
     let tokenID: String
     var kind: InlineTagKind
     var appearance: InlineTagAppearance
-    private(set) var hoverState: InlineTagHoverState = .none
+    private(set) var isHovered: Bool = false
 
     static let pillHeight: CGFloat = 22
     static let pillYOffset: CGFloat = {
@@ -130,16 +136,20 @@ final class InlineTagAttachment: NSTextAttachment {
         let bodyHeight = bodyFont.ascender - bodyFont.descender
         return floor(bodyFont.descender + (bodyHeight - pillHeight) / 2)
     }()
-    static let horizontalMargin: CGFloat = 5
-    static let horizontalPadding: CGFloat = 7
+    static let horizontalMargin: CGFloat = 4
+    static let trailingPadding: CGFloat = 7.5
     static let iconLeadingPadding: CGFloat = 6
     static let thumbLeadingPadding: CGFloat = 3
-    static let iconSpacing: CGFloat = 5
-    static let iconSize: CGFloat = 15
-    static let closeIconSize: CGFloat = 13
-    static let thumbSize: CGFloat = 18
-    static let maxPillWidth: CGFloat = 192
-    static let cornerRadius: CGFloat = 6
+    static let iconSpacing: CGFloat = 4.5
+    static let thumbSpacing: CGFloat = 5
+    static let iconSize: CGFloat = 13
+    static let closeIconSize: CGFloat = 12
+    static let thumbCloseIconSize: CGFloat = 11
+    static let thumbSize: CGFloat = 16
+    static let thumbCornerRadius: CGFloat = 4
+    static let maxPillWidth: CGFloat = 176
+    static let cornerRadius: CGFloat = 7
+    private static let labelFont = NSFont.systemFont(ofSize: 12.5, weight: .regular)
 
     private struct MarginKey: Hashable {
         let leading: Int
@@ -147,6 +157,7 @@ final class InlineTagAttachment: NSTextAttachment {
     }
 
     private var pillWidth: CGFloat = 0
+    private var maxTextWidth: CGFloat = 0
     private var imageCache: [MarginKey: NSImage] = [:]
 
     private var hasThumbnail: Bool {
@@ -154,11 +165,21 @@ final class InlineTagAttachment: NSTextAttachment {
         return false
     }
 
+    private var leadingPadding: CGFloat {
+        hasThumbnail ? Self.thumbLeadingPadding : Self.iconLeadingPadding
+    }
+
+    private var leadingVisualWidth: CGFloat {
+        hasThumbnail ? Self.thumbSize : Self.iconSize
+    }
+
+    private var leadingVisualSpacing: CGFloat {
+        hasThumbnail ? Self.thumbSpacing : Self.iconSpacing
+    }
+
     func closeHitWidth(atLineStart: Bool) -> CGFloat {
-        let iconWidth = hasThumbnail ? Self.thumbSize : Self.iconSize
-        let leadingPad = hasThumbnail ? Self.thumbLeadingPadding : Self.iconLeadingPadding
         let leadingMargin: CGFloat = atLineStart ? 0 : Self.horizontalMargin
-        return leadingMargin + leadingPad + iconWidth + Self.iconSpacing / 2
+        return leadingMargin + leadingPadding + leadingVisualWidth + leadingVisualSpacing / 2
     }
 
     init(kind: InlineTagKind, appearance: InlineTagAppearance) {
@@ -183,9 +204,9 @@ final class InlineTagAttachment: NSTextAttachment {
     }
 
     @discardableResult
-    func setHoverState(_ newState: InlineTagHoverState) -> Bool {
-        guard hoverState != newState else { return false }
-        hoverState = newState
+    func setHovered(_ newValue: Bool) -> Bool {
+        guard isHovered != newValue else { return false }
+        isHovered = newValue
         rebuildMetrics()
         return true
     }
@@ -223,15 +244,43 @@ final class InlineTagAttachment: NSTextAttachment {
         }
     }
 
+    private static func makeLabelLine(
+        text: String,
+        color: NSColor,
+        maxWidth: CGFloat,
+        truncatesMiddle: Bool
+    ) -> (line: CTLine, width: CGFloat) {
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: labelFont,
+            .foregroundColor: color
+        ]
+        let rawLine = CTLineCreateWithAttributedString(NSAttributedString(string: text, attributes: attrs))
+        let rawWidth = CGFloat(CTLineGetTypographicBounds(rawLine, nil, nil, nil))
+        guard rawWidth > maxWidth else {
+            return (rawLine, rawWidth)
+        }
+        let ellipsis = CTLineCreateWithAttributedString(NSAttributedString(string: "…", attributes: attrs))
+        let truncated = CTLineCreateTruncatedLine(
+            rawLine,
+            Double(maxWidth),
+            truncatesMiddle ? .middle : .end,
+            ellipsis
+        ) ?? rawLine
+        let finalWidth = CGFloat(CTLineGetTypographicBounds(truncated, nil, nil, nil))
+        return (truncated, min(maxWidth, finalWidth))
+    }
+
     private func rebuildMetrics() {
-        let font = NSFont.systemFont(ofSize: 12.5, weight: .regular)
-        let label = kind.label
-        let iconWidth: CGFloat = hasThumbnail ? Self.thumbSize : Self.iconSize
-        let leadingPad: CGFloat = hasThumbnail ? Self.thumbLeadingPadding : Self.iconLeadingPadding
-        let maxTextWidth = Self.maxPillWidth - leadingPad - iconWidth - Self.iconSpacing - Self.horizontalPadding
-        let measuredWidth = ceil((label as NSString).size(withAttributes: [.font: font]).width)
+        let availableTextWidth = Self.maxPillWidth - leadingPadding - leadingVisualWidth - leadingVisualSpacing - Self.trailingPadding
+        maxTextWidth = max(12, availableTextWidth)
+        let measuredWidth = ceil(Self.makeLabelLine(
+            text: kind.label,
+            color: .labelColor,
+            maxWidth: maxTextWidth,
+            truncatesMiddle: kind.truncatesMiddle
+        ).width)
         let textWidth = min(maxTextWidth, max(12, measuredWidth))
-        pillWidth = ceil(leadingPad + iconWidth + Self.iconSpacing + textWidth + Self.horizontalPadding)
+        pillWidth = ceil(leadingPadding + leadingVisualWidth + leadingVisualSpacing + textWidth + Self.trailingPadding)
 
         imageCache.removeAll()
         let fallback = renderedImage(leadingMargin: Self.horizontalMargin, trailingMargin: Self.horizontalMargin)
@@ -243,55 +292,53 @@ final class InlineTagAttachment: NSTextAttachment {
         let key = MarginKey(leading: Int(round(leadingMargin)), trailing: Int(round(trailingMargin)))
         if let cached = imageCache[key] { return cached }
 
-        let font = NSFont.systemFont(ofSize: 12.5, weight: .regular)
-        let label = kind.label
-        let iconWidth: CGFloat = hasThumbnail ? Self.thumbSize : Self.iconSize
-        let leadingPad: CGFloat = hasThumbnail ? Self.thumbLeadingPadding : Self.iconLeadingPadding
-        let textWidth = max(12, pillWidth - leadingPad - iconWidth - Self.iconSpacing - Self.horizontalPadding)
         let totalSize = NSSize(width: pillWidth + leadingMargin + trailingMargin, height: Self.pillHeight)
-
         let isDark = appearance.colorScheme == .dark
-        let isHovered = hoverState != .none
         let fillColor: NSColor
-        let borderColor: NSColor
+        let borderColor: NSColor?
         if appearance.reduceTransparency {
             fillColor = NSColor(ThemeColor.kBackground.color(for: appearance.colorScheme))
             borderColor = NSColor(ThemeColor.kBorder.color(for: appearance.colorScheme))
         } else if appearance.inBubble {
             fillColor = isDark
                 ? NSColor(white: 1, alpha: 0.12)
-                : NSColor(white: 1, alpha: 0.65)
-            borderColor = isDark
-                ? NSColor(white: 1, alpha: 0.14)
-                : NSColor(red: 14 / 255, green: 15 / 255, blue: 17 / 255, alpha: 0.08)
+                : NSColor(white: 1, alpha: 0.62)
+            borderColor = nil
         } else {
             fillColor = isDark
-                ? NSColor(white: 1, alpha: isHovered ? 0.15 : 0.10)
-                : NSColor(red: 14 / 255, green: 15 / 255, blue: 17 / 255, alpha: isHovered ? 0.10 : 0.065)
-            borderColor = isDark
-                ? NSColor(white: 1, alpha: isHovered ? 0.18 : 0.12)
-                : NSColor(red: 14 / 255, green: 15 / 255, blue: 17 / 255, alpha: isHovered ? 0.12 : 0.08)
+                ? NSColor(white: 1, alpha: 0.10)
+                : NSColor(red: 14 / 255, green: 15 / 255, blue: 17 / 255, alpha: 0.06)
+            borderColor = nil
         }
         let textColor = isDark
             ? NSColor(white: 1, alpha: 0.86)
-            : NSColor(red: 14 / 255, green: 15 / 255, blue: 17 / 255, alpha: 0.80)
-        let iconColor = NSColor(ThemeColor.kIcon.color(for: appearance.colorScheme))
+            : NSColor(red: 14 / 255, green: 15 / 255, blue: 17 / 255, alpha: 0.84)
+        let iconColor = NSColor(ThemeColor.kIconSubtle.color(for: appearance.colorScheme))
+        let labelLine = Self.makeLabelLine(
+            text: kind.label,
+            color: textColor,
+            maxWidth: maxTextWidth,
+            truncatesMiddle: kind.truncatesMiddle
+        ).line
 
         let image = NSImage(size: totalSize, flipped: false) { _ in
             let pillRect = NSRect(x: leadingMargin, y: 0.5, width: self.pillWidth, height: Self.pillHeight - 1)
             let path = NSBezierPath(roundedRect: pillRect, xRadius: Self.cornerRadius, yRadius: Self.cornerRadius)
             fillColor.setFill()
             path.fill()
-            borderColor.setStroke()
-            path.lineWidth = 0.5
-            path.stroke()
+            if let borderColor {
+                borderColor.setStroke()
+                path.lineWidth = 0.5
+                path.stroke()
+            }
 
-            let iconX = pillRect.minX + leadingPad
+            let visualX = pillRect.minX + self.leadingPadding
             if case .image(_, let data) = self.kind, let data, let nsImage = NSImage(data: data) {
-                let thumbRect = NSRect(x: iconX, y: (Self.pillHeight - Self.thumbSize) / 2,
+                let thumbRect = NSRect(x: visualX, y: (Self.pillHeight - Self.thumbSize) / 2,
                                        width: Self.thumbSize, height: Self.thumbSize)
+                let thumbPath = NSBezierPath(roundedRect: thumbRect, xRadius: Self.thumbCornerRadius, yRadius: Self.thumbCornerRadius)
                 NSGraphicsContext.saveGraphicsState()
-                NSBezierPath(roundedRect: thumbRect, xRadius: 4, yRadius: 4).addClip()
+                thumbPath.addClip()
                 let src = nsImage.size
                 let scale = max(thumbRect.width / max(1, src.width), thumbRect.height / max(1, src.height))
                 let drawSize = NSSize(width: src.width * scale, height: src.height * scale)
@@ -299,66 +346,55 @@ final class InlineTagAttachment: NSTextAttachment {
                                       y: thumbRect.midY - drawSize.height / 2,
                                       width: drawSize.width, height: drawSize.height)
                 nsImage.draw(in: drawRect)
-                if self.hoverState != .none {
-                    let scrimAlpha: CGFloat = self.hoverState == .closeButton ? 0.65 : 0.48
-                    NSColor.black.withAlphaComponent(scrimAlpha).setFill()
+                if self.isHovered {
+                    NSColor.black.withAlphaComponent(0.45).setFill()
                     thumbRect.fill()
-                    let glyph = MingCute.image("xmark", size: Self.closeIconSize)
+                    let glyph = MingCute.image("xmark", size: Self.thumbCloseIconSize)
                     let tinted = Self.tintedImage(glyph, color: .white)
-                    let closeRect = NSRect(x: thumbRect.midX - Self.closeIconSize / 2,
-                                           y: thumbRect.midY - Self.closeIconSize / 2,
-                                           width: Self.closeIconSize, height: Self.closeIconSize)
+                    let closeRect = NSRect(x: thumbRect.midX - Self.thumbCloseIconSize / 2,
+                                           y: thumbRect.midY - Self.thumbCloseIconSize / 2,
+                                           width: Self.thumbCloseIconSize, height: Self.thumbCloseIconSize)
                     tinted.draw(in: closeRect)
                 }
                 NSGraphicsContext.restoreGraphicsState()
-            } else if self.hoverState != .none {
-                let iconCenterX = iconX + Self.iconSize / 2
+
+                let thumbBorder = isDark
+                    ? NSColor(white: 1, alpha: 0.12)
+                    : NSColor(red: 14 / 255, green: 15 / 255, blue: 17 / 255, alpha: 0.08)
+                thumbBorder.setStroke()
+                let insetThumb = NSBezierPath(
+                    roundedRect: thumbRect.insetBy(dx: 0.25, dy: 0.25),
+                    xRadius: max(0, Self.thumbCornerRadius - 0.25),
+                    yRadius: max(0, Self.thumbCornerRadius - 0.25)
+                )
+                insetThumb.lineWidth = 0.5
+                insetThumb.stroke()
+            } else if self.isHovered {
+                let iconCenterX = visualX + Self.iconSize / 2
                 let iconCenterY = Self.pillHeight / 2
-                if self.hoverState == .closeButton {
-                    let badgeSize: CGFloat = 17
-                    let badgeRect = NSRect(x: iconCenterX - badgeSize / 2, y: iconCenterY - badgeSize / 2,
-                                           width: badgeSize, height: badgeSize)
-                    let badgeColor = isDark
-                        ? NSColor(white: 1, alpha: 0.16)
-                        : NSColor(red: 14 / 255, green: 15 / 255, blue: 17 / 255, alpha: 0.11)
-                    badgeColor.setFill()
-                    NSBezierPath(ovalIn: badgeRect).fill()
-                }
                 let glyph = MingCute.image("xmark", size: Self.closeIconSize)
-                let tint = self.hoverState == .closeButton ? textColor : iconColor
-                let tinted = Self.tintedImage(glyph, color: tint)
+                let tinted = Self.tintedImage(glyph, color: iconColor)
                 let closeRect = NSRect(x: iconCenterX - Self.closeIconSize / 2,
                                        y: iconCenterY - Self.closeIconSize / 2,
                                        width: Self.closeIconSize, height: Self.closeIconSize)
                 tinted.draw(in: closeRect)
             } else {
-                let symbol: String = switch self.kind {
-                case .image: "photo"
-                case .file: "doc"
-                case .pastedText: "doc.on.clipboard"
-                case .selection: "text.document"
-                case .reply: "arrow.turn.down.left"
-                }
-                let glyph = MingCute.image(symbol, size: Self.iconSize)
+                let glyph = MingCute.image(self.kind.symbolName, size: Self.iconSize)
                 let tinted = Self.tintedImage(glyph, color: iconColor)
-                let iconRect = NSRect(x: iconX, y: (Self.pillHeight - Self.iconSize) / 2,
+                let iconRect = NSRect(x: visualX, y: (Self.pillHeight - Self.iconSize) / 2,
                                       width: Self.iconSize, height: Self.iconSize)
                 tinted.draw(in: iconRect)
             }
 
-            let style = NSMutableParagraphStyle()
-            style.lineBreakMode = self.kind.truncatesMiddle ? .byTruncatingMiddle : .byTruncatingTail
-            let attrs: [NSAttributedString.Key: Any] = [
-                .font: font,
-                .foregroundColor: textColor,
-                .paragraphStyle: style
-            ]
-            let textHeight = ceil(font.ascender - font.descender)
-            let textRect = NSRect(x: iconX + iconWidth + Self.iconSpacing,
-                                  y: (Self.pillHeight - textHeight) / 2 + 0.5,
-                                  width: textWidth,
-                                  height: textHeight)
-            (label as NSString).draw(in: textRect, withAttributes: attrs)
+            if let context = NSGraphicsContext.current?.cgContext {
+                context.saveGState()
+                let textX = visualX + self.leadingVisualWidth + self.leadingVisualSpacing
+                let baselineY = round((Self.pillHeight - Self.labelFont.capHeight) * 0.5 * 2) / 2
+                context.textMatrix = .identity
+                context.textPosition = CGPoint(x: textX, y: baselineY)
+                CTLineDraw(labelLine, context)
+                context.restoreGState()
+            }
             return true
         }
         imageCache[key] = image
@@ -370,7 +406,7 @@ final class InlineTagAttachment: NSTextAttachment {
         return NSImage(size: size, flipped: false) { rect in
             image.draw(in: rect)
             color.set()
-            rect.fill(using: .sourceAtop)
+            rect.fill(using: .sourceIn)
             return true
         }
     }
@@ -510,15 +546,7 @@ private struct InlineTagPopoverContent: View {
         .frame(minWidth: 220, maxWidth: 344)
     }
 
-    private var iconName: String {
-        switch kind {
-        case .image: "photo"
-        case .file: "doc"
-        case .pastedText: "doc.on.clipboard"
-        case .selection: "text.document"
-        case .reply: "arrow.turn.down.left"
-        }
-    }
+    private var iconName: String { kind.symbolName }
 
     private var headerTitle: String {
         switch kind {

@@ -320,7 +320,7 @@ private final class ComposerTextView: NSTextView {
             hoveredTagIndex = nil
             return
         }
-        let changed = previous.setHoverState(.none)
+        let changed = previous.setHovered(false)
         let prevIndex = hoveredTagIndex
         hoveredTag = nil
         hoveredTagIndex = nil
@@ -458,7 +458,6 @@ private final class ComposerTextView: NSTextView {
         let pt = convert(event.locationInWindow, from: nil)
         if let (tag, index, rect) = tagAt(windowPoint: event.locationInWindow) {
             let overClose = isPointInCloseButton(pt, tag: tag, rect: rect)
-            let newState: InlineTagHoverState = overClose ? .closeButton : .pill
             if hoveredTag !== tag {
                 clearHoveredTag()
                 hoveredTag = tag
@@ -466,7 +465,7 @@ private final class ComposerTextView: NSTextView {
             } else {
                 hoveredTagIndex = index
             }
-            if tag.setHoverState(newState) {
+            if tag.setHovered(true) {
                 invalidateTagDisplay(at: index)
             }
             toolTip = overClose ? NSLocalizedString("移除", comment: "") : tag.kind.helpText
