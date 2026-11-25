@@ -154,7 +154,7 @@ enum LocalShortcutsRegression {
                     pendingInsertions: [], consumeInsertions: { _ in },
                     onSegmentsChanged: { segments in
                         draft = segments.compactMap { if case .text(let s) = $0 { return s } else { return nil } }.joined()
-                    }, pasteAttachment: { false }, pasteLongText: { _ in nil }, onRevealReply: { _ in },
+                    }, pasteAttachment: { false }, pasteLongText: { _ in nil },
                     submit: { sends += 1 }, shortcuts: agentPreferences)
                 let host = NSHostingView(rootView: composer)
                 host.frame = NSRect(x: 0, y: 0, width: 400, height: 100)

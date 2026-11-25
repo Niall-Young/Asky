@@ -2751,7 +2751,6 @@ private struct Composer: View {
                 onMarkedTextChanged: { hasMarkedText = $0 },
                 pasteAttachment: { model.pasteAttachments() },
                 pasteLongText: { model.collapsePastedTextIfNeeded($0) },
-                onRevealReply: { _ = model.revealReply($0) },
                 submit: submitDraft,
                 shortcuts: model.shortcutPreferences
             )

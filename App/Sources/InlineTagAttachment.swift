@@ -87,18 +87,9 @@ enum InlineTagKind: Equatable {
         return false
     }
 
-    var supportsComposerPopover: Bool {
-        switch self {
-        case .file, .image: false
-        case .pastedText, .selection, .reply: true
-        }
-    }
-
     var supportsBubbleAction: Bool {
-        switch self {
-        case .file, .image: false
-        case .pastedText, .selection, .reply: true
-        }
+        if case .reply = self { return true }
+        return false
     }
 
     static func singleLinePreview(_ text: String) -> String {
@@ -412,175 +403,6 @@ final class InlineTagAttachment: NSTextAttachment {
     }
 }
 
-/// Lightweight native popover for inspecting or acting on an inline tag.
-@MainActor
-final class InlineTagPopoverPresenter: NSObject, NSPopoverDelegate {
-    private var popover: NSPopover?
-
-    func close() {
-        popover?.performClose(nil)
-        popover = nil
-    }
-
-    func show(kind: InlineTagKind, relativeTo rect: NSRect, of view: NSView,
-              onExpandPasted: (() -> Void)? = nil,
-              onRevealReply: (() -> Void)? = nil,
-              onRemove: (() -> Void)? = nil) {
-        close()
-        let pop = NSPopover()
-        pop.behavior = .transient
-        pop.animates = true
-        pop.delegate = self
-        let content = InlineTagPopoverContent(
-            kind: kind,
-            onExpandPasted: onExpandPasted.map { action in { [weak pop] in pop?.performClose(nil); action() } },
-            onRevealReply: onRevealReply.map { action in { [weak pop] in pop?.performClose(nil); action() } },
-            onRemove: onRemove.map { action in { [weak pop] in pop?.performClose(nil); action() } }
-        )
-        let hosting = NSHostingController(rootView: content)
-        pop.contentViewController = hosting
-        popover = pop
-        pop.show(relativeTo: rect, of: view, preferredEdge: .minY)
-    }
-
-    func popoverDidClose(_ notification: Notification) {
-        popover = nil
-    }
-}
-
-private struct InlineTagPopoverContent: View {
-    let kind: InlineTagKind
-    let onExpandPasted: (() -> Void)?
-    let onRevealReply: (() -> Void)?
-    let onRemove: (() -> Void)?
-    @State private var loadedImage: NSImage?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 6) {
-                Image(mingCute: iconName, size: 15)
-                    .foregroundStyle(ThemeColor.kIcon)
-                Text(headerTitle)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(ThemeColor.kText)
-                    .lineLimit(1)
-                Spacer(minLength: 8)
-                if let subtitle = headerSubtitle {
-                    Text(subtitle)
-                        .font(.system(size: 12))
-                        .foregroundStyle(ThemeColor.kTextSubtlest)
-                }
-            }
-
-            switch kind {
-            case .image(let ref, let data):
-                Group {
-                    if let img = (data.flatMap(NSImage.init(data:)) ?? loadedImage) {
-                        Image(nsImage: img)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(maxWidth: 260, maxHeight: 200)
-                            .clipShape(.rect(cornerRadius: 8))
-                    } else {
-                        ProgressView()
-                            .frame(width: 120, height: 80)
-                    }
-                }
-                .task(id: ref.id) {
-                    if data == nil {
-                        let loaded = await Task.detached(priority: .utility) {
-                            ComposerAttachmentService.preview(ref).thumbnail
-                        }.value
-                        loadedImage = loaded.flatMap(NSImage.init(data:))
-                    }
-                }
-            case .file(let ref):
-                Text(URL(filePath: ref.path).lastPathComponent)
-                    .font(.system(size: 13))
-                    .foregroundStyle(ThemeColor.kTextSubtle)
-                    .textSelection(.enabled)
-            case .pastedText(let snippet):
-                ScrollView {
-                    Text(snippet.text)
-                        .font(.system(size: 13))
-                        .foregroundStyle(ThemeColor.kText)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .textSelection(.enabled)
-                }
-                .frame(width: 320, height: min(220, max(60, CGFloat(snippet.text.count / 24 + 2) * 18)))
-            case .selection(let quote), .reply(let quote):
-                ScrollView {
-                    Text(quote.text)
-                        .font(.system(size: 13))
-                        .foregroundStyle(ThemeColor.kText)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .textSelection(.enabled)
-                }
-                .frame(width: 320, height: min(220, max(56, CGFloat(quote.text.count / 24 + 2) * 18)))
-            }
-
-            HStack(spacing: 8) {
-                if let copyText {
-                    Button(NSLocalizedString("复制", comment: "")) {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(copyText, forType: .string)
-                    }
-                    .controlSize(.small)
-                }
-                if let onExpandPasted {
-                    Button(NSLocalizedString("展开到输入框", comment: ""), action: onExpandPasted)
-                        .controlSize(.small)
-                }
-                if let onRevealReply {
-                    Button(NSLocalizedString("查看原回复", comment: ""), action: onRevealReply)
-                        .controlSize(.small)
-                }
-                Spacer(minLength: 0)
-                if let onRemove {
-                    Button(action: onRemove) {
-                        Text(NSLocalizedString("移除", comment: ""))
-                            .foregroundStyle(ThemeColor.kTextNegative)
-                    }
-                    .controlSize(.small)
-                }
-            }
-        }
-        .padding(12)
-        .frame(minWidth: 220, maxWidth: 344)
-    }
-
-    private var iconName: String { kind.symbolName }
-
-    private var headerTitle: String {
-        switch kind {
-        case .image: NSLocalizedString("图片附件", comment: "")
-        case .file: NSLocalizedString("文件附件", comment: "")
-        case .pastedText: NSLocalizedString("粘贴的文本", comment: "")
-        case .selection: NSLocalizedString("划词引用", comment: "")
-        case .reply: NSLocalizedString("回复消息", comment: "")
-        }
-    }
-
-    private var headerSubtitle: String? {
-        switch kind {
-        case .image(let ref, _), .file(let ref):
-            return ByteCountFormatter.string(fromByteCount: Int64(ref.byteSize), countStyle: .file)
-        case .pastedText(let snippet):
-            return String(format: NSLocalizedString("%d 字", comment: ""), snippet.text.count)
-        case .selection, .reply:
-            return nil
-        }
-    }
-
-    private var copyText: String? {
-        switch kind {
-        case .pastedText(let snippet): snippet.text
-        case .selection(let quote), .reply(let quote): quote.text
-        case .image, .file: nil
-        }
-    }
-}
-
 /// Read-only native text view for sent user messages that contain inline tags.
 struct UserInlineMessageView: View {
     let segments: [MessageSegment]
@@ -707,7 +529,6 @@ private struct UserInlineNativeText: NSViewRepresentable {
         let storage = NSTextStorage()
         let manager = NSLayoutManager()
         let container = NSTextContainer(size: .zero)
-        let popover = InlineTagPopoverPresenter()
         var lastKey: RenderKey?
         private(set) var naturalWidth: CGFloat = 2
         private var cachedWidth: CGFloat?
@@ -768,12 +589,9 @@ private struct UserInlineNativeText: NSViewRepresentable {
     func updateNSView(_ view: NSTextView, context: Context) {
         view.selectedTextAttributes = [.backgroundColor: selectionColor]
         if let tagView = view as? UserInlineTagTextView {
-            tagView.onTagClick = { [weak tagView] attachment, rect in
-                guard let tagView else { return }
+            tagView.onTagClick = { attachment, _ in
                 if case .reply(let quote) = attachment.kind {
                     onRevealReply(quote.sourceMessageID)
-                } else {
-                    context.coordinator.popover.show(kind: attachment.kind, relativeTo: rect, of: tagView)
                 }
             }
         }

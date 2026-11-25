@@ -1174,7 +1174,7 @@ enum ClipboardRegression {
             }, pasteAttachment: {
                 if NSPasteboard.general.data(forType: .png) != nil { attachmentPastes += 1; return true }
                 return false
-            }, pasteLongText: { _ in nil }, onRevealReply: { _ in },
+            }, pasteLongText: { _ in nil },
             submit: { preconditionFailure("paste must never submit the message") }))
         let window = NSWindow(contentRect: NSRect(x: 200, y: 200, width: 500, height: 200),
                               styleMask: [.titled], backing: .buffered, defer: false)

@@ -70,7 +70,6 @@ private final class ComposerScrollView: NSScrollView {
 private final class ComposerTextView: NSTextView {
     var pasteAttachment: () -> Bool = { false }
     var pasteLongText: (String) -> InlineTagKind? = { _ in nil }
-    var onRevealReply: ((String) -> Void)?
     var onMarkedTextChanged: ((Bool) -> Void)?
     var shortcuts = SettingsPreferences()
     var submit: () -> Void = {}
@@ -83,7 +82,6 @@ private final class ComposerTextView: NSTextView {
     }
     var baseTextColor: NSColor = .labelColor
 
-    private let popoverPresenter = InlineTagPopoverPresenter()
     private var tracking: NSTrackingArea?
     private weak var hoveredTag: InlineTagAttachment?
     private var hoveredTagIndex: Int?
@@ -335,7 +333,6 @@ private final class ComposerTextView: NSTextView {
 
     func resetDraft() {
         clearHoveredTag()
-        popoverPresenter.close()
         if hasMarkedText() {
             unmarkText()
         }
@@ -469,7 +466,7 @@ private final class ComposerTextView: NSTextView {
                 invalidateTagDisplay(at: index)
             }
             toolTip = overClose ? NSLocalizedString("移除", comment: "") : tag.kind.helpText
-            if overClose || tag.kind.supportsComposerPopover {
+            if overClose {
                 NSCursor.pointingHand.set()
             } else {
                 NSCursor.arrow.set()
@@ -489,36 +486,11 @@ private final class ComposerTextView: NSTextView {
 
     override func mouseDown(with event: NSEvent) {
         let pt = convert(event.locationInWindow, from: nil)
-        if let (tag, index, rect) = tagAt(windowPoint: event.locationInWindow) {
-            if isPointInCloseButton(pt, tag: tag, rect: rect) {
-                clearHoveredTag()
-                popoverPresenter.close()
-                replaceTag(at: index, with: "")
-                return
-            }
-            if tag.kind.supportsComposerPopover {
-                let expand: (() -> Void)? = {
-                    if case .pastedText(let snippet) = tag.kind {
-                        return { [weak self] in self?.replaceTag(at: index, with: snippet.text) }
-                    }
-                    return nil
-                }()
-                let reveal: (() -> Void)? = {
-                    if case .reply(let quote) = tag.kind {
-                        return { [weak self] in self?.onRevealReply?(quote.sourceMessageID) }
-                    }
-                    return nil
-                }()
-                popoverPresenter.show(
-                    kind: tag.kind,
-                    relativeTo: rect,
-                    of: self,
-                    onExpandPasted: expand,
-                    onRevealReply: reveal,
-                    onRemove: { [weak self] in self?.replaceTag(at: index, with: "") }
-                )
-                return
-            }
+        if let (tag, index, rect) = tagAt(windowPoint: event.locationInWindow),
+           isPointInCloseButton(pt, tag: tag, rect: rect) {
+            clearHoveredTag()
+            replaceTag(at: index, with: "")
+            return
         }
         super.mouseDown(with: event)
     }
@@ -681,7 +653,6 @@ struct ComposerTextEditor: NSViewRepresentable {
     var onMarkedTextChanged: (Bool) -> Void = { _ in }
     var pasteAttachment: () -> Bool
     var pasteLongText: (String) -> InlineTagKind?
-    var onRevealReply: (String) -> Void
     var submit: () -> Void
     var shortcuts = SettingsPreferences()
     @Environment(\.chatSelectionColor) private var selectionColor
@@ -748,7 +719,6 @@ struct ComposerTextEditor: NSViewRepresentable {
         }
         editor.pasteAttachment = pasteAttachment
         editor.pasteLongText = pasteLongText
-        editor.onRevealReply = onRevealReply
         editor.shortcuts = shortcuts
         editor.submit = submit
 
