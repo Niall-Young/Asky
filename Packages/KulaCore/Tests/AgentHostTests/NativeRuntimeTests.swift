@@ -892,6 +892,61 @@ server.serve_forever()
         let deltas = events.compactMap { event -> String? in if case .textDelta(_, let text) = event { return text }; return nil }
         #expect(deltas == [handoff, finalReply])
     }
+
+    @Test func commonModelAndTransportErrorsMapToNaturalLanguageWithFallback() async throws {
+        #expect(NativeModelError.classifyHTTP(statusCode: 401, body: nil) == .authentication)
+        #expect(NativeModelError.classifyHTTP(statusCode: 402, body: nil) == .insufficientQuota)
+        #expect(NativeModelError.classifyHTTP(statusCode: 403, body: nil) == .permissionDenied)
+        #expect(NativeModelError.classifyHTTP(statusCode: 404, body: nil) == .modelNotFound)
+        #expect(NativeModelError.classifyHTTP(statusCode: 408, body: nil) == .timeout)
+        #expect(NativeModelError.classifyHTTP(statusCode: 413, body: nil) == .contextTooLong)
+        #expect(NativeModelError.classifyHTTP(statusCode: 429, body: nil) == .rateLimited)
+        #expect(NativeModelError.classifyHTTP(statusCode: 503, body: nil) == .serverUnavailable)
+        #expect(NativeModelError.classifyHTTP(statusCode: 418, body: nil) == .providerError)
+
+        // Provider JSON body overrides generic HTTP codes when specific causes are present.
+        let quotaBody = Data(#"{"error":{"code":"insufficient_quota","message":"You exceeded your current quota"}}"#.utf8)
+        #expect(NativeModelError.classifyHTTP(statusCode: 429, body: quotaBody) == .insufficientQuota)
+        let contextBody = Data(#"{"error":{"code":"context_length_exceeded","message":"maximum context length"}}"#.utf8)
+        #expect(NativeModelError.classifyHTTP(statusCode: 400, body: contextBody) == .contextTooLong)
+        let safetyBody = Data(#"{"error":{"code":"content_filter","message":"Blocked by safety policy"}}"#.utf8)
+        #expect(NativeModelError.classifyHTTP(statusCode: 400, body: safetyBody) == .contentFiltered)
+        let visionBody = Data(#"{"error":{"message":"This model does not support image input"}}"#.utf8)
+        #expect(NativeModelError.classifyHTTP(statusCode: 400, body: visionBody) == .unsupportedImage)
+
+        // Network URLErrors map to natural language.
+        #expect(NativeModelError.classifyURLError(URLError(.notConnectedToInternet)) == .networkOffline)
+        #expect(NativeModelError.classifyURLError(URLError(.timedOut)) == .timeout)
+        #expect(NativeModelError.classifyURLError(URLError(.cannotFindHost)) == .cannotFindHost)
+        #expect(NativeModelError.classifyURLError(URLError(.cannotConnectToHost)) == .cannotConnect)
+        #expect(NativeModelError.classifyURLError(URLError(.serverCertificateUntrusted)) == .tlsFailure)
+
+        // Decoder finish_reason edge cases map to specific reasons.
+        var lengthDecoder = NativeCompletionDecoder()
+        _ = try lengthDecoder.consume(["choices": [["delta": ["content": "half"], "finish_reason": "length"]]])
+        #expect(throws: NativeModelError.failure(.outputLengthLimit)) { _ = try lengthDecoder.result() }
+
+        var safetyDecoder = NativeCompletionDecoder()
+        _ = try safetyDecoder.consume(["choices": [["delta": ["content": ""], "finish_reason": "content_filter"]]])
+        #expect(throws: NativeModelError.failure(.contentFiltered)) { _ = try safetyDecoder.result() }
+
+        // Unexpected edge-case error falls back to generic natural-language message without leaking code jargon.
+        struct UnexpectedEdgeError: Error {}
+        let fallback = NativeModelError.userMessage(for: UnexpectedEdgeError())
+        #expect(fallback == ModelFailureReason.unknown.userMessage)
+        #expect(!fallback.contains("UnexpectedEdgeError"))
+        #expect(!fallback.contains("HTTP"))
+
+        // Empty model reply emits a natural-language error instead of silently completing with no bubble.
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let emptyScript = ModelScript([NativeCompletion(text: "   ")])
+        let agent = host(root: root, script: emptyScript)
+        let events = await collect(agent, AgentRequest(sessionID: "empty", text: "你好"))
+        await agent.shutdown()
+        #expect(events.contains { if case .error(_, let msg) = $0 { msg == ModelFailureReason.emptyResponse.userMessage } else { false } })
+        #expect(events.contains { if case .taskState(_, .failed) = $0 { true } else { false } })
+    }
 }
 
 private actor PromptBox {

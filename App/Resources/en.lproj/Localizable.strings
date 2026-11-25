@@ -1097,3 +1097,6 @@
 "整轮回复" = "Full reply";
 "仅此条" = "This bubble";
 "至" = "to";
+"AI 服务当前不可用，请稍后重试或重启 Asky。" = "The AI service is currently unavailable. Try again later or restart Asky.";
+"保存消息失败，请稍后重试。" = "Couldn’t save the message. Please try again later.";
+"AI 服务意外中断，未能完成回复，请重试。" = "The AI service stopped unexpectedly before finishing the reply. Please try again.";

@@ -42,10 +42,10 @@ public enum AgentHostError: LocalizedError, Equatable {
         switch self {
         case .notConfigured: CoreLocalization.text("尚未配置模型，请在设置 › 模型中填写 API 地址、模型名与 Key。")
         case .credentialMissing: CoreLocalization.text("模型 API Key 不存在或为空，请在设置 › 模型中重新保存 Key。")
-        case .sessionBusy: CoreLocalization.text("该会话已有任务在运行。")
-        case .handshakeFailed(let reason): String(format: CoreLocalization.text("AI 运行时连接失败：%@"), reason)
-        case .protocolMismatch(let version): String(format: CoreLocalization.text("AI 运行时协议版本不匹配：%d"), version)
-        case .launchFailed(let reason): String(format: CoreLocalization.text("AI 运行时启动失败：%@"), reason)
+        case .sessionBusy: CoreLocalization.text("当前会话已有任务正在处理，请等待完成后再试。")
+        case .handshakeFailed: CoreLocalization.text("AI 服务连接失败，请稍后重试。")
+        case .protocolMismatch: CoreLocalization.text("AI 服务状态异常，请重启 Asky 后重试。")
+        case .launchFailed: CoreLocalization.text("AI 服务启动失败，请稍后重试或重启 Asky。")
         }
     }
 }
@@ -120,7 +120,7 @@ public actor AgentHost {
     public func submit(_ request: AgentRequest) -> AsyncStream<AgentEvent> {
         let (stream, cont) = AsyncStream<AgentEvent>.makeStream(bufferingPolicy: .bufferingNewest(512))
         if tasks.values.contains(where: { $0.sessionID == request.sessionID }) {
-            cont.yield(.error(taskID: request.taskID, CoreLocalization.text("该会话已有任务在运行")))
+            cont.yield(.error(taskID: request.taskID, CoreLocalization.text("当前会话已有任务正在处理，请等待完成后再试。")))
             cont.finish()
             return stream
         }
@@ -160,7 +160,13 @@ public actor AgentHost {
             try p.write(resources.encoded())
             try p.write(HostMessage.prompt(request, sessionFile: sessionFiles[request.sessionID]).encoded())
         } catch {
-            emit(request.taskID, .error(taskID: request.taskID, String(format: CoreLocalization.text("无法启动 AI 运行时：%@"), error.localizedDescription)))
+            let message: String
+            if let localized = error as? LocalizedError, let description = localized.errorDescription, !description.isEmpty {
+                message = description
+            } else {
+                message = ModelFailureReason.unknown.userMessage
+            }
+            emit(request.taskID, .error(taskID: request.taskID, message))
             finish(request.taskID, .failed)
         }
     }
@@ -224,8 +230,8 @@ public actor AgentHost {
                 switch frame {
                 case .success(let line):
                     if let msg = try? RuntimeMessage.decode(line) { await handle(msg, from: p) }
-                case .failure(let e):
-                    emitAll(.error(taskID: nil, String(format: CoreLocalization.text("运行时协议错误：%@"), String(describing: e))))
+                case .failure:
+                    emitAll(.error(taskID: nil, CoreLocalization.text("AI 通信出现异常，无法接收完整回复，请重试。")))
                 }
             }
         }

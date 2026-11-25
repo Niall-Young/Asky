@@ -30,6 +30,8 @@ public enum Palette {
         v["red"] = RGBA(hex: 0xFF0730, alpha: 1)
         v["warningLight"] = RGBA(hex: 0xAD690B, alpha: 1)
         v["warningDark"] = RGBA(hex: 0xE8AD52, alpha: 1)
+        v["warningSubtleLight"] = RGBA(hex: 0xAD690B, alpha: 0.10)
+        v["warningSubtleDark"] = RGBA(hex: 0xE8AD52, alpha: 0.14)
         v["negativeLight"] = RGBA(hex: 0xB84542, alpha: 1)
         v["negativeDark"] = RGBA(hex: 0xDC726E, alpha: 1)
         v["negativeFillDark"] = RGBA(hex: 0xB54B48, alpha: 1)
@@ -73,6 +75,7 @@ public enum SemanticColors {
         "backgroundPrimaryHover": ("Palette/black80", "Palette/white80"),
         "backgroundPrimarySubtle": ("Palette/black6", "Palette/white6"),
         "backgroundNegative": ("Palette/negativeLight", "Palette/negativeFillDark"),
+        "backgroundWarningSubtle": ("Palette/warningSubtleLight", "Palette/warningSubtleDark"),
         "backgroundPositive": ("Palette/green", "Palette/green"),
         "backgroundNeutral": ("Palette/black6", "Palette/white6"),
         "backgroundNeutralHover": ("Palette/black8", "Palette/white8"),

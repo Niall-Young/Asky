@@ -29,6 +29,8 @@ import Testing
     @Test func warningAndNegativeTokensUseAppearanceAdaptivePalette() {
         #expect(SemanticColors.color(native: "textWarning", .light) == RGBA(hex: 0xAD690B, alpha: 1))
         #expect(SemanticColors.color(native: "textWarning", .dark) == RGBA(hex: 0xE8AD52, alpha: 1))
+        #expect(SemanticColors.color(native: "backgroundWarningSubtle", .light) == RGBA(hex: 0xAD690B, alpha: 0.10))
+        #expect(SemanticColors.color(native: "backgroundWarningSubtle", .dark) == RGBA(hex: 0xE8AD52, alpha: 0.14))
 
         let lightRed = RGBA(hex: 0xB84542, alpha: 1)
         let darkRedText = RGBA(hex: 0xDC726E, alpha: 1)

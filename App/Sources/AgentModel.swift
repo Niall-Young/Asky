@@ -749,7 +749,7 @@ final class AgentModel {
         if formSubmission != nil, isRunning { return false }
         let text = input.isEmpty ? NSLocalizedString("请分析这些附件", comment: "") : input
         guard let agent = app.agent else {
-            appendTrimmed(ChatItem(id: UUID().uuidString, kind: .error, text: app.agentUnavailableReason ?? NSLocalizedString("AI 运行时不可用", comment: "")))
+            appendTrimmed(ChatItem(id: UUID().uuidString, kind: .error, text: app.agentUnavailableReason ?? NSLocalizedString("AI 服务当前不可用，请稍后重试或重启 Asky。", comment: "")))
             return false
         }
         guard app.modelConfiguration != nil else {
@@ -772,7 +772,7 @@ final class AgentModel {
                                            attachments: submittedAttachments, presentation: presentation)
                 appendTrimmed(Self.item(message))
             } catch {
-                appendTrimmed(ChatItem(id: UUID().uuidString, kind: .error, text: String(format: NSLocalizedString("保存消息失败：%@", comment: ""), error.localizedDescription)))
+                appendTrimmed(ChatItem(id: UUID().uuidString, kind: .error, text: NSLocalizedString("保存消息失败，请稍后重试。", comment: "")))
                 return false
             }
             if fromComposer { clearComposerAfterSend() }
@@ -822,7 +822,7 @@ final class AgentModel {
             }
             appendTrimmed(Self.item(message))
         } catch {
-            appendTrimmed(ChatItem(id: UUID().uuidString, kind: .error, text: String(format: NSLocalizedString("保存消息失败：%@", comment: ""), error.localizedDescription)))
+            appendTrimmed(ChatItem(id: UUID().uuidString, kind: .error, text: NSLocalizedString("保存消息失败，请稍后重试。", comment: "")))
             return false
         }
         if fromComposer { clearComposerAfterSend() }
@@ -987,8 +987,8 @@ final class AgentModel {
             state = .awaitingConfirmation
         case .error(_, let msg):
             appendTrimmed(ChatItem(id: UUID().uuidString, kind: .error, text: msg))
-        case .runtimeExited(let code):
-            if taskID != nil { appendTrimmed(ChatItem(id: UUID().uuidString, kind: .error, text: String(format: NSLocalizedString("AI 运行时已退出（%@）", comment: ""), String(code)))) }
+        case .runtimeExited:
+            if taskID != nil { appendTrimmed(ChatItem(id: UUID().uuidString, kind: .error, text: NSLocalizedString("AI 服务意外中断，未能完成回复，请重试。", comment: ""))) }
         }
     }
 

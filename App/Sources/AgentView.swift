@@ -2681,10 +2681,20 @@ private struct ChatBubble: View {
             }
         case .error:
             MaxWidthLayout(maxWidth: AgentLayout.assistantBubbleMaxWidth) {
-                Label { Text(item.text) } icon: { Image(mingCute: "warning", size: 16) }.textStyle(.secondary).foregroundStyle(ThemeColor.kTextNegative)
-                    .padding(.horizontal, AgentLayout.messageHorizontalInset).padding(.vertical, AgentLayout.messageVerticalInset)
-                    .background(ThemeColor.kBackgroundNeutral, in: .rect(cornerRadius: AgentLayout.bubbleCornerRadius))
+                HStack(alignment: .top, spacing: 8) {
+                    Image(mingCute: "warning", size: 16)
+                        .padding(.top, 1)
+                    Text(item.text)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .textStyle(.secondary)
+                .foregroundStyle(ThemeColor.kWarning)
+                .padding(.horizontal, AgentLayout.messageHorizontalInset)
+                .padding(.vertical, AgentLayout.messageVerticalInset)
+                .background(ThemeColor.kBackgroundWarningSubtle, in: .rect(cornerRadius: AgentLayout.bubbleCornerRadius))
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
