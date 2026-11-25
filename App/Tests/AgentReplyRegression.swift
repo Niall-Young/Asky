@@ -4184,6 +4184,12 @@ enum AgentReplyRegression {
         let root = FileManager.default.temporaryDirectory.appending(path: "Asky-reply-\(UUID())")
         defer { try? FileManager.default.removeItem(at: root) }
         let app = try AppModel(root: root)
+        if CommandLine.arguments.contains("--wide-window-layout") {
+            let captureIdx = CommandLine.arguments.firstIndex(of: "--capture-prefix").map { $0 + 1 }
+            let capturePrefix = captureIdx.flatMap { $0 < CommandLine.arguments.count ? CommandLine.arguments[$0] : nil }
+            try await wideWindowLayoutRegression(app: app, capturePrefix: capturePrefix)
+            return
+        }
         if CommandLine.arguments.contains("--composer-tag-height") {
             let captureIdx = CommandLine.arguments.firstIndex(of: "--capture-prefix").map { $0 + 1 }
             let capturePrefix = captureIdx.flatMap { $0 < CommandLine.arguments.count ? CommandLine.arguments[$0] : nil }
@@ -5247,6 +5253,140 @@ enum AgentReplyRegression {
             try bitmap.representation(using: .png, properties: [:])!.write(to: URL(filePath: "build/tool-result-cards-\(name).png"))
         }
         print("Tool result cards regression passed: captured real light/dark AgentWindow renders")
+    }
+
+    static func wideWindowLayoutRegression(app: AppModel, capturePrefix: String?) async throws {
+        let store = ConversationStore(app.store)
+        let cid = try store.create(title: "Wide window layout")
+        let formText = """
+        请补充会议信息：
+
+        ```asky-form
+        {"title":"会议安排","fields":[{"id":"title","label":"会议名称","type":"text","required":true},{"id":"duration","label":"会议时长","type":"radio","required":true,"options":["30 分钟","60 分钟"]}]}
+        ```
+        """
+        let longUserText = "这是一条较长的用户消息，用来确认在默认 560pt 宽度与更宽的 960pt 窗口中，用户消息气泡保持与默认窗口完全一致的最大宽度，并且在更宽窗口中自然错开。"
+        try store.append(conversationID: cid, role: "user", text: "你好", id: "wl-u-short",
+            presentation: MessagePresentation(responseID: "wl-r1"))
+        try store.append(conversationID: cid, role: "assistant", text: "你好！", id: "wl-a-short",
+            presentation: MessagePresentation(responseID: "wl-r1"))
+        try store.append(conversationID: cid, role: "user", text: longUserText, id: "wl-u-long",
+            presentation: MessagePresentation(responseID: "wl-r2"))
+        try store.append(conversationID: cid, role: "assistant", text: formText, id: "wl-a-form",
+            presentation: MessagePresentation(responseID: "wl-r2"))
+
+        let model = AgentModel(app: app)
+        model.open(cid)
+        let controller = AgentWindowController(model: model, presentation: WindowPresentation())
+        controller.show()
+        guard let window = NSApplication.shared.windows.last(where: { $0.title == "Asky AI" && $0.isVisible }),
+              let surface = window.contentView else {
+            preconditionFailure("Expected visible Asky AI window")
+        }
+        defer { window.orderOut(nil) }
+        window.appearance = NSAppearance(named: .darkAqua)
+
+        func findView(in root: NSView, id: String) -> NSView? {
+            if root.identifier?.rawValue == id { return root }
+            for child in root.subviews {
+                if let found = findView(in: child, id: id) { return found }
+            }
+            return nil
+        }
+
+        func findComposerScroll(in root: NSView) -> NSScrollView? {
+            if let tv = root as? NSTextView, tv.isEditable, let scroll = tv.enclosingScrollView {
+                return scroll
+            }
+            for child in root.subviews {
+                if let found = findComposerScroll(in: child) { return found }
+            }
+            return nil
+        }
+
+        func frameInSurface(_ view: NSView) -> CGRect {
+            surface.convert(view.bounds, from: view)
+        }
+
+        func capture(_ suffix: String) throws {
+            guard let capturePrefix else { return }
+            surface.layoutSubtreeIfNeeded()
+            if let rep = surface.bitmapImageRepForCachingDisplay(in: surface.bounds) {
+                surface.cacheDisplay(in: surface.bounds, to: rep)
+                if let png = rep.representation(using: .png, properties: [:]) {
+                    try png.write(to: URL(filePath: "\(capturePrefix)-\(suffix).png"))
+                }
+            }
+        }
+
+        // 1. Default 560pt window
+        try await Task.sleep(for: .milliseconds(500))
+        surface.layoutSubtreeIfNeeded()
+        guard let uShortView = findView(in: surface, id: "transcript-reply-wl-u-short"),
+              let aShortView = findView(in: surface, id: "transcript-reply-wl-a-short"),
+              let uLongView = findView(in: surface, id: "transcript-reply-wl-u-long"),
+              let aFormView = findView(in: surface, id: "transcript-reply-wl-a-form"),
+              let composerScroll = findComposerScroll(in: surface) else {
+            preconditionFailure("Missing expected transcript or composer views in default window")
+        }
+
+        let uShort560 = frameInSurface(uShortView)
+        let aShort560 = frameInSurface(aShortView)
+        let uLong560 = frameInSurface(uLongView)
+        let aForm560 = frameInSurface(aFormView)
+        let composer560 = frameInSurface(composerScroll)
+        try capture("560")
+
+        // Verify compact short bubbles do not stretch to max width
+        precondition(uShort560.width < 120, "Short user bubble stretched in 560pt window: \(uShort560)")
+        precondition(aShort560.width < 120, "Short assistant bubble stretched in 560pt window: \(aShort560)")
+
+        // 2. Wider 960pt window (> 700pt content cap)
+        window.maxSize = NSSize(width: 1400, height: 1000)
+        window.setContentSize(NSSize(width: 960, height: 680))
+        try await Task.sleep(for: .milliseconds(500))
+        surface.layoutSubtreeIfNeeded()
+
+        let uShort960 = frameInSurface(uShortView)
+        let aShort960 = frameInSurface(aShortView)
+        let uLong960 = frameInSurface(uLongView)
+        let aForm960 = frameInSurface(aFormView)
+        let composer960 = frameInSurface(composerScroll)
+        try capture("960")
+
+        // Content column is capped at 700pt and centered inside 960pt -> column is [130, 830].
+        // Composer scroll has 4pt horizontal padding inside Composer (width ~= 700 - 8 = 692).
+        precondition(abs(composer960.midX - 480) < 2,
+                     "Composer should be centered in 960pt window, got midX=\(composer960.midX)")
+        precondition(composer960.width > 680 && composer960.width <= 700,
+                     "Composer width should cap at ~700pt in 960pt window, got \(composer960.width) (was \(composer560.width))")
+
+        // Long user & assistant bubbles must preserve their default-window widths.
+        precondition(abs(aForm960.width - aForm560.width) < 1.5,
+                     "Assistant form bubble width changed on wide window: 560=\(aForm560.width), 960=\(aForm960.width)")
+        precondition(abs(uLong960.width - uLong560.width) < 1.5,
+                     "User long bubble width changed on wide window: 560=\(uLong560.width), 960=\(uLong960.width)")
+
+        // Short bubbles stay compact.
+        precondition(uShort960.width < 120 && aShort960.width < 120,
+                     "Short bubbles stretched on wide window: user=\(uShort960.width), assistant=\(aShort960.width)")
+
+        // Assistant aligns to left edge of centered 700pt column (130 + 16 = 146);
+        // User aligns to right edge of centered 700pt column (830 - 16 = 814).
+        let expectedAssistantMinX = (960 - AgentLayout.contentMaxWidth) / 2 + AgentLayout.messageHorizontalInset
+        let expectedUserMaxX = (960 + AgentLayout.contentMaxWidth) / 2 - AgentLayout.messageHorizontalInset
+        precondition(abs(aForm960.minX - expectedAssistantMinX) < 2,
+                     "Assistant bubble should align to centered 700pt column leading edge (\(expectedAssistantMinX)), got \(aForm960.minX)")
+        precondition(abs(uLong960.maxX - expectedUserMaxX) < 2,
+                     "User bubble should align to centered 700pt column trailing edge (\(expectedUserMaxX)), got \(uLong960.maxX)")
+
+        // Bubbles stagger further apart horizontally on wide window compared to 560pt window.
+        let stagger560 = uLong560.minX - aForm560.minX
+        let stagger960 = uLong960.minX - aForm960.minX
+        precondition(stagger960 > stagger560 + 140,
+                     "Expected bubbles to stagger wider in 960pt window: 560=\(stagger560), 960=\(stagger960)")
+
+        print("Wide window layout regression passed: composer=\(composer560.width)->\(composer960.width)@midX=\(composer960.midX), assistantForm=\(aForm560.width)->\(aForm960.width)@minX=\(aForm960.minX), userLong=\(uLong560.width)->\(uLong960.width)@maxX=\(uLong960.maxX), stagger=\(stagger560)->\(stagger960)")
     }
 
     private static func runPreview(_ controller: AgentWindowController, application: NSApplication) {

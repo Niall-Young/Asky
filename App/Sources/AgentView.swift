@@ -102,6 +102,12 @@ enum AgentLayout {
     static let message = TextStyle(size: 14, weight: 400, mode: .default)
     static let headerHeight: CGFloat = 64
     static let toastTopInset: CGFloat = 48
+    static let contentHorizontalPadding: CGFloat = 12
+    static let contentMaxWidth: CGFloat = 700
+    static let defaultContentWidth: CGFloat = WindowMetrics.agentWidth - contentHorizontalPadding * 2
+    static let sideActionSpacing: CGFloat = 8
+    static let assistantBubbleMaxWidth: CGFloat = defaultContentWidth - AssistantSideActionBar.width - sideActionSpacing
+    static let userBubbleMaxWidth: CGFloat = defaultContentWidth - UserSideActionBar.width - sideActionSpacing
     static let messageHorizontalInset: CGFloat = 16
     static let messageVerticalInset: CGFloat = 12
     static let userMessageVerticalInset: CGFloat = 12
@@ -338,7 +344,8 @@ struct AgentView: View {
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
             Composer(model: model, showingApprovalMenu: $showingApprovalMenu)
-                .padding(.horizontal, 12).padding(.bottom, 12)
+                .frame(maxWidth: AgentLayout.contentMaxWidth)
+                .padding(.horizontal, AgentLayout.contentHorizontalPadding).padding(.bottom, 12)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
                     composerHeight = height
                     if isComposerEmpty { emptyComposerHeight = height }
@@ -889,10 +896,12 @@ private struct Transcript: View {
                     // Scroll content continues behind the floating composer; its tail remains readable.
                     Color.clear.frame(height: bottomInset + 13)
                 }
-                .padding(.horizontal, 12).padding(.top, 12)
+                .frame(maxWidth: AgentLayout.contentMaxWidth, alignment: .leading)
+                .padding(.horizontal, AgentLayout.contentHorizontalPadding).padding(.top, 12)
                 .padding(.top, AgentLayout.headerHeight)
-                // Keep an initially short conversation at the top without padding individual turns.
-                .frame(minHeight: geometry.size.height, alignment: .top)
+                // Keep an initially short conversation at the top without padding individual turns,
+                // and center the bounded content column inside wider windows.
+                .frame(maxWidth: .infinity, minHeight: geometry.size.height, alignment: .top)
             }
             .environment(\.transcriptScrollActivity, scrollActivity)
             .onChange(of: model.replyNavigation) { _, request in
@@ -2277,8 +2286,8 @@ private func bubbleSideActionCenterY(in proxy: GeometryProxy, barHeight: CGFloat
 }
 
 private struct AssistantSideActionBar: View {
-    static let width: CGFloat = 86
-    static let height: CGFloat = 28
+    nonisolated static let width: CGFloat = 86
+    nonisolated static let height: CGFloat = 28
 
     let messageID: String
     let timestamp: Date?
@@ -2366,8 +2375,8 @@ private struct AssistantSideActionBar: View {
 }
 
 private struct UserSideActionBar: View {
-    static let width: CGFloat = 58
-    static let height: CGFloat = 28
+    nonisolated static let width: CGFloat = 58
+    nonisolated static let height: CGFloat = 28
 
     let messageID: String
     let text: String
@@ -2446,6 +2455,24 @@ private extension View {
     }
 }
 
+/// Caps the proposed width to `maxWidth` without expanding compact children to fill it.
+private struct MaxWidthLayout: Layout {
+    let maxWidth: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard let subview = subviews.first else { return .zero }
+        let cappedWidth = proposal.width.map { min($0, maxWidth) } ?? maxWidth
+        return subview.sizeThatFits(ProposedViewSize(width: cappedWidth, height: proposal.height))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard let subview = subviews.first else { return }
+        let cappedWidth = min(bounds.width, maxWidth)
+        subview.place(at: bounds.origin, anchor: .topLeading,
+                      proposal: ProposedViewSize(width: cappedWidth, height: bounds.height))
+    }
+}
+
 private struct ChatBubble: View {
     @Environment(\.colorScheme) private var scheme
     let item: ChatItem
@@ -2481,32 +2508,34 @@ private struct ChatBubble: View {
                                 .scrollIndicators(.hidden)
                                 .defaultScrollAnchor(.trailing)
                         }
-                        .frame(maxWidth: .infinity, alignment: .trailing)
+                        .frame(maxWidth: AgentLayout.defaultContentWidth, alignment: .trailing)
                     }
                 }
-                HStack(alignment: .center, spacing: 8) {
+                HStack(alignment: .center, spacing: AgentLayout.sideActionSpacing) {
                     Color.clear
                         .frame(width: UserSideActionBar.width, height: UserSideActionBar.height)
                         .layoutPriority(1)
-                    bubble
-                        .background {
-                            TranscriptReplyPosition(id: item.id)
-                        }
-                        .padding(.horizontal, AgentLayout.messageHorizontalInset).padding(.vertical, AgentLayout.userMessageVerticalInset)
-                        .background {
-                            bubbleShape.fill(ThemeColor.kBackgroundNeutral)
-                                .overlay {
-                                    bubbleShape.fill(model.avatarColor.userBubbleTint(for: scheme))
-                                }
-                        }
-                        .overlay(alignment: .bottomLeading) {
-                            ChatReactionBadge(
-                                emoji: item.agentReaction,
-                                side: .leading,
-                                accentColor: model.avatarColor.tint,
-                                accessibilityLabelFormat: NSLocalizedString("Asky 回应了 %@", comment: "")
-                            )
-                        }
+                    MaxWidthLayout(maxWidth: AgentLayout.userBubbleMaxWidth) {
+                        bubble
+                            .background {
+                                TranscriptReplyPosition(id: item.id)
+                            }
+                            .padding(.horizontal, AgentLayout.messageHorizontalInset).padding(.vertical, AgentLayout.userMessageVerticalInset)
+                            .background {
+                                bubbleShape.fill(ThemeColor.kBackgroundNeutral)
+                                    .overlay {
+                                        bubbleShape.fill(model.avatarColor.userBubbleTint(for: scheme))
+                                    }
+                            }
+                            .overlay(alignment: .bottomLeading) {
+                                ChatReactionBadge(
+                                    emoji: item.agentReaction,
+                                    side: .leading,
+                                    accentColor: model.avatarColor.tint,
+                                    accessibilityLabelFormat: NSLocalizedString("Asky 回应了 %@", comment: "")
+                                )
+                            }
+                    }
                 }
                 .overlay(alignment: .leading) {
                     UserSideActionBar(
@@ -2533,32 +2562,34 @@ private struct ChatBubble: View {
             let contextActions = item.id == "streaming" ? nil : assistantContextActions
             let bubbleShape = grouping.shape(for: .leading)
             let hasForm = item.text.contains("```asky-form")
-            HStack(alignment: .center, spacing: 8) {
-                ChatReplyView(text: item.text, isStreaming: item.id == "streaming",
-                    values: hasForm ? Binding(get: { model.formAnswers(item.id) },
-                                              set: { model.setFormAnswers($0, for: item.id) }) : .constant([:]),
-                    active: hasForm && model.formIsActive(item.id), submit: { model.submitForm(item.id) })
-                    .environment(\.chatSelectionColor, model.avatarColor.tint)
-                    .environment(\.chatQuoteAction, { model.addQuote($0, sourceMessageID: item.id) })
-                    .environment(\.chatBubbleContextActions, contextActions)
-                    .multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .background {
-                        TranscriptReplyPosition(id: item.id)
-                    }
-                    .padding(.horizontal, AgentLayout.messageHorizontalInset).padding(.vertical, AgentLayout.messageVerticalInset)
-                    .background {
-                        bubbleShape.fill(ThemeColor.kBackgroundNeutral)
-                            .replySurfaceMotion(morphsFromTyping ? bubbleMotion : nil, reduceMotion: reduceMotion)
-                    }
-                    .overlay(alignment: .bottomTrailing) {
-                        userReactionBadge
-                    }
-                    .contextMenu {
-                        if let actions = contextActions {
-                            assistantContextMenuItems(actions)
+            HStack(alignment: .center, spacing: AgentLayout.sideActionSpacing) {
+                MaxWidthLayout(maxWidth: AgentLayout.assistantBubbleMaxWidth) {
+                    ChatReplyView(text: item.text, isStreaming: item.id == "streaming",
+                        values: hasForm ? Binding(get: { model.formAnswers(item.id) },
+                                                  set: { model.setFormAnswers($0, for: item.id) }) : .constant([:]),
+                        active: hasForm && model.formIsActive(item.id), submit: { model.submitForm(item.id) })
+                        .environment(\.chatSelectionColor, model.avatarColor.tint)
+                        .environment(\.chatQuoteAction, { model.addQuote($0, sourceMessageID: item.id) })
+                        .environment(\.chatBubbleContextActions, contextActions)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .background {
+                            TranscriptReplyPosition(id: item.id)
                         }
-                    }
+                        .padding(.horizontal, AgentLayout.messageHorizontalInset).padding(.vertical, AgentLayout.messageVerticalInset)
+                        .background {
+                            bubbleShape.fill(ThemeColor.kBackgroundNeutral)
+                                .replySurfaceMotion(morphsFromTyping ? bubbleMotion : nil, reduceMotion: reduceMotion)
+                        }
+                        .overlay(alignment: .bottomTrailing) {
+                            userReactionBadge
+                        }
+                        .contextMenu {
+                            if let actions = contextActions {
+                                assistantContextMenuItems(actions)
+                            }
+                        }
+                }
                 if contextActions != nil {
                     Color.clear
                         .frame(width: AssistantSideActionBar.width, height: AssistantSideActionBar.height)
@@ -2589,24 +2620,26 @@ private struct ChatBubble: View {
         case .toolNarration:
             let contextActions = assistantContextActions
             let bubbleShape = grouping.shape(for: .leading)
-            HStack(alignment: .center, spacing: 8) {
-                ChatMarkdownView(text: item.text).equatable()
-                    .environment(\.chatSelectionColor, model.avatarColor.tint)
-                    .environment(\.chatQuoteAction, { model.addQuote($0, sourceMessageID: item.id) })
-                    .environment(\.chatBubbleContextActions, contextActions)
-                    .multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, AgentLayout.messageHorizontalInset)
-                    .padding(.vertical, AgentLayout.messageVerticalInset)
-                    .background {
-                        bubbleShape.fill(ThemeColor.kBackgroundNeutral)
-                    }
-                    .overlay(alignment: .bottomTrailing) {
-                        userReactionBadge
-                    }
-                    .contextMenu {
-                        assistantContextMenuItems(contextActions)
-                    }
+            HStack(alignment: .center, spacing: AgentLayout.sideActionSpacing) {
+                MaxWidthLayout(maxWidth: AgentLayout.assistantBubbleMaxWidth) {
+                    ChatMarkdownView(text: item.text).equatable()
+                        .environment(\.chatSelectionColor, model.avatarColor.tint)
+                        .environment(\.chatQuoteAction, { model.addQuote($0, sourceMessageID: item.id) })
+                        .environment(\.chatBubbleContextActions, contextActions)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, AgentLayout.messageHorizontalInset)
+                        .padding(.vertical, AgentLayout.messageVerticalInset)
+                        .background {
+                            bubbleShape.fill(ThemeColor.kBackgroundNeutral)
+                        }
+                        .overlay(alignment: .bottomTrailing) {
+                            userReactionBadge
+                        }
+                        .contextMenu {
+                            assistantContextMenuItems(contextActions)
+                        }
+                }
                 Color.clear
                     .frame(width: AssistantSideActionBar.width, height: AssistantSideActionBar.height)
                     .layoutPriority(1)
@@ -2641,13 +2674,17 @@ private struct ChatBubble: View {
                 EmptyView()
             }
         case .notice:
-            Text(item.text).textStyle(.secondary).foregroundStyle(ThemeColor.kTextSubtle)
-                .padding(.horizontal, AgentLayout.messageHorizontalInset).padding(.vertical, AgentLayout.messageVerticalInset)
-                .background(ThemeColor.kBackgroundNeutral, in: .rect(cornerRadius: AgentLayout.bubbleCornerRadius))
+            MaxWidthLayout(maxWidth: AgentLayout.assistantBubbleMaxWidth) {
+                Text(item.text).textStyle(.secondary).foregroundStyle(ThemeColor.kTextSubtle)
+                    .padding(.horizontal, AgentLayout.messageHorizontalInset).padding(.vertical, AgentLayout.messageVerticalInset)
+                    .background(ThemeColor.kBackgroundNeutral, in: .rect(cornerRadius: AgentLayout.bubbleCornerRadius))
+            }
         case .error:
-            Label { Text(item.text) } icon: { Image(mingCute: "warning", size: 16) }.textStyle(.secondary).foregroundStyle(ThemeColor.kTextNegative)
-                .padding(.horizontal, AgentLayout.messageHorizontalInset).padding(.vertical, AgentLayout.messageVerticalInset)
-                .background(ThemeColor.kBackgroundNeutral, in: .rect(cornerRadius: AgentLayout.bubbleCornerRadius))
+            MaxWidthLayout(maxWidth: AgentLayout.assistantBubbleMaxWidth) {
+                Label { Text(item.text) } icon: { Image(mingCute: "warning", size: 16) }.textStyle(.secondary).foregroundStyle(ThemeColor.kTextNegative)
+                    .padding(.horizontal, AgentLayout.messageHorizontalInset).padding(.vertical, AgentLayout.messageVerticalInset)
+                    .background(ThemeColor.kBackgroundNeutral, in: .rect(cornerRadius: AgentLayout.bubbleCornerRadius))
+            }
         }
     }
 
