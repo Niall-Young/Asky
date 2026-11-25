@@ -319,6 +319,9 @@
 "拖拽授权" = "Drag to grant access";
 "关于 Asky" = "About Asky";
 "版本 %@（%@）" = "Version %@ (%@)";
+"当前版本 %@" = "Current version %@";
+"当前版本 %@（%@）" = "Current version %@ (%@)";
+"开源项目" = "Open Source";
 "在 GitHub 查看项目" = "View Project on GitHub";
 "前往" = "Go";
 "软件更新" = "Software Update";
@@ -340,6 +343,7 @@
 "在后台下载并校验新版本，在你不使用 Asky 时静默重启完成更新，旧版本会被删除" ="Downloads and verifies new versions in the background, then silently restarts to finish updating while you're not using Asky. The old version is removed.";
 "新版本 %@ 已就绪" = "Version %@ is ready";
 "将在你不使用 Asky 时自动完成更新" = "Installs automatically while you're not using Asky";
+"新版本 %@ 已就绪，将在你不使用 Asky 时自动完成更新" = "Version %@ is ready and will install automatically while you're not using Asky";
 "下载更新" = "Download Update";
 "立即重启" = "Restart Now";
 "立即重启以完成更新？" = "Restart now to finish updating?";
@@ -625,7 +629,7 @@
 "喜欢 Asky？去 GitHub 点个 Star" = "Enjoying Asky? Star it on GitHub";
 "你的支持是持续更新的动力" = "Your support helps keep Asky improving";
 "Star 能让更多人发现这个项目" = "A star helps more people discover this project";
-"查看仓库" = "View repository";
+"查看仓库" = "View Repository";
 "去点 Star" = "Star on GitHub";
 "好" = "OK";
 "重新启动 Asky" = "Restart Asky";

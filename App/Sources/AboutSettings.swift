@@ -16,24 +16,19 @@ struct AboutSettings: View {
                         .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 4) {
                         Text(verbatim: "Asky").font(.title2.weight(.semibold))
-                        Text(ToolService.currentAppBuild.isEmpty
-                             ? String(format: NSLocalizedString("版本 %@", comment: ""), ToolService.currentAppVersion)
-                             : String(format: NSLocalizedString("版本 %@（%@）", comment: ""),
-                                      ToolService.currentAppVersion, ToolService.currentAppBuild))
+                        Text(NSLocalizedString("搜索、剪贴板与 AI，一个快捷键呼出", comment: ""))
                             .foregroundStyle(.secondary)
-                            .textSelection(.enabled)
-                    }
-                    Spacer(minLength: 12)
-                    SettingsButton("GitHub", assetImage: "GitHubMark") {
-                        _ = ToolService.openLauncherURL(ToolService.appRepositoryURL)
                     }
                 }
                 .padding(.vertical, 4)
-                StarRepositoryRow()
             }
             Section(NSLocalizedString("软件更新", comment: "")) {
                 HStack(alignment: .center, spacing: 16) {
-                    statusText
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(currentVersionText)
+                            .textSelection(.enabled)
+                        statusText
+                    }
                     Spacer(minLength: 16)
                     actionArea
                 }
@@ -48,6 +43,9 @@ struct AboutSettings: View {
                     }
                 }
             }
+            Section(NSLocalizedString("开源项目", comment: "")) {
+                StarRepositoryRow()
+            }
         }
         .appDialog(NSLocalizedString("立即重启以完成更新？", comment: ""), isPresented: $confirmingInstall,
                    message: NSLocalizedString("Asky 将退出，用新版本替换当前版本，然后重新打开", comment: ""),
@@ -56,24 +54,52 @@ struct AboutSettings: View {
         }
     }
 
+    private var currentVersionText: String {
+        ToolService.currentAppBuild.isEmpty
+            ? String(format: NSLocalizedString("当前版本 %@", comment: ""), ToolService.currentAppVersion)
+            : String(format: NSLocalizedString("当前版本 %@（%@）", comment: ""),
+                     ToolService.currentAppVersion, ToolService.currentAppBuild)
+    }
+
     @ViewBuilder private var statusText: some View {
         switch updater.status {
-        case .idle: Text(NSLocalizedString("尚未检查更新", comment: "")).foregroundStyle(.secondary)
-        case .checking: HStack(spacing: 8) { ProgressView().controlSize(.small); Text(NSLocalizedString("检查中…", comment: "")) }
-        case .upToDate: Text(NSLocalizedString("已是最新版本", comment: "")).foregroundStyle(.secondary)
+        case .idle:
+            Text(NSLocalizedString("尚未检查更新", comment: ""))
+                .foregroundStyle(.secondary)
+        case .checking:
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text(NSLocalizedString("检查中…", comment: ""))
+            }
+            .foregroundStyle(.secondary)
+        case .upToDate:
+            Text(NSLocalizedString("已是最新版本", comment: ""))
+                .foregroundStyle(.secondary)
         case .available(let release):
             Text(String(format: NSLocalizedString("发现新版本 %@", comment: ""), release.version))
+                .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-        case .downloading(_, let step): HStack(spacing: 8) { ProgressView().controlSize(.small); Text(step) }
-        case .ready(let staged):
-            VStack(alignment: .leading, spacing: 4) {
-                Text(String(format: NSLocalizedString("新版本 %@ 已就绪", comment: ""), staged.release.version))
-                Text(NSLocalizedString("将在你不使用 Asky 时自动完成更新", comment: ""))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+        case .downloading(_, let step):
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text(step)
             }
-        case .installing: HStack(spacing: 8) { ProgressView().controlSize(.small); Text(NSLocalizedString("正在安装…", comment: "")) }
-        case .failed(let message): Text(message).foregroundStyle(ThemeColor.kTextNegative).fixedSize(horizontal: false, vertical: true)
+            .foregroundStyle(.secondary)
+        case .ready(let staged):
+            Text(String(format: NSLocalizedString("新版本 %@ 已就绪，将在你不使用 Asky 时自动完成更新", comment: ""),
+                        staged.release.version))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        case .installing:
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text(NSLocalizedString("正在安装…", comment: ""))
+            }
+            .foregroundStyle(.secondary)
+        case .failed(let message):
+            Text(message)
+                .foregroundStyle(ThemeColor.kTextNegative)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 

@@ -30,7 +30,8 @@ for path in sorted(maps.glob("*.modulemap")):
 for relative in ["swift-cmark/src/include", "swift-cmark/extensions/include"]:
     command += ["-I", str(derived_data / "SourcePackages/checkouts" / relative)]
 command += [str(root / "App/Sources" / (name + ".swift")) for name in sources]
-test_source = ("PluginSettingsRegression.swift" if "--plugin-tabs" in sys.argv else
+test_source = ("AboutSettingsRegression.swift" if "--about-page" in sys.argv else
+               "PluginSettingsRegression.swift" if "--plugin-tabs" in sys.argv else
                "LocalShortcutsRegression.swift" if "--local-shortcuts" in sys.argv else "SettingsRegression.swift")
 command += [str(root / "App/Tests" / test_source)]
 command += [str(path) for path in sorted(products.glob("*.o"))]
@@ -47,9 +48,13 @@ shutil.copy2(products / "Asky.app/Contents/Resources/Assets.car", bundle / "Reso
 shutil.copy2(products / "Asky.app/Contents/Resources/AskyNative.icns", bundle / "Resources/AskyNative.icns")
 for localization in (products / "Asky.app/Contents/Resources").glob("*.lproj"):
     shutil.copytree(localization, bundle / "Resources" / localization.name, dirs_exist_ok=True)
+with (products / "Asky.app/Contents/Info.plist").open("rb") as source_plist:
+    app_info = plistlib.load(source_plist)
 with (bundle / "Info.plist").open("wb") as output:
     plistlib.dump({"CFBundleExecutable": "SettingsRegression", "CFBundleIdentifier": "app.asky.plugin-settings-regression" if "--plugin-tabs" in sys.argv else "app.asky.settings-regression",
                   "CFBundleName": "SettingsRegression", "CFBundleIconFile": "AskyNative", "CFBundleIconName": "AskyNative",
+                  "CFBundleShortVersionString": app_info.get("CFBundleShortVersionString", "0.1.0"),
+                  "CFBundleVersion": app_info.get("CFBundleVersion", "1"),
                   "CFBundleDevelopmentRegion": "zh-Hans", "CFBundlePackageType": "APPL", "LSUIElement": True}, output)
 # Refresh the bundle signature after replacing its executable and resources.
 subprocess.run(["codesign", "--force", "--sign", "-", str(bundle.parent)], check=True)
