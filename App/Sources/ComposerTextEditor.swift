@@ -444,7 +444,17 @@ private final class ComposerTextView: NSTextView {
         )
     }
 
+    override func cursorUpdate(with event: NSEvent) {
+        guard !ActionArrowCursor.applyIfCovered(event, in: window) else { return }
+        super.cursorUpdate(with: event)
+    }
+
     override func mouseMoved(with event: NSEvent) {
+        if ActionArrowCursor.applyIfCovered(event, in: window) {
+            clearHoveredTag()
+            toolTip = nil
+            return
+        }
         let pt = convert(event.locationInWindow, from: nil)
         if let (tag, index, rect) = tagAt(windowPoint: event.locationInWindow) {
             let overClose = isPointInCloseButton(pt, tag: tag, rect: rect)

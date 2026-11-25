@@ -57,6 +57,7 @@ struct ChatDeleteConfirmPresentation: ViewModifier {
                         .transition(cardTransition)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .actionArrowCursor(enabled: isPresented)
                 }
             }
             .animation(presentationAnimation, value: isPresented)

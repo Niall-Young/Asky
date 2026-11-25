@@ -546,6 +546,16 @@ extension AgentReplyRegression {
         NSApp.activate(ignoringOtherApps: true)
         try await Task.sleep(for: .milliseconds(250))
 
+        let originalPointer = NSEvent.mouseLocation
+        func movePointer(_ point: NSPoint) {
+            let screenHeight = NSScreen.screens[0].frame.maxY
+            CGWarpMouseCursorPosition(CGPoint(x: point.x, y: screenHeight - point.y))
+            CGEvent(mouseEventSource: nil, mouseType: .mouseMoved,
+                mouseCursorPosition: CGPoint(x: point.x, y: screenHeight - point.y),
+                mouseButton: .left)?.post(tap: .cghidEventTap)
+        }
+        defer { movePointer(originalPointer) }
+
         let targetItem = model.items.first { $0.id == targetUser.id }!
         model.confirmAndDeleteUserMessage(targetItem)
         precondition(model.pendingDeleteMessage?.id == targetUser.id)
@@ -578,6 +588,29 @@ extension AgentReplyRegression {
             try capture(name)
         }
 
+        // Hovering over the top-right close button (sitting above selectable AI text), action buttons,
+        // and the covered composer must keep the arrow cursor instead of leaking an I-beam cursor.
+        let openSurface = window.contentView!
+        let openButtons = descendants(openSurface).compactMap { $0 as? NSButton }
+        let closeBtn = openButtons.first { $0.accessibilityIdentifier() == "chat-delete-confirm-close" }!
+        let cancelBtn = openButtons.first { $0.accessibilityIdentifier() == "chat-delete-confirm-cancel" }!
+        let deleteBtn = openButtons.first { $0.accessibilityIdentifier() == "chat-delete-confirm-delete" }!
+        let composerView = descendants(openSurface).compactMap { $0 as? NSTextView }.first { $0.isEditable }!
+        let replyTextView = descendants(openSurface).compactMap { $0 as? ChatSelectableTextView }
+            .first { $0.string.contains("时间要对齐") }!
+        let cursorTargets: [(String, NSPoint)] = [
+            ("close button", closeBtn.convert(NSPoint(x: closeBtn.bounds.midX, y: closeBtn.bounds.midY), to: nil)),
+            ("cancel button", cancelBtn.convert(NSPoint(x: cancelBtn.bounds.midX, y: cancelBtn.bounds.midY), to: nil)),
+            ("delete button", deleteBtn.convert(NSPoint(x: deleteBtn.bounds.midX, y: deleteBtn.bounds.midY), to: nil)),
+            ("covered composer", composerView.convert(NSPoint(x: 24, y: composerView.bounds.midY), to: nil)),
+        ]
+        for (label, pointInWindow) in cursorTargets {
+            movePointer(window.convertPoint(toScreen: pointInWindow))
+            try await Task.sleep(for: .milliseconds(160))
+            precondition(NSCursor.current == .arrow,
+                         "Hovering \(label) while delete dialog is open must show arrow cursor, not I-beam")
+        }
+
         // Escape cancels ONLY the dialog, keeping the Agent window visible and preserving the message.
         let escEvent = NSEvent.keyEvent(
             with: .keyDown, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
@@ -589,6 +622,13 @@ extension AgentReplyRegression {
         precondition(model.pendingDeleteMessage == nil, "Escape must dismiss the delete dialog")
         precondition(window.isVisible, "Escape on delete dialog must not close the Agent window")
         precondition(model.items.contains { $0.id == targetUser.id }, "Cancelling must preserve the user message")
+
+        // After dismissing the dialog, hovering selectable reply text restores the I-beam cursor.
+        let replyHoverPoint = replyTextView.convert(NSPoint(x: 24, y: 12), to: nil)
+        movePointer(window.convertPoint(toScreen: replyHoverPoint))
+        try await Task.sleep(for: .milliseconds(180))
+        precondition(NSCursor.current == .iBeam,
+                     "After dismissing delete dialog, hovering selectable reply text must restore I-beam cursor")
 
         // Clicking outside cancels without deleting.
         model.confirmAndDeleteUserMessage(targetItem)

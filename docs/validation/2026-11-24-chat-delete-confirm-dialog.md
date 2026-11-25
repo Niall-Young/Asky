@@ -11,6 +11,12 @@
 - [AgentReactionRegression.swift](../../App/Tests/AgentReactionRegression.swift) 与 [AgentReplyRegression.swift](../../App/Tests/AgentReplyRegression.swift)：新增 `--delete-dialog-preview` 回归用例，覆盖居中几何、等宽按钮、输入框失焦、`Esc` 与外部点击取消不删消息、确认删除仅移除目标用户消息并保留 AI 回复，以及亮/暗模式实际窗口截图。
 - [design-system.md](../design-system.md)：在 `Dialog 与 Alert` 一节补充对话消息删除确认弹窗规范。
 
+## 2026-11-25 补充修复：弹窗与右上角关闭按钮悬停光标
+
+- [ChatDeleteConfirmDialog.swift](../../App/Sources/ChatDeleteConfirmDialog.swift)：为删除确认弹窗覆盖层添加 `.actionArrowCursor(enabled: isPresented)`，防止背后可选择气泡正文（`ChatSelectableTextView`）在指针移至右上角关闭按钮或弹窗区域时安装 I-beam 输入光标。
+- [ComposerTextEditor.swift](../../App/Sources/ComposerTextEditor.swift)：在 `ComposerTextView.cursorUpdate(with:)` 与 `mouseMoved(with:)` 中接入 `ActionArrowCursor.applyIfCovered(event, in: window)`，避免被弹窗覆盖的输入框残留文本光标或触发行内 Tag 悬停。
+- [AgentReactionRegression.swift](../../App/Tests/AgentReactionRegression.swift)：在 `deleteDialogPreviewRegression` 中新增真实指针移动断言，覆盖右上角关闭按钮、取消按钮、删除按钮与被遮盖输入框均保持箭头光标，以及关闭弹窗后悬停 AI 正文恢复 I-beam 光标。
+
 ## 实际执行与结果
 
 1. 工程生成与 Debug 构建：
@@ -18,11 +24,14 @@
    - 结果：通过（修改文件零新增告警）。
 2. 删除确认弹窗原生回归与视觉验收：
    - 命令：`python3 App/Tests/run-agent-reply-regression.py --delete-dialog-preview`
-   - 结果：通过（`Delete confirmation dialog regression passed in light and dark`）。
+   - 结果：通过（`Delete confirmation dialog regression passed in light and dark`，含真实指针悬停光标断言）。
    - 实际窗口截图人工核查 `build/delete-dialog-light.png` 与 `build/delete-dialog-dark.png`：亮暗双模式液态玻璃边缘、标题/正文层次、单行正文排版、等宽胶囊按钮、红色删除按钮清晰度与无输入框光标残留均符合预期。
-3. 既有表情回应与单条删除回归：
+3. 动作光标与覆盖层回归：
+   - 命令：`python3 App/Tests/run-agent-reply-regression.py --action-cursor-preview`
+   - 结果：通过（`Action cursor passed: overlays, selection actions, source tags/cards and return to text`）。
+4. 既有表情回应与单条删除回归：
    - 命令：`python3 App/Tests/run-agent-reply-regression.py --reactions-preview`
    - 结果：通过（`Reaction regression passed: ... and single user message deletion`）。
-4. `KulaCore` 单元测试：
+5. `KulaCore` 单元测试：
    - 命令：`cd Packages/KulaCore && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test`
    - 结果：通过（全部测试通过，退出码 0）。
