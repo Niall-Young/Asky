@@ -230,7 +230,7 @@ struct ChatBubblePopoverPresentation: ViewModifier {
                     controller.dismiss()
                     onReply()
                 } icon: {
-                    Image(mingCute: "arrow.turn.down.left", size: 14)
+                    Image(mingCute: "share_forward", size: 14)
                 }
                 .accessibilityIdentifier("bubble-more-reply")
 

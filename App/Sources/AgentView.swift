@@ -1889,7 +1889,7 @@ private struct ChatReplyButton: View {
 
     var body: some View {
         Button(action: action) {
-            Image(mingCute: "arrow.turn.down.left", size: 14)
+            Image(mingCute: "share_forward", size: 14)
                 .frame(width: 16, height: 16).padding(6)
         }
         .buttonStyle(AgentIconButtonStyle())

@@ -57,7 +57,7 @@ enum InlineTagKind: Equatable {
         case .file: "doc"
         case .pastedText: "doc.on.clipboard"
         case .selection: "text.bubble"
-        case .reply: "arrow.turn.down.left"
+        case .reply: "share_forward"
         }
     }
 

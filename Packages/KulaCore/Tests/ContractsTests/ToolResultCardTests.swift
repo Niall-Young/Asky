@@ -31,6 +31,7 @@ struct ToolResultCardTests {
         #expect(card != nil)
         #expect(card?.kind == .calendarEvent)
         #expect(card?.source == .calendar)
+        #expect(card?.categoryTitle == "工作日程")
         #expect(card?.headline == "14:00 – 15:00")
         #expect(card?.title == "项目周会")
         #expect(card?.subtitle?.contains("工作") == true)
@@ -68,11 +69,26 @@ struct ToolResultCardTests {
         let card = ToolResultCard.from(tool: "reminders_create", arguments: args, result: result, calendar: fixedCalendar)
         #expect(card != nil)
         #expect(card?.kind == .reminder)
+        #expect(card?.categoryTitle == "提醒事项")
         #expect(card?.headline == "06:50")
         #expect(card?.title == "起床")
         #expect(card?.subtitle == "11月22日 周日")
         #expect(card?.metadata.isEmpty == true)
         #expect(card?.action?.kind == .openReminders)
+        #expect(card?.action?.label == "查看事项")
+
+        let workResult = ExecutionResult(
+            requestID: "req-rem-work",
+            status: .completed,
+            readback: [
+                "id": "r-2",
+                "title": "提交季度项目复盘报告",
+                "due": "2026-11-30T09:00:00+08:00",
+                "list": "工作"
+            ]
+        )
+        let workCard = ToolResultCard.from(tool: "reminders_create", result: workResult, calendar: fixedCalendar)
+        #expect(workCard?.categoryTitle == "工作事项提醒")
     }
 
     @Test("Builds note card without folder path subtitle")
@@ -115,11 +131,14 @@ struct ToolResultCardTests {
         let card = ToolResultCard.from(tool: "calendar_search_events", result: result, calendar: fixedCalendar)
         #expect(card != nil)
         #expect(card?.kind == .calendarSchedule)
+        #expect(card?.categoryTitle == "生日日程")
         #expect(card?.headline == "11月28日 周六")
         #expect(card?.rows.count == 1)
         #expect(card?.rows.first?.title == "何瑞兆雪的24岁生日")
         #expect(card?.rows.first?.subtitle == nil)
         #expect(card?.rows.first?.trailing == "全天")
+        #expect(card?.rows.first?.badge == "全天")
+        #expect(card?.rows.first?.dateLabel == "11月28日 周六")
     }
 
     @Test("Builds multi-day calendar schedule card with date range headline and inline row dates")
@@ -148,12 +167,15 @@ struct ToolResultCardTests {
 
         let card = ToolResultCard.from(tool: "calendar_search_events", result: result, calendar: fixedCalendar)
         #expect(card != nil)
+        #expect(card?.categoryTitle == "日历日程")
         #expect(card?.headline == "11月28日 – 30日")
         #expect(card?.rows.count == 2)
         #expect(card?.rows[0].subtitle == nil)
         #expect(card?.rows[0].trailing == "11月28日 全天")
         #expect(card?.rows[1].subtitle == "3 号会议室")
         #expect(card?.rows[1].trailing == "11月30日 14:00")
+        #expect(card?.rows[1].badge == "14:00 - 15:00")
+        #expect(card?.rows[1].dateLabel == "11月30日 周一")
     }
 
     @Test("Builds reminder list card without list subtitles or count filler")
@@ -181,6 +203,21 @@ struct ToolResultCardTests {
         #expect(sameDayCard?.headline == "11月26日 周四")
         #expect(sameDayCard?.rows.first?.subtitle == nil)
         #expect(sameDayCard?.rows.first?.trailing == "09:00")
+        #expect(sameDayCard?.rows.first?.dateLabel == "11月26日 周四")
+        #expect(sameDayCard?.rows.first?.badge == nil)
+        #expect(sameDayCard?.action?.label == "查看事项")
+
+        let customListResult = ExecutionResult(
+            requestID: "req-rems-3",
+            status: .completed,
+            output: [
+                ["id": "r-4", "title": "购买全脂牛奶和燕麦片", "list": "购物清单"]
+            ]
+        )
+        let customListCard = ToolResultCard.from(tool: "reminders_list", result: customListResult, calendar: fixedCalendar)
+        #expect(customListCard?.categoryTitle == "购物清单事项提醒")
+        #expect(customListCard?.rows.first?.subtitle == nil)
+        #expect(customListCard?.rows.first?.badge == "购物清单")
     }
 
     @Test("Builds memory card without file name subtitle")
@@ -195,6 +232,10 @@ struct ToolResultCardTests {
         #expect(card?.title == "偏好深色模式")
         #expect(card?.subtitle == nil)
         #expect(card?.action?.target == "MEMORY.md")
+
+        let corrected = ToolResultCard.from(tool: "memory_correct", arguments: ["content": "工作会议尽量安排在下午两点之后"], result: result, calendar: fixedCalendar)
+        #expect(corrected?.categoryTitle == "更新记忆")
+        #expect(corrected?.headline == "记忆已更新")
     }
 
     @Test("Builds maps routes comparison card")
@@ -215,6 +256,7 @@ struct ToolResultCardTests {
         let card = ToolResultCard.from(tool: "maps_routes", result: result, calendar: fixedCalendar)
         #expect(card != nil)
         #expect(card?.kind == .mapRoutes)
+        #expect(card?.categoryTitle == "路线规划")
         #expect(card?.headline == "公司 → 首都机场")
         #expect(card?.rows.count == 2)
         #expect(card?.rows.first?.trailing == "40 分钟")

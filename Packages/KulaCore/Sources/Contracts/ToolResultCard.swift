@@ -47,14 +47,16 @@ public struct ToolResultCard: Sendable, Hashable, Codable, Identifiable {
         public var subtitle: String?
         public var trailing: String?
         public var badge: String?
+        public var dateLabel: String?
 
         public init(id: String = UUID().uuidString, title: String, subtitle: String? = nil,
-                    trailing: String? = nil, badge: String? = nil) {
+                    trailing: String? = nil, badge: String? = nil, dateLabel: String? = nil) {
             self.id = id
             self.title = title
             self.subtitle = subtitle
             self.trailing = trailing
             self.badge = badge
+            self.dateLabel = dateLabel
         }
     }
 
@@ -315,7 +317,7 @@ public struct ToolResultCard: Sendable, Hashable, Codable, Identifiable {
             id: id,
             kind: .calendarEvent,
             source: .calendar,
-            categoryTitle: isUpdate ? CoreLocalization.text("已更新日程") : CoreLocalization.text("日历"),
+            categoryTitle: calendarCategoryTitle(groupName: calName, isUpdate: isUpdate),
             headline: headline,
             title: title,
             subtitle: subtitleParts.isEmpty ? nil : subtitleParts.joined(separator: " · "),
@@ -368,21 +370,36 @@ public struct ToolResultCard: Sendable, Hashable, Codable, Identifiable {
                 trailing = timePart
             }
 
+            let fullTimeRange: String?
+            if allDay {
+                fullTimeRange = CoreLocalization.text("全天")
+            } else if let start, let end {
+                fullTimeRange = "\(formatTime(start, calendar: calendar)) - \(formatTime(end, calendar: calendar))"
+            } else if let start {
+                fullTimeRange = formatTime(start, calendar: calendar)
+            } else {
+                fullTimeRange = nil
+            }
+
             return DetailRow(
                 id: nonEmpty(item["id"]?.stringValue) ?? "\(id)-\(index)",
                 title: title,
                 subtitle: location,
-                trailing: trailing
+                trailing: trailing,
+                badge: fullTimeRange,
+                dateLabel: start.map { formatMonthDayWeekday($0, calendar: calendar) }
             )
         }
         guard !rows.isEmpty else { return nil }
         let firstStart = shownItems.first?["start"]?.stringValue
+        let uniqueCalendars = Set(shownItems.compactMap { nonEmpty($0["calendar"]?.stringValue) })
+        let sharedCalendar = uniqueCalendars.count == 1 ? uniqueCalendars.first : nil
 
         return ToolResultCard(
             id: id,
             kind: .calendarSchedule,
             source: .calendar,
-            categoryTitle: CoreLocalization.text("日历日程"),
+            categoryTitle: calendarCategoryTitle(groupName: sharedCalendar, isUpdate: false, fallback: CoreLocalization.text("日历日程")),
             headline: headline,
             rows: rows,
             action: Action(kind: .openCalendar, label: CoreLocalization.text("查看日历"), target: firstStart)
@@ -415,11 +432,11 @@ public struct ToolResultCard: Sendable, Hashable, Codable, Identifiable {
             id: id,
             kind: .reminder,
             source: .reminders,
-            categoryTitle: CoreLocalization.text("提醒事项"),
+            categoryTitle: reminderCategoryTitle(groupName: listName),
             headline: headline,
             title: displayTitle,
             subtitle: subParts.isEmpty ? nil : subParts.joined(separator: " · "),
-            action: Action(kind: .openReminders, label: CoreLocalization.text("查看提醒事项"))
+            action: Action(kind: .openReminders, label: CoreLocalization.text("查看事项"))
         )
     }
 
@@ -450,22 +467,28 @@ public struct ToolResultCard: Sendable, Hashable, Codable, Identifiable {
             } else {
                 trailing = nil
             }
+            let listName = nonEmpty(item["list"]?.stringValue)
+            let customList = listName.flatMap { isDefaultReminderList($0) ? nil : $0 }
             return DetailRow(
                 id: nonEmpty(item["id"]?.stringValue) ?? "\(id)-\(index)",
                 title: title,
-                trailing: trailing
+                trailing: trailing,
+                badge: customList,
+                dateLabel: due.map { formatMonthDayWeekday($0, calendar: calendar) }
             )
         }
         guard !rows.isEmpty else { return nil }
+        let uniqueLists = Set(shownItems.compactMap { nonEmpty($0["list"]?.stringValue) })
+        let sharedList = uniqueLists.count == 1 ? uniqueLists.first : nil
 
         return ToolResultCard(
             id: id,
             kind: .reminderList,
             source: .reminders,
-            categoryTitle: CoreLocalization.text("提醒事项"),
+            categoryTitle: reminderCategoryTitle(groupName: sharedList),
             headline: headline,
             rows: rows,
-            action: Action(kind: .openReminders, label: CoreLocalization.text("查看提醒事项"))
+            action: Action(kind: .openReminders, label: CoreLocalization.text("查看事项"))
         )
     }
 
@@ -551,7 +574,7 @@ public struct ToolResultCard: Sendable, Hashable, Codable, Identifiable {
             id: id,
             kind: .mapRoutes,
             source: .maps,
-            categoryTitle: CoreLocalization.text("路线时间"),
+            categoryTitle: CoreLocalization.text("路线规划"),
             headline: "\(origin) → \(dest)",
             rows: rows,
             action: Action(kind: .openMaps, label: CoreLocalization.text("在地图中查看"),
@@ -617,19 +640,28 @@ public struct ToolResultCard: Sendable, Hashable, Codable, Identifiable {
         let content = nonEmpty(arguments?["content"]?.stringValue)
             ?? nonEmpty(arguments?["old"]?.stringValue)
             ?? ""
+        let categoryTitle: String
         let headline: String
         switch tool {
-        case "memory_save": headline = CoreLocalization.text("已记住")
-        case "memory_correct": headline = CoreLocalization.text("已更新记忆")
-        case "memory_forget": headline = CoreLocalization.text("已移除记忆")
-        default: headline = CoreLocalization.text("记忆")
+        case "memory_save":
+            categoryTitle = CoreLocalization.text("记忆")
+            headline = CoreLocalization.text("已记住")
+        case "memory_correct":
+            categoryTitle = CoreLocalization.text("更新记忆")
+            headline = CoreLocalization.text("记忆已更新")
+        case "memory_forget":
+            categoryTitle = CoreLocalization.text("记忆")
+            headline = CoreLocalization.text("已移除记忆")
+        default:
+            categoryTitle = CoreLocalization.text("记忆")
+            headline = CoreLocalization.text("记忆")
         }
 
         return ToolResultCard(
             id: id,
             kind: .memory,
             source: .memory,
-            categoryTitle: CoreLocalization.text("记忆"),
+            categoryTitle: categoryTitle,
             headline: headline,
             title: truncate(content, limit: 160),
             action: Action(kind: .openMemoryFile, label: CoreLocalization.text("查看记忆"), target: file)
@@ -637,6 +669,34 @@ public struct ToolResultCard: Sendable, Hashable, Codable, Identifiable {
     }
 
     // MARK: - Formatting helpers
+
+    private static func calendarCategoryTitle(
+        groupName: String?,
+        isUpdate: Bool,
+        fallback: String? = nil
+    ) -> String {
+        if let raw = nonEmpty(groupName) {
+            let lower = raw.lowercased()
+            if lower != "日历" && lower != "calendar" && lower != "日程" {
+                if raw.hasSuffix("日程") {
+                    return raw
+                }
+                return "\(raw)\(CoreLocalization.text("日程"))"
+            }
+        }
+        if let fallback { return fallback }
+        return isUpdate ? CoreLocalization.text("已更新日程") : CoreLocalization.text("日历日程")
+    }
+
+    private static func reminderCategoryTitle(groupName: String?) -> String {
+        if let raw = nonEmpty(groupName), !isDefaultReminderList(raw) {
+            if raw.hasSuffix("事项提醒") || raw.hasSuffix("提醒事项") || raw.hasSuffix("提醒") {
+                return raw
+            }
+            return "\(raw)\(CoreLocalization.text("事项提醒"))"
+        }
+        return CoreLocalization.text("提醒事项")
+    }
 
     private static func isDefaultReminderList(_ name: String) -> Bool {
         let normalized = name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
