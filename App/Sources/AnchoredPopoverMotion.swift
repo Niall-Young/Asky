@@ -1,22 +1,14 @@
 import SwiftUI
 
 /// Shared spring popup motion and trigger-anchored layout for non-morphing in-window
-/// Liquid Glass menus and floating pickers (chat bubble menus, approval mode menu,
-/// and form date/time pickers).
+/// Liquid Glass menus (chat bubble menus and approval mode menu).
 enum AnchoredPopoverMotion {
     static let openAnimation: Animation = .spring(response: 0.26, dampingFraction: 0.78)
     static let closeAnimation: Animation = .easeOut(duration: 0.15)
-    static let pickerOpenAnimation: Animation = .spring(response: 0.15, dampingFraction: 0.90)
-    static let pickerCloseAnimation: Animation = .easeOut(duration: 0.10)
 
     static func animation(isPresented: Bool, reduceMotion: Bool) -> Animation? {
         guard !reduceMotion else { return nil }
         return isPresented ? openAnimation : closeAnimation
-    }
-
-    static func pickerAnimation(isPresented: Bool, reduceMotion: Bool) -> Animation? {
-        guard !reduceMotion else { return nil }
-        return isPresented ? pickerOpenAnimation : pickerCloseAnimation
     }
 
     /// Computes a local `UnitPoint` on the popup's edge facing `trigger`, aligned to the
@@ -45,24 +37,6 @@ enum AnchoredPopoverMotion {
                 .combined(with: .offset(y: insertionOffsetY))
                 .combined(with: .opacity),
             removal: .scale(scale: 0.90, anchor: anchor)
-                .combined(with: .offset(y: removalOffsetY))
-                .combined(with: .opacity)
-        )
-    }
-
-    static func pickerTransition(
-        anchor: UnitPoint,
-        placedAbove: Bool,
-        reduceMotion: Bool
-    ) -> AnyTransition {
-        guard !reduceMotion else { return .opacity }
-        let insertionOffsetY: CGFloat = placedAbove ? 4 : -4
-        let removalOffsetY: CGFloat = placedAbove ? 3 : -3
-        return .asymmetric(
-            insertion: .scale(scale: 0.94, anchor: anchor)
-                .combined(with: .offset(y: insertionOffsetY))
-                .combined(with: .opacity),
-            removal: .scale(scale: 0.96, anchor: anchor)
                 .combined(with: .offset(y: removalOffsetY))
                 .combined(with: .opacity)
         )

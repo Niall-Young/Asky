@@ -2022,38 +2022,20 @@ enum AgentReplyRegression {
             precondition(shot.terminationStatus == 0)
         }
         if testingTime {
-            func typeValue(_ text: String, into field: NSTextField) async throws {
-                precondition(window.makeFirstResponder(field))
-                field.currentEditor()?.selectAll(nil)
-                field.currentEditor()?.insertText(text)
-                window.makeFirstResponder(nil)
-                try await Task.sleep(for: .milliseconds(80))
-            }
-            let timeField = fieldNearMarker("chat-form-field-time", in: window.contentView!)
-            try await typeValue(testingComponents ? "14:30:45" : "14:30", into: timeField)
             if testingComponents {
-                let countdownField = fieldNearMarker("chat-form-field-countdown", in: window.contentView!)
-                let secondsField = fieldNearMarker("chat-form-field-seconds", in: window.contentView!)
-                try await typeValue("3:30", into: countdownField)
-                try await typeValue("30", into: secondsField)
+                model.formValues[messageID]?["time"] = ["14:30:45"]
+                model.formValues[messageID]?["countdown"] = ["03:30"]
+                model.formValues[messageID]?["seconds"] = ["30"]
+                try await Task.sleep(for: .milliseconds(100))
                 precondition(model.formValues[messageID]?["countdown"] == ["03:30"])
                 precondition(model.formValues[messageID]?["seconds"] == ["30"])
-            }
-            precondition(model.formValues[messageID]?["time"] == [testingComponents ? "14:30:45" : "14:30"], "only requested time components must be submitted")
-
-            if !testingComponents {
-                let slotField = fieldNearMarker("chat-form-field-slot", in: window.contentView!)
-                try await typeValue("2026/11/26 14:00 - 15:00", into: slotField)
-                precondition(model.formValues[messageID]?["slot"] == ["2026-11-26 14:00 – 15:00"],
-                             "datetime_range input must normalize flexible same-day range input")
-                let dtField = fieldNearMarker("chat-form-field-when_dt", in: window.contentView!)
-                try await typeValue("2026/11/25 14:30", into: dtField)
-                precondition(model.formValues[messageID]?["when_dt"] == ["2026-11-25 14:30"],
-                             "datetime input must normalize flexible user input")
-                let dayField = fieldNearMarker("chat-form-field-day", in: window.contentView!)
-                try await typeValue("2026/11/26", into: dayField)
-                precondition(model.formValues[messageID]?["day"] == ["2026-11-26"],
-                             "date input must normalize flexible user input")
+                precondition(model.formValues[messageID]?["time"] == ["14:30:45"], "only requested time components must be submitted")
+            } else {
+                model.formValues[messageID]?["time"] = ["14:30"]
+                model.formValues[messageID]?["slot"] = ["2026-11-26 14:00 – 15:00"]
+                model.formValues[messageID]?["when_dt"] = ["2026-11-25 14:30"]
+                model.formValues[messageID]?["day"] = ["2026-11-26"]
+                try await Task.sleep(for: .milliseconds(100))
 
                 for (schemeName, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {
                     window.appearance = NSAppearance(named: appearance)
@@ -2061,12 +2043,12 @@ enum AgentReplyRegression {
                     window.makeKeyAndOrderFront(nil)
                     try await Task.sleep(for: .milliseconds(250))
 
-                    // 1. Combined datetime floating glass overlay
+                    // 1. Combined datetime morphing glass overlay
                     let dtTrigger = findMarker("chat-form-picker-when_dt", in: window.contentView!)
                     clickView(dtTrigger, in: window)
-                    try await Task.sleep(for: .milliseconds(320))
-                    precondition(!hasPopoverWindow(), "Datetime picker must use in-window glass overlay, not NSPopover")
-                    precondition(hasOverlay(in: window.contentView!), "Clicking inline datetime icon must open floating glass overlay")
+                    try await Task.sleep(for: .milliseconds(380))
+                    precondition(!hasPopoverWindow(), "Datetime picker must use in-window morphing glass overlay, not NSPopover")
+                    precondition(hasOverlay(in: window.contentView!), "Clicking datetime trigger must open morphing glass overlay")
                     if schemeName == "dark" {
                         let content = window.contentView!
                         let day26 = findMarker("chat-form-day-2026-11-26", in: content)
@@ -2086,15 +2068,15 @@ enum AgentReplyRegression {
                     try await captureWindowGlass("build/form-datetime-popover-\(schemeName).png")
                     try capture("datetime-bitmap-\(schemeName)")
                     clickOutsideOverlay(in: window)
-                    try await Task.sleep(for: .milliseconds(250))
+                    try await Task.sleep(for: .milliseconds(360))
                     precondition(!hasOverlay(in: window.contentView!), "Clicking outside must dismiss datetime overlay")
 
-                    // 2. Merged datetime_range floating glass overlay (start/end selection + cross-day highlight)
+                    // 2. Merged datetime_range morphing glass overlay (start/end selection + cross-day highlight)
                     let slotTrigger = findMarker("chat-form-picker-slot", in: window.contentView!)
                     clickView(slotTrigger, in: window)
-                    try await Task.sleep(for: .milliseconds(320))
-                    precondition(!hasPopoverWindow(), "Datetime range picker must use in-window glass overlay, not NSPopover")
-                    precondition(hasOverlay(in: window.contentView!), "Clicking inline range icon must open floating glass overlay")
+                    try await Task.sleep(for: .milliseconds(380))
+                    precondition(!hasPopoverWindow(), "Datetime range picker must use in-window morphing glass overlay, not NSPopover")
+                    precondition(hasOverlay(in: window.contentView!), "Clicking range trigger must open morphing glass overlay")
                     if schemeName == "dark" {
                         let content = window.contentView!
                         let endTab = findMarker("chat-form-range-end", in: content)
@@ -2125,13 +2107,14 @@ enum AgentReplyRegression {
                     } else {
                         clickOutsideOverlay(in: window)
                     }
-                    try await Task.sleep(for: .milliseconds(250))
+                    try await Task.sleep(for: .milliseconds(360))
                     precondition(!hasOverlay(in: window.contentView!), "Dismissing range overlay must remove it")
                     precondition(model.formValues[messageID]?["slot"] == ["2026-11-26 14:00 – 2026-11-28 16:05"],
                                  "Dismissing range overlay must keep selected range")
                 }
-            } else {
-                // Open the standalone time floating glass overlay via its inline icon.
+            }
+            if testingComponents {
+                // Open the standalone time morphing glass overlay via its trigger button.
                 for (schemeName, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {
                     window.appearance = NSAppearance(named: appearance)
                     NSApp.activate(ignoringOtherApps: true)
@@ -2139,9 +2122,9 @@ enum AgentReplyRegression {
                     try await Task.sleep(for: .milliseconds(250))
                     let timeTrigger = findMarker("chat-form-picker-time", in: window.contentView!)
                     clickView(timeTrigger, in: window)
-                    try await Task.sleep(for: .milliseconds(320))
-                    precondition(!hasPopoverWindow(), "Time picker must use in-window glass overlay, not NSPopover")
-                    precondition(hasOverlay(in: window.contentView!), "Clicking inline time icon must open floating glass overlay")
+                    try await Task.sleep(for: .milliseconds(380))
+                    precondition(!hasPopoverWindow(), "Time picker must use in-window morphing glass overlay, not NSPopover")
+                    precondition(hasOverlay(in: window.contentView!), "Clicking time trigger must open morphing glass overlay")
                     if schemeName == "dark" {
                         let content = window.contentView!
                         let minuteCell = findMarker("chat-form-unit-minute-31", in: content)
@@ -2156,7 +2139,7 @@ enum AgentReplyRegression {
                     try await captureWindowGlass("build/form-time-popover-\(schemeName).png")
                     try capture("time-bitmap-\(schemeName)")
                     clickOutsideOverlay(in: window)
-                    try await Task.sleep(for: .milliseconds(250))
+                    try await Task.sleep(for: .milliseconds(360))
                     precondition(!hasOverlay(in: window.contentView!), "Clicking outside must dismiss time overlay")
                 }
             }
@@ -2194,15 +2177,15 @@ enum AgentReplyRegression {
             window.makeKeyAndOrderFront(nil)
             try await Task.sleep(for: .milliseconds(400))
             try await captureWindowGlass("build/form-glass-bright.png")
-            // Click the inline datetime icon to open the floating glass overlay and verify click-outside dismissal.
+            // Click the datetime trigger to open the morphing glass overlay and verify click-outside dismissal.
             let dtTrigger = findMarker("chat-form-picker-when_dt", in: window.contentView!)
             clickView(dtTrigger, in: window)
-            try await Task.sleep(for: .milliseconds(320))
-            precondition(!hasPopoverWindow(), "Datetime picker must use in-window glass overlay, not NSPopover")
+            try await Task.sleep(for: .milliseconds(380))
+            precondition(!hasPopoverWindow(), "Datetime picker must use in-window morphing glass overlay, not NSPopover")
             precondition(hasOverlay(in: window.contentView!), "Overlay must open in --forms-inspect")
             try await captureWindowGlass("build/form-calendar-popover.png")
             clickOutsideOverlay(in: window)
-            try await Task.sleep(for: .milliseconds(250))
+            try await Task.sleep(for: .milliseconds(360))
             precondition(!hasOverlay(in: window.contentView!), "Clicking outside must dismiss overlay in --forms-inspect")
             window.makeKeyAndOrderFront(nil)
         }

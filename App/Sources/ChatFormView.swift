@@ -447,29 +447,19 @@ private struct ChatCustomChoice: View {
     }
 }
 
-// MARK: - Combined Date & Time Field (Unified Input + Inline Icon + Floating Glass Picker)
+// MARK: - Combined Date & Time Field (Input-Styled Morphing Trigger + Liquid Glass Picker)
 
 private struct ChatFormDateTimeField: View {
     let field: ChatForm.Field
     @Binding var value: String
     let active: Bool
 
-    @State private var draftText: String
     @State private var anchorBox = ChatBubbleAnchorBox()
-    @FocusState private var inputFocused: Bool
-    @Environment(\.colorScheme) private var scheme
     @Environment(\.formPickerOverlay) private var pickerOverlay
-
-    init(field: ChatForm.Field, value: Binding<String>, active: Bool) {
-        self.field = field
-        _value = value
-        self.active = active
-        let initial = value.wrappedValue.isEmpty ? field.initialDateTime() : value.wrappedValue
-        _draftText = State(initialValue: initial)
-    }
 
     private var pickerID: String { "chat-form-picker-" + field.id }
     private var isPickerOpen: Bool { pickerOverlay?.isOpen(pickerID) == true }
+    private var displayValue: String { value.isEmpty ? field.initialDateTime() : value }
 
     private var currentComponents: (date: Date, time: [Int]) {
         field.dateTimeComponents(value) ?? (Date(), field.initialTemporalValues())
@@ -479,9 +469,7 @@ private struct ChatFormDateTimeField: View {
         Binding(
             get: { currentComponents.date },
             set: { newDate in
-                let formatted = field.dateTimeString(date: newDate, time: currentComponents.time)
-                value = formatted
-                draftText = formatted
+                value = field.dateTimeString(date: newDate, time: currentComponents.time)
                 overlay?.notifyChanged()
             }
         )
@@ -491,91 +479,54 @@ private struct ChatFormDateTimeField: View {
         Binding(
             get: { currentComponents.time },
             set: { newTime in
-                let formatted = field.dateTimeString(date: currentComponents.date, time: newTime)
-                value = formatted
-                draftText = formatted
+                value = field.dateTimeString(date: currentComponents.date, time: newTime)
                 overlay?.notifyChanged()
             }
         )
     }
 
     var body: some View {
-        HStack(spacing: 6) {
-            TextField(field.dateTimePlaceholder, text: $draftText,
-                      prompt: Text(verbatim: field.dateTimePlaceholder).foregroundStyle(ThemeColor.kTextSubtlest))
-                .labelsHidden()
-                .textFieldStyle(.plain)
-                .font(.system(size: 14).monospacedDigit())
-                .focused($inputFocused)
-                .disabled(!active)
-                .onSubmit { commitDraft() }
-                .onChange(of: inputFocused) { _, focused in
-                    if !focused { commitDraft() }
-                }
-                .onChange(of: draftText) { _, newValue in
-                    guard active, let parsed = field.parseDateTimeInput(newValue) else { return }
-                    let formatted = field.dateTimeString(date: parsed.date, time: parsed.time)
-                    if value != formatted {
-                        value = formatted
-                        pickerOverlay?.notifyChanged()
-                    }
-                }
-                .onChange(of: value) { _, newValue in
-                    let parsedDraft = field.parseDateTimeInput(draftText).map {
-                        field.dateTimeString(date: $0.date, time: $0.time)
-                    }
-                    if !newValue.isEmpty, (!inputFocused || parsedDraft != newValue) {
-                        draftText = newValue
-                    }
-                }
-                .onChange(of: active) { _, isActive in
-                    if !isActive, isPickerOpen { pickerOverlay?.dismiss() }
-                }
-                .accessibilityLabel(field.label)
-                .accessibilityIdentifier("chat-form-field-" + field.id)
-
-            ChatFormInlinePickerIcon(
-                isOpen: isPickerOpen,
-                enabled: active,
-                accessibilityLabel: NSLocalizedString("选择日期与时间", comment: ""),
-                accessibilityIdentifier: pickerID
-            ) {
-                togglePicker()
-            } icon: {
-                ChatFormClockGlyph(size: 15)
-            }
+        ChatFormPickerTrigger(
+            text: displayValue,
+            isOpen: isPickerOpen,
+            active: active,
+            fieldLabel: field.label,
+            fieldMarkerID: "chat-form-field-" + field.id,
+            pickerID: pickerID,
+            anchorBox: anchorBox,
+            action: togglePicker
+        ) {
+            ChatFormClockGlyph(size: 15)
         }
-        .settingsInputSurface(scheme: scheme, focused: inputFocused || isPickerOpen)
-        .background(ChatFormControlMarker(id: "chat-form-field-" + field.id))
-        .background(ChatBubbleAnchorReader(box: anchorBox).allowsHitTesting(false))
+        .onChange(of: active) { _, isActive in
+            if !isActive, isPickerOpen { pickerOverlay?.dismiss(animated: false) }
+        }
     }
 
     private func togglePicker() {
-        commitDraft()
-        inputFocused = false
         guard let anchor = anchorBox.swiftUIFrameInWindow() else { return }
         let overlay = pickerOverlay
         overlay?.toggle(
             id: pickerID,
             anchor: anchor,
-            preferredSize: ChatFormDateTimePopover.preferredSize(for: field)
-        ) {
-            AnyView(ChatFormDateTimePopover(
-                field: field,
-                date: dateBinding(overlay: overlay),
-                timeValues: timeBinding(overlay: overlay)
-            ))
-        }
-    }
-
-    private func commitDraft() {
-        if let parsed = field.parseDateTimeInput(draftText) {
-            let formatted = field.dateTimeString(date: parsed.date, time: parsed.time)
-            value = formatted
-            draftText = formatted
-        } else {
-            draftText = value.isEmpty ? field.initialDateTime() : value
-        }
+            preferredSize: ChatFormDateTimePopover.preferredSize(for: field),
+            trigger: {
+                AnyView(ChatFormPickerTriggerContent(
+                    text: value.isEmpty ? field.initialDateTime() : value,
+                    active: active,
+                    highlighted: true
+                ) {
+                    ChatFormClockGlyph(size: 15)
+                })
+            },
+            content: {
+                AnyView(ChatFormDateTimePopover(
+                    field: field,
+                    date: dateBinding(overlay: overlay),
+                    timeValues: timeBinding(overlay: overlay)
+                ))
+            }
+        )
     }
 }
 
@@ -634,118 +585,58 @@ struct ChatFormDateTimePopover: View {
     }
 }
 
-// MARK: - Date & Time Range Field (Merged Start + End Selector)
+// MARK: - Date & Time Range Field (Merged Start + End Morphing Trigger)
 
 private struct ChatFormDateTimeRangeField: View {
     let field: ChatForm.Field
     @Binding var value: String
     let active: Bool
 
-    @State private var draftText: String
     @State private var anchorBox = ChatBubbleAnchorBox()
-    @FocusState private var inputFocused: Bool
-    @Environment(\.colorScheme) private var scheme
     @Environment(\.formPickerOverlay) private var pickerOverlay
-
-    init(field: ChatForm.Field, value: Binding<String>, active: Bool) {
-        self.field = field
-        _value = value
-        self.active = active
-        let initial = value.wrappedValue.isEmpty ? field.initialDateTimeRange() : value.wrappedValue
-        _draftText = State(initialValue: initial)
-    }
 
     private var pickerID: String { "chat-form-picker-" + field.id }
     private var isPickerOpen: Bool { pickerOverlay?.isOpen(pickerID) == true }
+    private var displayValue: String { value.isEmpty ? field.initialDateTimeRange() : value }
 
     var body: some View {
-        HStack(spacing: 6) {
-            TextField(field.dateTimeRangePlaceholder, text: $draftText,
-                      prompt: Text(verbatim: field.dateTimeRangePlaceholder).foregroundStyle(ThemeColor.kTextSubtlest))
-                .labelsHidden()
-                .textFieldStyle(.plain)
-                .font(.system(size: 14).monospacedDigit())
-                .focused($inputFocused)
-                .disabled(!active)
-                .onSubmit { commitDraft() }
-                .onChange(of: inputFocused) { _, focused in
-                    if !focused { commitDraft() }
-                }
-                .onChange(of: draftText) { _, newValue in
-                    guard active, let parsed = field.parseDateTimeRangeInput(newValue) else { return }
-                    let formatted = field.dateTimeRangeString(
-                        startDate: parsed.startDate,
-                        startTime: parsed.startTime,
-                        endDate: parsed.endDate,
-                        endTime: parsed.endTime
-                    )
-                    if value != formatted {
-                        value = formatted
-                        pickerOverlay?.notifyChanged()
-                    }
-                }
-                .onChange(of: value) { _, newValue in
-                    let parsedDraft = field.parseDateTimeRangeInput(draftText).map {
-                        field.dateTimeRangeString(
-                            startDate: $0.startDate,
-                            startTime: $0.startTime,
-                            endDate: $0.endDate,
-                            endTime: $0.endTime
-                        )
-                    }
-                    if !newValue.isEmpty, (!inputFocused || parsedDraft != newValue) {
-                        draftText = newValue
-                    }
-                }
-                .onChange(of: active) { _, isActive in
-                    if !isActive, isPickerOpen { pickerOverlay?.dismiss() }
-                }
-                .accessibilityLabel(field.label)
-                .accessibilityIdentifier("chat-form-field-" + field.id)
-
-            ChatFormInlinePickerIcon(
-                isOpen: isPickerOpen,
-                enabled: active,
-                accessibilityLabel: NSLocalizedString("选择时间段", comment: ""),
-                accessibilityIdentifier: pickerID
-            ) {
-                togglePicker()
-            } icon: {
-                ChatFormClockGlyph(size: 15)
-            }
+        ChatFormPickerTrigger(
+            text: displayValue,
+            isOpen: isPickerOpen,
+            active: active,
+            fieldLabel: field.label,
+            fieldMarkerID: "chat-form-field-" + field.id,
+            pickerID: pickerID,
+            anchorBox: anchorBox,
+            action: togglePicker
+        ) {
+            ChatFormClockGlyph(size: 15)
         }
-        .settingsInputSurface(scheme: scheme, focused: inputFocused || isPickerOpen)
-        .background(ChatFormControlMarker(id: "chat-form-field-" + field.id))
-        .background(ChatBubbleAnchorReader(box: anchorBox).allowsHitTesting(false))
+        .onChange(of: active) { _, isActive in
+            if !isActive, isPickerOpen { pickerOverlay?.dismiss(animated: false) }
+        }
     }
 
     private func togglePicker() {
-        commitDraft()
-        inputFocused = false
         guard let anchor = anchorBox.swiftUIFrameInWindow() else { return }
         let overlay = pickerOverlay
         overlay?.toggle(
             id: pickerID,
             anchor: anchor,
-            preferredSize: ChatFormDateTimeRangePopover.preferredSize(for: field)
-        ) {
-            AnyView(ChatFormDateTimeRangePopover(field: field, value: $value))
-        }
-    }
-
-    private func commitDraft() {
-        if let parsed = field.parseDateTimeRangeInput(draftText) {
-            let formatted = field.dateTimeRangeString(
-                startDate: parsed.startDate,
-                startTime: parsed.startTime,
-                endDate: parsed.endDate,
-                endTime: parsed.endTime
-            )
-            value = formatted
-            draftText = formatted
-        } else {
-            draftText = value.isEmpty ? field.initialDateTimeRange() : value
-        }
+            preferredSize: ChatFormDateTimeRangePopover.preferredSize(for: field),
+            trigger: {
+                AnyView(ChatFormPickerTriggerContent(
+                    text: value.isEmpty ? field.initialDateTimeRange() : value,
+                    active: active,
+                    highlighted: true
+                ) {
+                    ChatFormClockGlyph(size: 15)
+                })
+            },
+            content: {
+                AnyView(ChatFormDateTimeRangePopover(field: field, value: $value))
+            }
+        )
     }
 }
 
@@ -943,112 +834,68 @@ struct ChatFormDateTimeRangePopover: View {
     }
 }
 
-// MARK: - Date Field (Unified Input + Inline Calendar Icon + Floating Glass Picker)
+// MARK: - Date Field (Input-Styled Morphing Trigger + Liquid Glass Calendar Picker)
 
 private struct ChatFormDateField: View {
     let field: ChatForm.Field
     @Binding var value: String
     let active: Bool
 
-    @State private var draftText: String
     @State private var anchorBox = ChatBubbleAnchorBox()
-    @FocusState private var inputFocused: Bool
-    @Environment(\.colorScheme) private var scheme
     @Environment(\.formPickerOverlay) private var pickerOverlay
-
-    init(field: ChatForm.Field, value: Binding<String>, active: Bool) {
-        self.field = field
-        _value = value
-        self.active = active
-        let initial = value.wrappedValue.isEmpty ? ChatForm.dateString(Date()) : value.wrappedValue
-        _draftText = State(initialValue: initial)
-    }
 
     private var pickerID: String { "chat-form-picker-" + field.id }
     private var isPickerOpen: Bool { pickerOverlay?.isOpen(pickerID) == true }
+    private var displayValue: String { value.isEmpty ? ChatForm.dateString(Date()) : value }
 
     private func dateBinding(overlay: FormPickerOverlayController?) -> Binding<Date> {
         Binding(
             get: { ChatForm.date(value) ?? Date() },
             set: { date in
-                let formatted = ChatForm.dateString(date)
-                value = formatted
-                draftText = formatted
+                value = ChatForm.dateString(date)
                 overlay?.notifyChanged()
             }
         )
     }
 
     var body: some View {
-        HStack(spacing: 6) {
-            TextField("YYYY-MM-DD", text: $draftText,
-                      prompt: Text(verbatim: "YYYY-MM-DD").foregroundStyle(ThemeColor.kTextSubtlest))
-                .labelsHidden()
-                .textFieldStyle(.plain)
-                .font(.system(size: 14).monospacedDigit())
-                .focused($inputFocused)
-                .disabled(!active)
-                .onSubmit { commitDraft() }
-                .onChange(of: inputFocused) { _, focused in
-                    if !focused { commitDraft() }
-                }
-                .onChange(of: draftText) { _, newValue in
-                    guard active, let parsed = ChatForm.parseDateInput(newValue) else { return }
-                    let formatted = ChatForm.dateString(parsed)
-                    if value != formatted {
-                        value = formatted
-                        pickerOverlay?.notifyChanged()
-                    }
-                }
-                .onChange(of: value) { _, newValue in
-                    if !newValue.isEmpty, (!inputFocused || ChatForm.parseDateInput(draftText).map(ChatForm.dateString) != newValue) {
-                        draftText = newValue
-                    }
-                }
-                .onChange(of: active) { _, isActive in
-                    if !isActive, isPickerOpen { pickerOverlay?.dismiss() }
-                }
-                .accessibilityLabel(field.label)
-                .accessibilityIdentifier("chat-form-field-" + field.id)
-
-            ChatFormInlinePickerIcon(
-                isOpen: isPickerOpen,
-                enabled: active,
-                accessibilityLabel: NSLocalizedString("选择日期", comment: ""),
-                accessibilityIdentifier: pickerID
-            ) {
-                togglePicker()
-            } icon: {
-                Image(mingCute: "calendar", size: 15)
-            }
+        ChatFormPickerTrigger(
+            text: displayValue,
+            isOpen: isPickerOpen,
+            active: active,
+            fieldLabel: field.label,
+            fieldMarkerID: "chat-form-field-" + field.id,
+            pickerID: pickerID,
+            anchorBox: anchorBox,
+            action: togglePicker
+        ) {
+            Image(mingCute: "calendar", size: 15)
         }
-        .settingsInputSurface(scheme: scheme, focused: inputFocused || isPickerOpen)
-        .background(ChatFormControlMarker(id: "chat-form-field-" + field.id))
-        .background(ChatBubbleAnchorReader(box: anchorBox).allowsHitTesting(false))
+        .onChange(of: active) { _, isActive in
+            if !isActive, isPickerOpen { pickerOverlay?.dismiss(animated: false) }
+        }
     }
 
     private func togglePicker() {
-        commitDraft()
-        inputFocused = false
         guard let anchor = anchorBox.swiftUIFrameInWindow() else { return }
         let overlay = pickerOverlay
         overlay?.toggle(
             id: pickerID,
             anchor: anchor,
-            preferredSize: ChatFormDatePopover.preferredSize
-        ) {
-            AnyView(ChatFormDatePopover(selection: dateBinding(overlay: overlay)))
-        }
-    }
-
-    private func commitDraft() {
-        if let parsed = ChatForm.parseDateInput(draftText) {
-            let formatted = ChatForm.dateString(parsed)
-            value = formatted
-            draftText = formatted
-        } else {
-            draftText = value.isEmpty ? ChatForm.dateString(Date()) : value
-        }
+            preferredSize: ChatFormDatePopover.preferredSize,
+            trigger: {
+                AnyView(ChatFormPickerTriggerContent(
+                    text: value.isEmpty ? ChatForm.dateString(Date()) : value,
+                    active: active,
+                    highlighted: true
+                ) {
+                    Image(mingCute: "calendar", size: 15)
+                })
+            },
+            content: {
+                AnyView(ChatFormDatePopover(selection: dateBinding(overlay: overlay)))
+            }
+        )
     }
 }
 
@@ -1067,103 +914,58 @@ struct ChatFormDatePopover: View {
     }
 }
 
-// MARK: - Date Range Field (Unified Input + Inline Calendar Icon + Range Calendar Overlay)
+// MARK: - Date Range Field (Input-Styled Morphing Trigger + Range Calendar Overlay)
 
 private struct ChatFormDateRangeField: View {
     let field: ChatForm.Field
     @Binding var value: String
     let active: Bool
 
-    @State private var draftText: String
     @State private var anchorBox = ChatBubbleAnchorBox()
-    @FocusState private var inputFocused: Bool
-    @Environment(\.colorScheme) private var scheme
     @Environment(\.formPickerOverlay) private var pickerOverlay
-
-    init(field: ChatForm.Field, value: Binding<String>, active: Bool) {
-        self.field = field
-        _value = value
-        self.active = active
-        let initial = value.wrappedValue.isEmpty ? field.initialDateRange() : value.wrappedValue
-        _draftText = State(initialValue: initial)
-    }
 
     private var pickerID: String { "chat-form-picker-" + field.id }
     private var isPickerOpen: Bool { pickerOverlay?.isOpen(pickerID) == true }
+    private var displayValue: String { value.isEmpty ? field.initialDateRange() : value }
 
     var body: some View {
-        HStack(spacing: 6) {
-            TextField(field.dateRangePlaceholder, text: $draftText,
-                      prompt: Text(verbatim: field.dateRangePlaceholder).foregroundStyle(ThemeColor.kTextSubtlest))
-                .labelsHidden()
-                .textFieldStyle(.plain)
-                .font(.system(size: 14).monospacedDigit())
-                .focused($inputFocused)
-                .disabled(!active)
-                .onSubmit { commitDraft() }
-                .onChange(of: inputFocused) { _, focused in
-                    if !focused { commitDraft() }
-                }
-                .onChange(of: draftText) { _, newValue in
-                    guard active, let parsed = field.parseDateRangeInput(newValue) else { return }
-                    let formatted = field.dateRangeString(start: parsed.start, end: parsed.end)
-                    if value != formatted {
-                        value = formatted
-                        pickerOverlay?.notifyChanged()
-                    }
-                }
-                .onChange(of: value) { _, newValue in
-                    let parsedDraft = field.parseDateRangeInput(draftText).map {
-                        field.dateRangeString(start: $0.start, end: $0.end)
-                    }
-                    if !newValue.isEmpty, (!inputFocused || parsedDraft != newValue) {
-                        draftText = newValue
-                    }
-                }
-                .onChange(of: active) { _, isActive in
-                    if !isActive, isPickerOpen { pickerOverlay?.dismiss() }
-                }
-                .accessibilityLabel(field.label)
-                .accessibilityIdentifier("chat-form-field-" + field.id)
-
-            ChatFormInlinePickerIcon(
-                isOpen: isPickerOpen,
-                enabled: active,
-                accessibilityLabel: NSLocalizedString("选择日期范围", comment: ""),
-                accessibilityIdentifier: pickerID
-            ) {
-                togglePicker()
-            } icon: {
-                Image(mingCute: "calendar", size: 15)
-            }
+        ChatFormPickerTrigger(
+            text: displayValue,
+            isOpen: isPickerOpen,
+            active: active,
+            fieldLabel: field.label,
+            fieldMarkerID: "chat-form-field-" + field.id,
+            pickerID: pickerID,
+            anchorBox: anchorBox,
+            action: togglePicker
+        ) {
+            Image(mingCute: "calendar", size: 15)
         }
-        .settingsInputSurface(scheme: scheme, focused: inputFocused || isPickerOpen)
-        .background(ChatFormControlMarker(id: "chat-form-field-" + field.id))
-        .background(ChatBubbleAnchorReader(box: anchorBox).allowsHitTesting(false))
+        .onChange(of: active) { _, isActive in
+            if !isActive, isPickerOpen { pickerOverlay?.dismiss(animated: false) }
+        }
     }
 
     private func togglePicker() {
-        commitDraft()
-        inputFocused = false
         guard let anchor = anchorBox.swiftUIFrameInWindow() else { return }
         let overlay = pickerOverlay
         overlay?.toggle(
             id: pickerID,
             anchor: anchor,
-            preferredSize: ChatFormDateRangePopover.preferredSize
-        ) {
-            AnyView(ChatFormDateRangePopover(field: field, value: $value))
-        }
-    }
-
-    private func commitDraft() {
-        if let parsed = field.parseDateRangeInput(draftText) {
-            let formatted = field.dateRangeString(start: parsed.start, end: parsed.end)
-            value = formatted
-            draftText = formatted
-        } else {
-            draftText = value.isEmpty ? field.initialDateRange() : value
-        }
+            preferredSize: ChatFormDateRangePopover.preferredSize,
+            trigger: {
+                AnyView(ChatFormPickerTriggerContent(
+                    text: value.isEmpty ? field.initialDateRange() : value,
+                    active: active,
+                    highlighted: true
+                ) {
+                    Image(mingCute: "calendar", size: 15)
+                })
+            },
+            content: {
+                AnyView(ChatFormDateRangePopover(field: field, value: $value))
+            }
+        )
     }
 }
 
@@ -1245,121 +1047,80 @@ struct ChatFormDateRangePopover: View {
     }
 }
 
-// MARK: - Time & Duration Field (Unified Input + Inline Clock Icon + Floating Glass Picker)
+// MARK: - Time & Duration Field (Input-Styled Morphing Trigger + Liquid Glass Picker)
 
 private struct ChatFormTemporalField: View {
     let field: ChatForm.Field
     @Binding var value: String
     let active: Bool
 
-    @State private var draftText: String
     @State private var anchorBox = ChatBubbleAnchorBox()
-    @FocusState private var inputFocused: Bool
-    @Environment(\.colorScheme) private var scheme
     @Environment(\.formPickerOverlay) private var pickerOverlay
-
-    init(field: ChatForm.Field, value: Binding<String>, active: Bool) {
-        self.field = field
-        _value = value
-        self.active = active
-        let initial = value.wrappedValue.isEmpty
-            ? field.temporalString(field.initialTemporalValues())
-            : value.wrappedValue
-        _draftText = State(initialValue: initial)
-    }
 
     private var pickerID: String { "chat-form-picker-" + field.id }
     private var isPickerOpen: Bool { pickerOverlay?.isOpen(pickerID) == true }
+    private var displayValue: String {
+        value.isEmpty ? field.temporalString(field.initialTemporalValues()) : value
+    }
+
+    private var unitSuffix: String? {
+        if field.type == .duration, field.timeUnits.count == 1, let unit = field.timeUnits.first {
+            return NSLocalizedString(unit.label, comment: "")
+        }
+        return nil
+    }
 
     private func temporalBinding(overlay: FormPickerOverlayController?) -> Binding<[Int]> {
         Binding(
             get: { field.temporalValues(value) ?? field.initialTemporalValues() },
             set: { numbers in
-                let formatted = field.temporalString(numbers)
-                value = formatted
-                draftText = formatted
+                value = field.temporalString(numbers)
                 overlay?.notifyChanged()
             }
         )
     }
 
     var body: some View {
-        HStack(spacing: 6) {
-            TextField(field.temporalPlaceholder, text: $draftText,
-                      prompt: Text(verbatim: field.temporalPlaceholder).foregroundStyle(ThemeColor.kTextSubtlest))
-                .labelsHidden()
-                .textFieldStyle(.plain)
-                .font(.system(size: 14).monospacedDigit())
-                .focused($inputFocused)
-                .disabled(!active)
-                .onSubmit { commitDraft() }
-                .onChange(of: inputFocused) { _, focused in
-                    if !focused { commitDraft() }
-                }
-                .onChange(of: draftText) { _, newValue in
-                    guard active, let parsed = field.parseTemporalInput(newValue) else { return }
-                    let formatted = field.temporalString(parsed)
-                    if value != formatted {
-                        value = formatted
-                        pickerOverlay?.notifyChanged()
-                    }
-                }
-                .onChange(of: value) { _, newValue in
-                    if !newValue.isEmpty, (!inputFocused || field.parseTemporalInput(draftText).map(field.temporalString) != newValue) {
-                        draftText = newValue
-                    }
-                }
-                .onChange(of: active) { _, isActive in
-                    if !isActive, isPickerOpen { pickerOverlay?.dismiss() }
-                }
-                .accessibilityLabel(field.label)
-                .accessibilityIdentifier("chat-form-field-" + field.id)
-
-            if field.type == .duration, field.timeUnits.count == 1, let unit = field.timeUnits.first {
-                Text(NSLocalizedString(unit.label, comment: ""))
-                    .font(.system(size: 12))
-                    .foregroundStyle(ThemeColor.kTextSubtlest)
-                    .allowsHitTesting(false)
-            }
-
-            ChatFormInlinePickerIcon(
-                isOpen: isPickerOpen,
-                enabled: active,
-                accessibilityLabel: NSLocalizedString(field.type == .duration ? "选择时长" : "选择时间", comment: ""),
-                accessibilityIdentifier: pickerID
-            ) {
-                togglePicker()
-            } icon: {
-                ChatFormClockGlyph(size: 15)
-            }
+        ChatFormPickerTrigger(
+            text: displayValue,
+            unitSuffix: unitSuffix,
+            isOpen: isPickerOpen,
+            active: active,
+            fieldLabel: field.label,
+            fieldMarkerID: "chat-form-field-" + field.id,
+            pickerID: pickerID,
+            anchorBox: anchorBox,
+            action: togglePicker
+        ) {
+            ChatFormClockGlyph(size: 15)
         }
-        .settingsInputSurface(scheme: scheme, focused: inputFocused || isPickerOpen)
-        .background(ChatFormControlMarker(id: "chat-form-field-" + field.id))
-        .background(ChatBubbleAnchorReader(box: anchorBox).allowsHitTesting(false))
+        .onChange(of: active) { _, isActive in
+            if !isActive, isPickerOpen { pickerOverlay?.dismiss(animated: false) }
+        }
     }
 
     private func togglePicker() {
-        commitDraft()
-        inputFocused = false
         guard let anchor = anchorBox.swiftUIFrameInWindow() else { return }
         let overlay = pickerOverlay
+        let suffix = unitSuffix
         overlay?.toggle(
             id: pickerID,
             anchor: anchor,
-            preferredSize: ChatFormTemporalPopover.preferredSize(for: field)
-        ) {
-            AnyView(ChatFormTemporalPopover(field: field, values: temporalBinding(overlay: overlay)))
-        }
-    }
-
-    private func commitDraft() {
-        if let parsed = field.parseTemporalInput(draftText) {
-            let formatted = field.temporalString(parsed)
-            value = formatted
-            draftText = formatted
-        } else {
-            draftText = value.isEmpty ? field.temporalString(field.initialTemporalValues()) : value
-        }
+            preferredSize: ChatFormTemporalPopover.preferredSize(for: field),
+            trigger: {
+                AnyView(ChatFormPickerTriggerContent(
+                    text: value.isEmpty ? field.temporalString(field.initialTemporalValues()) : value,
+                    unitSuffix: suffix,
+                    active: active,
+                    highlighted: true
+                ) {
+                    ChatFormClockGlyph(size: 15)
+                })
+            },
+            content: {
+                AnyView(ChatFormTemporalPopover(field: field, values: temporalBinding(overlay: overlay)))
+            }
+        )
     }
 }
 
@@ -1410,96 +1171,51 @@ private struct ChatFormTimeRangeField: View {
     @Binding var value: String
     let active: Bool
 
-    @State private var draftText: String
     @State private var anchorBox = ChatBubbleAnchorBox()
-    @FocusState private var inputFocused: Bool
-    @Environment(\.colorScheme) private var scheme
     @Environment(\.formPickerOverlay) private var pickerOverlay
-
-    init(field: ChatForm.Field, value: Binding<String>, active: Bool) {
-        self.field = field
-        _value = value
-        self.active = active
-        let initial = value.wrappedValue.isEmpty ? field.initialTimeRange() : value.wrappedValue
-        _draftText = State(initialValue: initial)
-    }
 
     private var pickerID: String { "chat-form-picker-" + field.id }
     private var isPickerOpen: Bool { pickerOverlay?.isOpen(pickerID) == true }
+    private var displayValue: String { value.isEmpty ? field.initialTimeRange() : value }
 
     var body: some View {
-        HStack(spacing: 6) {
-            TextField(field.timeRangePlaceholder, text: $draftText,
-                      prompt: Text(verbatim: field.timeRangePlaceholder).foregroundStyle(ThemeColor.kTextSubtlest))
-                .labelsHidden()
-                .textFieldStyle(.plain)
-                .font(.system(size: 14).monospacedDigit())
-                .focused($inputFocused)
-                .disabled(!active)
-                .onSubmit { commitDraft() }
-                .onChange(of: inputFocused) { _, focused in
-                    if !focused { commitDraft() }
-                }
-                .onChange(of: draftText) { _, newValue in
-                    guard active, let parsed = field.parseTimeRangeInput(newValue) else { return }
-                    let formatted = field.timeRangeString(start: parsed.start, end: parsed.end)
-                    if value != formatted {
-                        value = formatted
-                        pickerOverlay?.notifyChanged()
-                    }
-                }
-                .onChange(of: value) { _, newValue in
-                    let parsedDraft = field.parseTimeRangeInput(draftText).map {
-                        field.timeRangeString(start: $0.start, end: $0.end)
-                    }
-                    if !newValue.isEmpty, (!inputFocused || parsedDraft != newValue) {
-                        draftText = newValue
-                    }
-                }
-                .onChange(of: active) { _, isActive in
-                    if !isActive, isPickerOpen { pickerOverlay?.dismiss() }
-                }
-                .accessibilityLabel(field.label)
-                .accessibilityIdentifier("chat-form-field-" + field.id)
-
-            ChatFormInlinePickerIcon(
-                isOpen: isPickerOpen,
-                enabled: active,
-                accessibilityLabel: NSLocalizedString("选择时间段", comment: ""),
-                accessibilityIdentifier: pickerID
-            ) {
-                togglePicker()
-            } icon: {
-                ChatFormClockGlyph(size: 15)
-            }
+        ChatFormPickerTrigger(
+            text: displayValue,
+            isOpen: isPickerOpen,
+            active: active,
+            fieldLabel: field.label,
+            fieldMarkerID: "chat-form-field-" + field.id,
+            pickerID: pickerID,
+            anchorBox: anchorBox,
+            action: togglePicker
+        ) {
+            ChatFormClockGlyph(size: 15)
         }
-        .settingsInputSurface(scheme: scheme, focused: inputFocused || isPickerOpen)
-        .background(ChatFormControlMarker(id: "chat-form-field-" + field.id))
-        .background(ChatBubbleAnchorReader(box: anchorBox).allowsHitTesting(false))
+        .onChange(of: active) { _, isActive in
+            if !isActive, isPickerOpen { pickerOverlay?.dismiss(animated: false) }
+        }
     }
 
     private func togglePicker() {
-        commitDraft()
-        inputFocused = false
         guard let anchor = anchorBox.swiftUIFrameInWindow() else { return }
         let overlay = pickerOverlay
         overlay?.toggle(
             id: pickerID,
             anchor: anchor,
-            preferredSize: ChatFormTimeRangePopover.preferredSize(for: field)
-        ) {
-            AnyView(ChatFormTimeRangePopover(field: field, value: $value))
-        }
-    }
-
-    private func commitDraft() {
-        if let parsed = field.parseTimeRangeInput(draftText) {
-            let formatted = field.timeRangeString(start: parsed.start, end: parsed.end)
-            value = formatted
-            draftText = formatted
-        } else {
-            draftText = value.isEmpty ? field.initialTimeRange() : value
-        }
+            preferredSize: ChatFormTimeRangePopover.preferredSize(for: field),
+            trigger: {
+                AnyView(ChatFormPickerTriggerContent(
+                    text: value.isEmpty ? field.initialTimeRange() : value,
+                    active: active,
+                    highlighted: true
+                ) {
+                    ChatFormClockGlyph(size: 15)
+                })
+            },
+            content: {
+                AnyView(ChatFormTimeRangePopover(field: field, value: $value))
+            }
+        )
     }
 }
 

@@ -262,11 +262,11 @@ enum CalendarEditorRegression {
             }
 
             clickCenter(of: rangePickerMarker, in: panel)
-            try await Task.sleep(for: .milliseconds(320))
+            try await Task.sleep(for: .milliseconds(380))
             let hasPopoverWindow = NSApp.windows.contains {
                 $0 !== panel && $0.isVisible && String(describing: type(of: $0)).contains("Popover")
             }
-            precondition(!hasPopoverWindow, "Time range picker must render as an in-window glass overlay, not NSPopover")
+            precondition(!hasPopoverWindow, "Time range picker must render as an in-window morphing glass overlay, not NSPopover")
             precondition(findMarker("form-picker-overlay", in: content) != nil, "Time range overlay did not open")
             precondition(findMarker("chat-form-range-start", in: content) != nil, "Range start tab missing")
             precondition(findMarker("chat-form-range-end", in: content) != nil, "Range end tab missing")
@@ -274,7 +274,7 @@ enum CalendarEditorRegression {
 
             // Click outside the floating overlay (top-left header area) to confirm and dismiss.
             clickPoint(NSPoint(x: 40, y: MessageCalendarEditor.windowSize.height - 28), in: panel)
-            try await Task.sleep(for: .milliseconds(250))
+            try await Task.sleep(for: .milliseconds(360))
             precondition(findMarker("form-picker-overlay", in: content) == nil, "Clicking outside must dismiss time range overlay")
 
             panel.orderOut(nil)

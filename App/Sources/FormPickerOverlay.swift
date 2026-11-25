@@ -2,16 +2,38 @@ import AppKit
 import SwiftUI
 import Theme
 
-/// Coordinates in-window Liquid Glass floating date/time pickers so they share Asky's
-/// fast floating-overlay animation, native glass material, and click-outside dismissal.
+enum FormPickerMorphMotion {
+    static let collapsedCornerRadius: CGFloat = ChatFormMetrics.controlCornerRadius
+    static let expandedCornerRadius: CGFloat = 18
+    static let edgeMargin: CGFloat = 12
+    static let openFrameDelay: TimeInterval = 0.016
+    static let openDuration: TimeInterval = 0.28
+    static let closeDuration: TimeInterval = 0.22
+    static let closeTeardownDelay: TimeInterval = closeDuration + 0.05
+
+    static var openAnimation: Animation {
+        .spring(response: openDuration, dampingFraction: 0.76)
+    }
+
+    static var closeAnimation: Animation {
+        .spring(response: closeDuration, dampingFraction: 0.86)
+    }
+}
+
+/// Coordinates in-window Liquid Glass date/time pickers that morph in-place
+/// between their input-styled trigger button and the expanded glass picker surface.
 @MainActor @Observable
 final class FormPickerOverlayController {
     weak static var active: FormPickerOverlayController?
 
     private(set) var targetID: String?
+    private(set) var sessionID: UUID?
     private(set) var anchorRect: CGRect?
     private(set) var preferredSize: CGSize = .zero
+    private(set) var isExpanded: Bool = false
+    private(set) var isClosing: Bool = false
     private(set) var revision: Int = 0
+    @ObservationIgnored private var triggerBuilder: (() -> AnyView)?
     @ObservationIgnored private var contentBuilder: (() -> AnyView)?
     @ObservationIgnored weak var panelView: NSView?
 
@@ -21,23 +43,73 @@ final class FormPickerOverlayController {
         targetID == id
     }
 
-    func toggle(id: String, anchor: CGRect, preferredSize: CGSize, content: @escaping () -> AnyView) {
-        if targetID == id {
-            dismiss()
+    func toggle(
+        id: String,
+        anchor: CGRect,
+        preferredSize: CGSize,
+        trigger: @escaping () -> AnyView,
+        content: @escaping () -> AnyView
+    ) {
+        if targetID == id, !isClosing {
+            dismiss(animated: true)
+            return
+        }
+
+        let newSessionID = UUID()
+        sessionID = newSessionID
+        targetID = id
+        anchorRect = anchor
+        self.preferredSize = preferredSize
+        triggerBuilder = trigger
+        contentBuilder = content
+        isClosing = false
+        revision &+= 1
+        Self.active = self
+
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            isExpanded = true
         } else {
-            contentBuilder = content
-            anchorRect = anchor
-            self.preferredSize = preferredSize
-            targetID = id
-            revision &+= 1
-            Self.active = self
+            isExpanded = false
+            // Let Core Animation commit the collapsed trigger frame before morphing
+            // the Liquid Glass surface into the expanded picker.
+            DispatchQueue.main.asyncAfter(deadline: .now() + FormPickerMorphMotion.openFrameDelay) { [weak self] in
+                guard let self, self.sessionID == newSessionID, !self.isClosing else { return }
+                withAnimation(FormPickerMorphMotion.openAnimation) {
+                    self.isExpanded = true
+                }
+            }
         }
     }
 
-    func dismiss() {
+    func dismiss(animated: Bool = true) {
+        guard let currentSession = sessionID else { return }
+        if isClosing {
+            if !animated { teardownImmediately() }
+            return
+        }
+        if !animated || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            teardownImmediately()
+            return
+        }
+
+        isClosing = true
+        withAnimation(FormPickerMorphMotion.closeAnimation) {
+            isExpanded = false
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + FormPickerMorphMotion.closeTeardownDelay) { [weak self] in
+            guard let self, self.sessionID == currentSession else { return }
+            self.teardownImmediately()
+        }
+    }
+
+    private func teardownImmediately() {
         targetID = nil
+        sessionID = nil
         anchorRect = nil
         preferredSize = .zero
+        isExpanded = false
+        isClosing = false
+        triggerBuilder = nil
         contentBuilder = nil
         if Self.active === self {
             Self.active = nil
@@ -48,26 +120,31 @@ final class FormPickerOverlayController {
         revision &+= 1
     }
 
+    func buildTrigger() -> AnyView? {
+        _ = revision
+        return triggerBuilder?()
+    }
+
     func buildContent() -> AnyView? {
         _ = revision
         return contentBuilder?()
     }
 
-    /// Handles mouse, scroll, and Escape events for an open floating picker overlay.
+    /// Handles mouse, scroll, and Escape events for an open morphing picker overlay.
     /// Returns `true` when the event should be consumed.
     func handleLocalEvent(_ event: NSEvent) -> Bool {
-        guard isPresented else { return false }
+        guard isPresented, !isClosing else { return false }
         let point = event.locationInWindow
         let window = event.window
         if event.type == .scrollWheel {
             if !contains(point: point, in: window) {
-                dismiss()
+                dismiss(animated: true)
             }
             return false
         }
         if event.type == .keyDown {
             guard event.keyCode == 53 else { return false }
-            dismiss()
+            dismiss(animated: true)
             return true
         }
         guard event.type == .leftMouseDown || event.type == .rightMouseDown else {
@@ -77,7 +154,7 @@ final class FormPickerOverlayController {
             return false
         }
         let sameWindow = window != nil && window === panelView?.window
-        dismiss()
+        dismiss(animated: true)
         return sameWindow
     }
 
@@ -98,7 +175,8 @@ extension EnvironmentValues {
     }
 }
 
-/// Presents the active form date/time picker as an in-window Liquid Glass floating overlay.
+/// Presents the active form date/time picker by morphing its trigger in-place into
+/// an in-window Liquid Glass surface.
 struct FormPickerOverlayPresentation: ViewModifier {
     var controller: FormPickerOverlayController
     var topInset: CGFloat = 12
@@ -107,63 +185,68 @@ struct FormPickerOverlayPresentation: ViewModifier {
     @State private var monitor: Any?
     @State private var measuredSize: CGSize = .zero
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    private var useNativeLiquidGlass: Bool {
+        if #available(macOS 26, *) {
+            return !SurfaceCompatibility.useLegacyMaterial && !reduceTransparency && contrast != .increased
+        }
+        return false
+    }
+
+    private var morphAnimation: Animation? {
+        guard !reduceMotion else { return nil }
+        return controller.isExpanded ? FormPickerMorphMotion.openAnimation : FormPickerMorphMotion.closeAnimation
+    }
 
     func body(content: Content) -> some View {
         content
             .overlay {
                 GeometryReader { geometry in
-                    AnchoredOverlayLayout {
-                        if let targetID = controller.targetID,
+                    ZStack(alignment: .topLeading) {
+                        Color.clear
+                        if let sessionID = controller.sessionID,
                            let trigger = controller.anchorRect {
                             let panelSize = effectiveSize
-                            let placement = layout(
+                            let panelRect = layout(
                                 trigger: trigger,
                                 panelSize: panelSize,
                                 container: geometry.size
                             )
-                            let anchorPoint = AnchoredPopoverMotion.anchor(
-                                for: trigger,
-                                menuOrigin: placement.origin,
-                                menuSize: panelSize,
-                                placedAbove: placement.placedAbove
+                            let isExpanded = controller.isExpanded
+                            let currentWidth = isExpanded ? panelRect.width : trigger.width
+                            let currentHeight = isExpanded ? panelRect.height : trigger.height
+                            let currentCornerRadius = isExpanded
+                                ? FormPickerMorphMotion.expandedCornerRadius
+                                : FormPickerMorphMotion.collapsedCornerRadius
+                            let currentMidX = isExpanded ? panelRect.midX : trigger.midX
+                            let currentMidY = isExpanded ? panelRect.midY : trigger.midY
+                            let shape = RoundedRectangle(cornerRadius: currentCornerRadius, style: .continuous)
+
+                            morphSurface(
+                                shape: shape,
+                                triggerSize: trigger.size,
+                                currentWidth: currentWidth,
+                                currentHeight: currentHeight,
+                                isExpanded: isExpanded
                             )
-                            FormPickerOverlayContent(controller: controller)
-                                .nativeGlassBackground(in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                                .background(ChatFormControlMarker(id: "form-picker-overlay"))
-                                .background(FormPickerViewReader(controller: controller).allowsHitTesting(false))
-                                .fixedSize()
-                                .onGeometryChange(for: CGSize.self) { $0.size } action: { newSize in
-                                    if abs(newSize.width - effectiveSize.width) > 1
-                                        || abs(newSize.height - effectiveSize.height) > 1 {
-                                        measuredSize = newSize
-                                    }
-                                }
-                                .anchoredOverlayOrigin(placement.origin)
-                                .transition(
-                                    AnchoredPopoverMotion.pickerTransition(
-                                        anchor: anchorPoint,
-                                        placedAbove: placement.placedAbove,
-                                        reduceMotion: reduceMotion
-                                    )
-                                )
-                                .id(targetID)
+                            .background(ChatFormControlMarker(id: "form-picker-overlay"))
+                            .background(FormPickerViewReader(controller: controller).allowsHitTesting(false))
+                            .position(x: currentMidX, y: currentMidY)
+                            .animation(morphAnimation, value: isExpanded)
+                            .allowsHitTesting(!controller.isClosing)
+                            .id(sessionID)
                         }
                     }
                     .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
-                    .animation(
-                        AnchoredPopoverMotion.pickerAnimation(
-                            isPresented: controller.isPresented,
-                            reduceMotion: reduceMotion
-                        ),
-                        value: controller.targetID
-                    )
                 }
-                .allowsHitTesting(controller.isPresented)
+                .allowsHitTesting(controller.isPresented && !controller.isClosing)
                 .zIndex(20)
             }
-            .onChange(of: controller.targetID) { _, newTarget in
+            .onChange(of: controller.sessionID) { _, newSession in
                 measuredSize = .zero
-                if newTarget != nil {
+                if newSession != nil {
                     onWillOpen?()
                     startMonitoring()
                 } else {
@@ -172,18 +255,83 @@ struct FormPickerOverlayPresentation: ViewModifier {
             }
             .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { event in
                 if let owner = controller.panelView?.window, event.object as? NSWindow === owner {
-                    controller.dismiss()
+                    controller.dismiss(animated: false)
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { event in
                 if let owner = controller.panelView?.window, event.object as? NSWindow === owner {
-                    controller.dismiss()
+                    controller.dismiss(animated: false)
                 }
             }
             .onDisappear {
-                controller.dismiss()
+                controller.dismiss(animated: false)
                 stopMonitoring()
             }
+    }
+
+    @ViewBuilder
+    private func morphSurface(
+        shape: RoundedRectangle,
+        triggerSize: CGSize,
+        currentWidth: CGFloat,
+        currentHeight: CGFloat,
+        isExpanded: Bool
+    ) -> some View {
+        if #available(macOS 26, *), useNativeLiquidGlass {
+            GlassEffectContainer {
+                shape
+                    .fill(.clear)
+                    .frame(width: currentWidth, height: currentHeight)
+                    .glassEffect(.regular, in: shape)
+                    .overlay {
+                        morphForeground(
+                            triggerSize: triggerSize,
+                            currentWidth: currentWidth,
+                            currentHeight: currentHeight,
+                            isExpanded: isExpanded,
+                            shape: shape
+                        )
+                    }
+                    .glassEffect(.identity)
+            }
+        } else {
+            morphForeground(
+                triggerSize: triggerSize,
+                currentWidth: currentWidth,
+                currentHeight: currentHeight,
+                isExpanded: isExpanded,
+                shape: shape
+            )
+            .nativeGlassBackground(in: shape)
+        }
+    }
+
+    private func morphForeground(
+        triggerSize: CGSize,
+        currentWidth: CGFloat,
+        currentHeight: CGFloat,
+        isExpanded: Bool,
+        shape: RoundedRectangle
+    ) -> some View {
+        ZStack {
+            if isExpanded {
+                FormPickerOverlayContent(controller: controller)
+                    .fixedSize()
+                    .onGeometryChange(for: CGSize.self) { $0.size } action: { newSize in
+                        if abs(newSize.width - effectiveSize.width) > 1
+                            || abs(newSize.height - effectiveSize.height) > 1 {
+                            measuredSize = newSize
+                        }
+                    }
+                    .transition(.opacity)
+            } else {
+                FormPickerOverlayTriggerSnapshot(controller: controller)
+                    .frame(width: triggerSize.width, height: triggerSize.height)
+                    .transition(.opacity)
+            }
+        }
+        .frame(width: currentWidth, height: currentHeight)
+        .clipShape(shape)
     }
 
     private var effectiveSize: CGSize {
@@ -193,19 +341,13 @@ struct FormPickerOverlayPresentation: ViewModifier {
         return controller.preferredSize
     }
 
-    private struct Placement {
-        let origin: CGPoint
-        let placedAbove: Bool
-    }
-
-    private func layout(trigger: CGRect, panelSize: CGSize, container: CGSize) -> Placement {
-        let edgeMargin: CGFloat = 12
-        let gap: CGFloat = 6
-        let topLimit = topInset
+    private func layout(trigger: CGRect, panelSize: CGSize, container: CGSize) -> CGRect {
+        let edgeMargin = FormPickerMorphMotion.edgeMargin
+        let topLimit = max(edgeMargin, topInset)
         let bottomLimit = container.height - edgeMargin
 
-        // Right-align with the unified input's trailing icon when it fits; otherwise left-align
-        // with the input's leading edge, clamping inside the window bounds.
+        // Right-align with the trigger's trailing edge (icon side) when it fits; otherwise
+        // left-align with the trigger's leading edge, clamping inside the window bounds.
         let rightAlignedX = trigger.maxX - panelSize.width
         let maxX = max(edgeMargin, container.width - edgeMargin - panelSize.width)
         let preferredX: CGFloat
@@ -218,28 +360,24 @@ struct FormPickerOverlayPresentation: ViewModifier {
         }
         let x = min(max(edgeMargin, preferredX), maxX)
 
-        let belowY = trigger.maxY + gap
-        let aboveY = trigger.minY - gap - panelSize.height
-        let spaceBelow = bottomLimit - belowY
-        let spaceAbove = trigger.minY - gap - topLimit
-
-        let placedAbove: Bool
-        let y: CGFloat
-        if belowY + panelSize.height <= bottomLimit {
-            placedAbove = false
-            y = belowY
-        } else if aboveY >= topLimit {
-            placedAbove = true
-            y = aboveY
-        } else if spaceAbove > spaceBelow {
-            placedAbove = true
-            y = max(topLimit, min(aboveY, bottomLimit - panelSize.height))
+        // Expand in-place from the trigger's top edge downward, or from its bottom edge upward.
+        let spaceBelow = bottomLimit - trigger.minY
+        let spaceAbove = trigger.maxY - topLimit
+        let rawY: CGFloat
+        if panelSize.height <= spaceBelow || spaceBelow >= spaceAbove {
+            rawY = trigger.minY
         } else {
-            placedAbove = false
-            y = max(topLimit, min(belowY, bottomLimit - panelSize.height))
+            rawY = trigger.maxY - panelSize.height
         }
+        let maxY = max(topLimit, bottomLimit - panelSize.height)
+        let y = min(max(topLimit, rawY), maxY)
 
-        return Placement(origin: CGPoint(x: x, y: y), placedAbove: placedAbove)
+        return CGRect(
+            x: round(x),
+            y: round(y),
+            width: ceil(panelSize.width),
+            height: ceil(panelSize.height)
+        )
     }
 
     private func startMonitoring() {
@@ -270,6 +408,19 @@ private struct FormPickerOverlayContent: View {
     }
 }
 
+private struct FormPickerOverlayTriggerSnapshot: View {
+    var controller: FormPickerOverlayController
+
+    var body: some View {
+        let _ = controller.revision
+        if let trigger = controller.buildTrigger() {
+            trigger
+                .environment(\.settingsInputHeight, ChatFormMetrics.controlHeight)
+                .environment(\.settingsInputCornerRadius, ChatFormMetrics.controlCornerRadius)
+        }
+    }
+}
+
 private struct FormPickerViewReader: NSViewRepresentable {
     let controller: FormPickerOverlayController
 
@@ -288,45 +439,89 @@ private struct FormPickerViewReader: NSViewRepresentable {
     }
 }
 
-/// Inline trailing icon button embedded inside a unified `settingsInputSurface` field.
-struct ChatFormInlinePickerIcon<Icon: View>: View {
-    let isOpen: Bool
-    let enabled: Bool
-    let accessibilityLabel: String
-    let accessibilityIdentifier: String
-    let action: () -> Void
+/// Visual content of a date/time picker trigger styled identically to Asky's form input surface.
+struct ChatFormPickerTriggerContent<Icon: View>: View {
+    let text: String
+    var unitSuffix: String? = nil
+    let active: Bool
+    var highlighted: Bool = false
     @ViewBuilder let icon: () -> Icon
 
-    @State private var hovered = false
     @Environment(\.colorScheme) private var scheme
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        Button(action: action) {
+        HStack(spacing: 6) {
+            Text(text)
+                .font(.system(size: 14).monospacedDigit())
+                .foregroundStyle(active ? ThemeColor.kText : ThemeColor.kTextSubtle)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            if let unitSuffix, !unitSuffix.isEmpty {
+                Text(unitSuffix)
+                    .font(.system(size: 12))
+                    .foregroundStyle(ThemeColor.kTextSubtlest)
+            }
+
             icon()
                 .foregroundStyle(
-                    isOpen || (hovered && enabled)
+                    highlighted && active
                         ? ThemeColor.kText.color(for: scheme)
                         : ThemeColor.kIcon.color(for: scheme)
                 )
                 .frame(width: 26, height: 26)
                 .background(
-                    isOpen || (hovered && enabled)
+                    highlighted && active
                         ? ThemeColor.kInteractionHover.color(for: scheme)
                         : .clear,
                     in: Circle()
                 )
-                .contentShape(Circle())
+                .padding(.trailing, -5)
+        }
+        .settingsInputSurface(scheme: scheme, focused: highlighted && active)
+    }
+}
+
+/// Pure trigger button keeping Asky's input-field styling, morphing in-place into
+/// a Liquid Glass picker overlay when activated.
+struct ChatFormPickerTrigger<Icon: View>: View {
+    let text: String
+    var unitSuffix: String? = nil
+    let isOpen: Bool
+    let active: Bool
+    let fieldLabel: String
+    let fieldMarkerID: String
+    let pickerID: String
+    let anchorBox: ChatBubbleAnchorBox
+    let action: () -> Void
+    @ViewBuilder let icon: () -> Icon
+
+    @State private var hovered = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        Button(action: action) {
+            ChatFormPickerTriggerContent(
+                text: text,
+                unitSuffix: unitSuffix,
+                active: active,
+                highlighted: hovered || isOpen,
+                icon: icon
+            )
+            .contentShape(RoundedRectangle(cornerRadius: ChatFormMetrics.controlCornerRadius, style: .continuous))
         }
         .buttonStyle(.plain)
-        .disabled(!enabled)
-        .padding(.trailing, -5)
+        .disabled(!active)
+        .opacity(isOpen ? 0 : 1)
         .onHover { hovered = $0 }
-        .background(ChatFormControlMarker(id: accessibilityIdentifier))
-        .actionArrowCursor(enabled: enabled)
+        .background(ChatFormControlMarker(id: fieldMarkerID))
+        .background(ChatFormControlMarker(id: pickerID))
+        .background(ChatBubbleAnchorReader(box: anchorBox).allowsHitTesting(false))
+        .actionArrowCursor(enabled: active)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.10), value: hovered)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: isOpen)
-        .accessibilityLabel(accessibilityLabel)
-        .accessibilityIdentifier(accessibilityIdentifier)
+        .accessibilityLabel(fieldLabel)
+        .accessibilityValue(unitSuffix.map { "\(text) \($0)" } ?? text)
+        .accessibilityIdentifier(pickerID)
     }
 }
