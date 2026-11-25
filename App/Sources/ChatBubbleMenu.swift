@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 import Theme
 
-enum ChatBubblePopoverTarget: Equatable {
+enum ChatBubblePopoverTarget: Hashable {
     case emojiPicker(messageID: String)
     case assistantMore(messageID: String)
     case userMore(messageID: String)
@@ -100,57 +100,95 @@ struct ChatBubblePopoverPresentation: ViewModifier {
     func body(content: Content) -> some View {
         content
             .overlay {
-                if let target = controller.target, let payload = controller.payload, let trigger = controller.anchorRect {
-                    GeometryReader { geometry in
-                        let menuSize = effectiveSize(for: target)
-                        let origin = menuOrigin(for: target, trigger: trigger, menuSize: menuSize, container: geometry.size)
-
-                        if case .emojiPicker(let selectedEmoji, let accentColor, let onSelect) = payload,
-                           emojiPickerExpanded {
-                            let panelLayout = expandedEmojiPanelLayout(
-                                quickBarOrigin: origin,
-                                quickBarSize: menuSize,
+                GeometryReader { geometry in
+                    AnchoredOverlayLayout {
+                        if let target = controller.target,
+                           let payload = controller.payload,
+                           let trigger = controller.anchorRect {
+                            let menuSize = effectiveSize(for: target)
+                            let placement = menuPlacement(
+                                for: target,
+                                trigger: trigger,
+                                menuSize: menuSize,
                                 container: geometry.size
                             )
-                            ChatEmojiFullPickerView(
-                                selectedEmoji: selectedEmoji,
-                                accentColor: accentColor,
-                                panelHeight: panelLayout.size.height,
-                                onSelect: { emoji in
-                                    controller.dismiss()
-                                    onSelect(emoji)
-                                }
+                            let anchorPoint = AnchoredPopoverMotion.anchor(
+                                for: trigger,
+                                menuOrigin: placement.origin,
+                                menuSize: menuSize,
+                                placedAbove: placement.placedAbove
                             )
-                            .nativeGlassBackground(in: RoundedRectangle(cornerRadius: 18))
-                            .background(BubblePopoverViewReader(box: expandedPanelView).allowsHitTesting(false))
-                            .fixedSize()
-                            .position(
-                                x: panelLayout.origin.x + panelLayout.size.width / 2,
-                                y: panelLayout.origin.y + panelLayout.size.height / 2
-                            )
-                            .transition(
-                                reduceMotion
-                                    ? .opacity
-                                    : .opacity.combined(with: .scale(scale: 0.94, anchor: panelLayout.placedAbove ? .bottom : .top))
-                            )
-                            .zIndex(1)
-                        }
 
-                        popoverContent(for: payload)
-                            .background(BubblePopoverViewReader(box: menuView).allowsHitTesting(false))
-                            .fixedSize()
-                            .onGeometryChange(for: CGSize.self) { $0.size } action: { measuredSize = $0 }
-                            .position(x: origin.x + menuSize.width / 2, y: origin.y + menuSize.height / 2)
-                            .zIndex(2)
+                            if case .emojiPicker(let selectedEmoji, let accentColor, let onSelect) = payload,
+                               emojiPickerExpanded {
+                                let panelLayout = expandedEmojiPanelLayout(
+                                    quickBarOrigin: placement.origin,
+                                    quickBarSize: menuSize,
+                                    container: geometry.size
+                                )
+                                let panelAnchor = AnchoredPopoverMotion.anchor(
+                                    for: CGRect(origin: placement.origin, size: menuSize),
+                                    menuOrigin: panelLayout.origin,
+                                    menuSize: panelLayout.size,
+                                    placedAbove: panelLayout.placedAbove
+                                )
+                                ChatEmojiFullPickerView(
+                                    selectedEmoji: selectedEmoji,
+                                    accentColor: accentColor,
+                                    panelHeight: panelLayout.size.height,
+                                    onSelect: { emoji in
+                                        controller.dismiss()
+                                        onSelect(emoji)
+                                    }
+                                )
+                                .nativeGlassBackground(in: RoundedRectangle(cornerRadius: 18))
+                                .background(BubblePopoverViewReader(box: expandedPanelView).allowsHitTesting(false))
+                                .fixedSize()
+                                .anchoredOverlayOrigin(panelLayout.origin)
+                                .transition(
+                                    AnchoredPopoverMotion.transition(
+                                        anchor: panelAnchor,
+                                        placedAbove: panelLayout.placedAbove,
+                                        reduceMotion: reduceMotion
+                                    )
+                                )
+                                .zIndex(1)
+                            }
+
+                            popoverContent(for: payload)
+                                .background(BubblePopoverViewReader(box: menuView).allowsHitTesting(false))
+                                .fixedSize()
+                                .onGeometryChange(for: CGSize.self) { $0.size } action: { measuredSize = $0 }
+                                .anchoredOverlayOrigin(placement.origin)
+                                .transition(
+                                    AnchoredPopoverMotion.transition(
+                                        anchor: anchorPoint,
+                                        placedAbove: placement.placedAbove,
+                                        reduceMotion: reduceMotion
+                                    )
+                                )
+                                .id(target)
+                                .zIndex(2)
+                        }
                     }
+                    .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
                     .animation(
-                        reduceMotion ? nil : .spring(response: 0.24, dampingFraction: 0.82),
+                        AnchoredPopoverMotion.animation(
+                            isPresented: controller.target != nil,
+                            reduceMotion: reduceMotion
+                        ),
+                        value: controller.target
+                    )
+                    .animation(
+                        AnchoredPopoverMotion.animation(
+                            isPresented: emojiPickerExpanded,
+                            reduceMotion: reduceMotion
+                        ),
                         value: emojiPickerExpanded
                     )
-                    .transition(.opacity)
                 }
+                .allowsHitTesting(controller.target != nil)
             }
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: controller.target)
             .onChange(of: controller.target) { _, newTarget in
                 measuredSize = .zero
                 emojiPickerExpanded = false
@@ -198,7 +236,8 @@ struct ChatBubblePopoverPresentation: ViewModifier {
                     if reduceMotion {
                         emojiPickerExpanded.toggle()
                     } else {
-                        withAnimation(.spring(response: 0.24, dampingFraction: 0.82)) {
+                        let opening = !emojiPickerExpanded
+                        withAnimation(AnchoredPopoverMotion.animation(isPresented: opening, reduceMotion: false)) {
                             emojiPickerExpanded.toggle()
                         }
                     }
@@ -307,7 +346,12 @@ struct ChatBubblePopoverPresentation: ViewModifier {
         )
     }
 
-    private func menuOrigin(for target: ChatBubblePopoverTarget, trigger: CGRect, menuSize: CGSize, container: CGSize) -> CGPoint {
+    private struct BubbleMenuPlacement {
+        let origin: CGPoint
+        let placedAbove: Bool
+    }
+
+    private func menuPlacement(for target: ChatBubblePopoverTarget, trigger: CGRect, menuSize: CGSize, container: CGSize) -> BubbleMenuPlacement {
         let edgeMargin: CGFloat = 12
         let topLimit = headerHeight + 4
         let bottomLimit = container.height - edgeMargin
@@ -315,6 +359,7 @@ struct ChatBubblePopoverPresentation: ViewModifier {
 
         let x: CGFloat
         let y: CGFloat
+        let placedAbove: Bool
         switch target {
         case .emojiPicker:
             let preferredX = trigger.midX - menuSize.width / 2
@@ -323,10 +368,13 @@ struct ChatBubblePopoverPresentation: ViewModifier {
             let belowY = trigger.maxY + gap
             if aboveY >= topLimit {
                 y = aboveY
+                placedAbove = true
             } else if belowY + menuSize.height <= bottomLimit {
                 y = belowY
+                placedAbove = false
             } else {
                 y = min(max(topLimit, aboveY), max(topLimit, bottomLimit - menuSize.height))
+                placedAbove = true
             }
         case .assistantMore:
             let preferredX = trigger.maxX - menuSize.width
@@ -335,10 +383,13 @@ struct ChatBubblePopoverPresentation: ViewModifier {
             let aboveY = trigger.minY - gap - menuSize.height
             if belowY + menuSize.height <= bottomLimit {
                 y = belowY
+                placedAbove = false
             } else if aboveY >= topLimit {
                 y = aboveY
+                placedAbove = true
             } else {
                 y = min(max(topLimit, belowY), max(topLimit, bottomLimit - menuSize.height))
+                placedAbove = false
             }
         case .userMore:
             let preferredX = trigger.minX
@@ -347,13 +398,16 @@ struct ChatBubblePopoverPresentation: ViewModifier {
             let aboveY = trigger.minY - gap - menuSize.height
             if belowY + menuSize.height <= bottomLimit {
                 y = belowY
+                placedAbove = false
             } else if aboveY >= topLimit {
                 y = aboveY
+                placedAbove = true
             } else {
                 y = min(max(topLimit, belowY), max(topLimit, bottomLimit - menuSize.height))
+                placedAbove = false
             }
         }
-        return CGPoint(x: x, y: y)
+        return BubbleMenuPlacement(origin: CGPoint(x: x, y: y), placedAbove: placedAbove)
     }
 
     private func startMonitoring() {

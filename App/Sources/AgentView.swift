@@ -2883,21 +2883,50 @@ private struct ApprovalMenuPresentation<Menu: View>: ViewModifier {
     func body(content: Content) -> some View {
         content
             .overlayPreferenceValue(ApprovalMenuAnchorKey.self) { anchor in
-                if showing, let anchor {
+                if let anchor {
                     GeometryReader { geometry in
                         let trigger = geometry[anchor]
-                        menu()
-                            .nativeGlassBackground(in: RoundedRectangle(cornerRadius: 14))
-                            .background(ViewReader(box: menuView).allowsHitTesting(false))
-                            .fixedSize()
-                            // Present in the full window, outside the composer's glass/hover bounds.
-                            .position(x: min(geometry.size.width - 122, trigger.maxX + 40 - 110),
-                                      y: trigger.minY - 8 - 43)
+                        let menuSize = CGSize(width: 220, height: 86)
+                        let centerX = min(geometry.size.width - 122, trigger.maxX + 40 - 110)
+                        let origin = CGPoint(
+                            x: centerX - menuSize.width / 2,
+                            y: trigger.minY - 8 - menuSize.height
+                        )
+                        let anchorPoint = AnchoredPopoverMotion.anchor(
+                            for: trigger,
+                            menuOrigin: origin,
+                            menuSize: menuSize,
+                            placedAbove: true
+                        )
+                        AnchoredOverlayLayout {
+                            if showing {
+                                menu()
+                                    .nativeGlassBackground(in: RoundedRectangle(cornerRadius: 14))
+                                    .background(ViewReader(box: menuView).allowsHitTesting(false))
+                                    .fixedSize()
+                                    // Present in the full window, outside the composer's glass/hover bounds.
+                                    .anchoredOverlayOrigin(origin)
+                                    .transition(
+                                        AnchoredPopoverMotion.transition(
+                                            anchor: anchorPoint,
+                                            placedAbove: true,
+                                            reduceMotion: reduceMotion
+                                        )
+                                    )
+                            }
+                        }
+                        .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
+                        .animation(
+                            AnchoredPopoverMotion.animation(
+                                isPresented: showing,
+                                reduceMotion: reduceMotion
+                            ),
+                            value: showing
+                        )
                     }
-                    .transition(.opacity)
+                    .allowsHitTesting(showing)
                 }
             }
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: showing)
             .onChange(of: showing) { _, shown in shown ? startMonitoring() : stopMonitoring() }
             .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { event in
                 if let owner = menuView.view?.window, event.object as? NSWindow === owner { showing = false; stopMonitoring() }
