@@ -449,6 +449,59 @@ enum AgentReplyRegression {
                 }
             }
         }
+        // Verify unordered & ordered list markers share the exact first-line baseline with both plain CJK,
+        // direct links, and source-badged lines (reproducing the reported screenshot structure).
+        let bulletAlignmentSample = """
+        主要几个入口：
+
+        - 搜索引擎：https://www.baidu.com [来源](https://www.baidu.com)
+        - 百度智能云 / AI 开放平台：https://cloud.baidu.com
+        - 百度开发者中心：https://developer.baidu.com [来源](https://developer.baidu.com)
+
+        1. 有序首项：https://www.baidu.com [来源](https://www.baidu.com)
+        2. 第二项纯中文换行验证，确保有序编号也与首行基线对齐。
+        """
+        for (name, scheme) in [("light", ColorScheme.light), ("dark", .dark)] {
+            let hosted = NSHostingView(rootView: ChatMarkdownView(text: bulletAlignmentSample)
+                .padding(.horizontal, 18).padding(.vertical, 14)
+                .background(scheme == .dark ? Color(white: 0.18) : Color(white: 0.94), in: RoundedRectangle(cornerRadius: 16))
+                .padding(16)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .background(scheme == .dark ? Color(white: 0.12) : Color(white: 0.96))
+                .environment(\.colorScheme, scheme))
+            let fixture = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 460, height: 420),
+                styleMask: [.borderless], backing: .buffered, defer: false)
+            fixture.contentView = hosted
+            fixture.orderFront(nil)
+            defer { fixture.orderOut(nil) }
+            try await Task.sleep(for: .milliseconds(220))
+            hosted.layoutSubtreeIfNeeded()
+            let bitmap = hosted.bitmapImageRepForCachingDisplay(in: hosted.bounds)!
+            hosted.cacheDisplay(in: hosted.bounds, to: bitmap)
+            try bitmap.representation(using: .png, properties: [:])!.write(to: URL(filePath: "build/list-alignment-\(name).png"))
+            let selectableViews = texts(hosted).compactMap { $0 as? ChatSelectableTextView }
+            func baselineY(_ view: ChatSelectableTextView) -> CGFloat {
+                let rect = view.convert(view.bounds, to: nil)
+                return rect.maxY - view.firstBaselineOffsetFromTop
+            }
+            let bullets = selectableViews.filter { $0.textStorage?.attribute(.chatSelectionText, at: 0, effectiveRange: nil) as? String == "•" }
+            let itemPrefixes = ["搜索引擎", "百度智能云", "百度开发者中心"]
+            precondition(bullets.count == itemPrefixes.count, "Expected \(itemPrefixes.count) bullets, got \(bullets.count)")
+            let sortedBullets = bullets.sorted { baselineY($0) > baselineY($1) }
+            for (bulletView, prefix) in zip(sortedBullets, itemPrefixes) {
+                let bodyView = selectableViews.first { $0.string.hasPrefix(prefix) }!
+                let delta = abs(baselineY(bulletView) - baselineY(bodyView))
+                print("List alignment \(name) [\(prefix)]: bulletY=\(baselineY(bulletView)), bodyY=\(baselineY(bodyView)), delta=\(delta)")
+                precondition(delta <= 1.5, "Bullet must share first-line baseline with '\(prefix)' (delta=\(delta))")
+            }
+            for (marker, prefix) in [("1.", "有序首项"), ("2.", "第二项纯中文")] {
+                let numView = selectableViews.first { $0.string == marker }!
+                let bodyView = selectableViews.first { $0.string.hasPrefix(prefix) }!
+                let delta = abs(baselineY(numView) - baselineY(bodyView))
+                print("Ordered alignment \(name) [\(marker)]: numY=\(baselineY(numView)), bodyY=\(baselineY(bodyView)), delta=\(delta)")
+                precondition(delta <= 1.5, "Numbered marker '\(marker)' must share first-line baseline (delta=\(delta))")
+            }
+        }
         print("Bubble widths passed: actual chat screenshot, short Chinese/emoji, styled text, long wrapping, bullet/numbered/nested lists in light/dark at 280/460 pt")
     }
 

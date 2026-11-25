@@ -57,6 +57,8 @@ enum ChatImageGalleryContent {
                     index = next
                 }
                 images.append(contentsOf: photos)
+            } else if trimmed == "<!-- end list -->" {
+                // cmark-gfm inserts this HTML comment when re-rendering adjacent lists; never surface it as prose.
             } else if trimmed.isEmpty, !images.isEmpty {
                 // Empty lines between photos do not create separate galleries.
             } else {

@@ -64,6 +64,29 @@ class ChatSelectableTextView: NSTextView {
         }
     }
 
+    override var firstBaselineOffsetFromTop: CGFloat {
+        guard let manager = layoutManager, let container = textContainer else {
+            return super.firstBaselineOffsetFromTop
+        }
+        manager.ensureLayout(for: container)
+        guard manager.numberOfGlyphs > 0 else {
+            return ceil(NSFont.systemFont(ofSize: 14).ascender)
+        }
+        let lineRect = manager.lineFragmentRect(forGlyphAt: 0, effectiveRange: nil)
+        let location = manager.location(forGlyphAt: 0)
+        var baseline = lineRect.minY + location.y
+        let charIndex = manager.characterIndexForGlyph(at: 0)
+        if let storage = textStorage, charIndex < storage.length,
+           let attachment = storage.attribute(.attachment, at: charIndex, effectiveRange: nil) as? NSTextAttachment {
+            if let cell = attachment.attachmentCell {
+                baseline += cell.cellBaselineOffset().y
+            } else {
+                baseline += attachment.bounds.origin.y
+            }
+        }
+        return textContainerOrigin.y + baseline
+    }
+
     override func copy(_ sender: Any?) { _ = MessageClipboard.copy(selectedContent) }
 
     override func menu(for event: NSEvent) -> NSMenu? {

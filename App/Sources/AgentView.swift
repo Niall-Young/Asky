@@ -592,7 +592,9 @@ private struct Transcript: View {
     var body: some View {
         GeometryReader { geometry in
             let allGroups = groups
-            CompatibleTranscriptScroll(submittedMessageID: items.last(where: { $0.kind == .user })?.id, isWaiting: isRunning, completedReplyID: items.last(where: { $0.kind == .assistant })?.id, viewport: viewport, bottomInset: bottomInset, replyNavigation: model.replyNavigation, hasNewer: model.hasNewer, loadLatest: model.loadLatestMessages) {
+            let latestCompletedReplyID = allGroups.last(where: { $0.content.contains { $0.kind == .assistant } })?
+                .content.first(where: { $0.kind == .assistant })?.id
+            CompatibleTranscriptScroll(submittedMessageID: items.last(where: { $0.kind == .user })?.id, isWaiting: isRunning, completedReplyID: latestCompletedReplyID, viewport: viewport, bottomInset: bottomInset, replyNavigation: model.replyNavigation, hasNewer: model.hasNewer, loadLatest: model.loadLatestMessages) {
                 // The model already bounds this window to 120 records. Measure it eagerly:
                 // lazy height estimates changed during scrolling and moved native text offscreen.
                 VStack(alignment: .leading, spacing: 0) {
@@ -1362,7 +1364,7 @@ private struct ResponseGroupView: View {
     private func message(_ item: ChatItem, grouping: ChatBubbleGrouping) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             ChatBubble(item: item, model: model, bubblePopover: bubblePopover, bubbleMotion: isLatest ? bubbleMotion : nil,
-                morphsFromTyping: !group.isRunning && group.content.last(where: { $0.kind == .assistant })?.id == item.id,
+                morphsFromTyping: !group.isRunning && group.content.first(where: { $0.kind == .assistant })?.id == item.id,
                 grouping: grouping)
             if item.needsPermissionSettings {
                 Button(NSLocalizedString("管理权限…", comment: "")) { model.openSettings(permissions: true) }

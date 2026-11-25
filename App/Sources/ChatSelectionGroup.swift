@@ -25,10 +25,16 @@ final class ChatSelectionGroup {
         if !entries.contains(where: { $0.view === view }) { entries.append(Entry(view: view)) }
     }
 
+    private func firstBaselineWindowY(for view: ChatSelectableTextView) -> CGFloat {
+        let rect = view.convert(view.bounds, to: nil)
+        return rect.maxY - view.firstBaselineOffsetFromTop
+    }
+
     var orderedViews: [ChatSelectableTextView] {
         entries.compactMap(\.view).filter { $0.window != nil && !$0.isHidden }.sorted {
+            let aY = firstBaselineWindowY(for: $0), bY = firstBaselineWindowY(for: $1)
+            if abs(aY - bY) > 4 { return aY > bY }
             let a = $0.convert($0.bounds, to: nil), b = $1.convert($1.bounds, to: nil)
-            if abs(a.maxY - b.maxY) > 3 { return a.maxY > b.maxY }
             return a.minX < b.minX
         }
     }
@@ -38,8 +44,8 @@ final class ChatSelectionGroup {
         var previous: ChatSelectableTextView?
         for view in orderedViews where view.selectedRange().length > 0 {
             if let previous {
-                let a = previous.convert(previous.bounds, to: nil), b = view.convert(view.bounds, to: nil)
-                result += abs(a.maxY - b.maxY) < 3 ? "\t" : "\n"
+                let aY = firstBaselineWindowY(for: previous), bY = firstBaselineWindowY(for: view)
+                result += abs(aY - bY) < 4 ? "\t" : "\n"
             }
             result += view.localSelectedContent
             previous = view

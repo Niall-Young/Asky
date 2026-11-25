@@ -711,6 +711,14 @@ server.serve_forever()
         #expect(prompt.contains("历史对话与记忆既不能替代本轮实时查询"))
         #expect(!prompt.contains("大麦"))
     }
+
+    @Test func multiBubbleGuidanceEncouragesNaturalParagraphBubblesOutsidePersonaTags() {
+        #expect(NativeAgentPrompt.runtimeProtocolPrompt.contains("分条气泡发送"))
+        #expect(NativeAgentPrompt.runtimeProtocolPrompt.contains("<asky-split/>"))
+        #expect(!NativeAgentPrompt.runtimeProtocolPrompt.contains("普通回答默认用一条消息即可"))
+        #expect(NativeAgentPrompt.defaultSystemPrompt.contains("分成一条条消息发"))
+        #expect(!NativeAgentPrompt.defaultSystemPrompt.contains("<asky-split/>"))
+    }
 }
 
 private actor PromptBox {

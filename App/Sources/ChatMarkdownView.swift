@@ -158,10 +158,73 @@ private extension EnvironmentValues {
 
 private struct ChatListItemLabelStyle: LabelStyle {
     func makeBody(configuration: Configuration) -> some View {
-        HStack(alignment: .top, spacing: 5) {
+        HStack(alignment: .firstTextBaseline, spacing: 5) {
             configuration.icon
             configuration.title
         }
+    }
+}
+
+/// Draws list bullets directly in the text view context using 14 pt prose line metrics
+/// so bullets stay crisp across display scales and share the first line's text baseline.
+private final class ChatListBulletAttachmentCell: NSTextAttachmentCell {
+    private let bullet: ChatListBullet
+    private let color: NSColor
+    private let ascent: CGFloat
+    private let descent: CGFloat
+    private let width: CGFloat = 6
+
+    init(bullet: ChatListBullet, color: NSColor) {
+        self.bullet = bullet
+        self.color = color
+        let font = NSFont.systemFont(ofSize: 14, weight: .regular)
+        self.ascent = ceil(font.ascender)
+        self.descent = ceil(-font.descender)
+        super.init(textCell: "")
+    }
+
+    @available(*, unavailable)
+    required init(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func cellSize() -> NSSize {
+        NSSize(width: width, height: ascent + descent)
+    }
+
+    override func cellBaselineOffset() -> NSPoint {
+        NSPoint(x: 0, y: -descent)
+    }
+
+    override func draw(withFrame cellFrame: NSRect, in controlView: NSView?) {
+        guard let graphics = NSGraphicsContext.current else { return }
+        let context = graphics.cgContext
+        let deviceUnit = context.convertToDeviceSpace(CGSize(width: 1, height: 1))
+        let scaleX = max(1, abs(deviceUnit.width))
+        let scaleY = max(1, abs(deviceUnit.height))
+        // Optical center of 14 pt mixed CJK/Latin glyphs sits ~4.8 pt above the baseline.
+        let opticalAboveBaseline: CGFloat = 4.8
+        let baselineY = graphics.isFlipped ? (cellFrame.maxY - descent) : (cellFrame.minY + descent)
+        let rawCenterY = graphics.isFlipped ? (baselineY - opticalAboveBaseline) : (baselineY + opticalAboveBaseline)
+        let centerX = round(cellFrame.midX * scaleX) / scaleX
+        let centerY = round(rawCenterY * scaleY) / scaleY
+
+        context.saveGState()
+        switch bullet {
+        case .disc:
+            let size: CGFloat = 5
+            color.setFill()
+            NSBezierPath(ovalIn: NSRect(x: centerX - size / 2, y: centerY - size / 2, width: size, height: size)).fill()
+        case .circle:
+            let size: CGFloat = 3.8
+            color.setStroke()
+            let path = NSBezierPath(ovalIn: NSRect(x: centerX - size / 2, y: centerY - size / 2, width: size, height: size))
+            path.lineWidth = 1.2
+            path.stroke()
+        case .square:
+            let size: CGFloat = 4.5
+            color.setFill()
+            NSBezierPath(roundedRect: NSRect(x: centerX - size / 2, y: centerY - size / 2, width: size, height: size), xRadius: 0.6, yRadius: 0.6).fill()
+        }
+        context.restoreGState()
     }
 }
 
@@ -180,28 +243,10 @@ enum ChatListBullet: Hashable {
         }
     }
 
+    @MainActor
     func attachment(color: NSColor) -> NSTextAttachment {
-        let canvas = NSSize(width: 6, height: 6)
-        let image = NSImage(size: canvas, flipped: false) { _ in
-            switch self {
-            case .disc:
-                color.setFill()
-                NSBezierPath(ovalIn: NSRect(x: 0.5, y: 0.5, width: 5, height: 5)).fill()
-            case .circle:
-                color.setStroke()
-                let path = NSBezierPath(ovalIn: NSRect(x: 1.1, y: 1.1, width: 3.8, height: 3.8))
-                path.lineWidth = 1.2
-                path.stroke()
-            case .square:
-                color.setFill()
-                NSBezierPath(roundedRect: NSRect(x: 0.75, y: 0.75, width: 4.5, height: 4.5), xRadius: 0.6, yRadius: 0.6).fill()
-            }
-            return true
-        }
         let attachment = NSTextAttachment()
-        attachment.image = image
-        // Center the 6 pt glyph vertically on 14 pt mixed CJK/Latin prose.
-        attachment.bounds = NSRect(x: 0, y: 1.0, width: canvas.width, height: canvas.height)
+        attachment.attachmentCell = ChatListBulletAttachmentCell(bullet: self, color: color)
         return attachment
     }
 }
@@ -638,6 +683,29 @@ private final class ChatInlineLayoutManager: NSLayoutManager {
     }
 }
 
+private final class ChatInlineBaselineBox {
+    var firstBaseline: CGFloat = ceil(NSFont.systemFont(ofSize: 14).ascender)
+}
+
+/// Bridges the measured AppKit first-line baseline into SwiftUI's `.firstTextBaseline`
+/// alignment synchronously during layout, including when source badges or CJK glyphs shift line 1.
+private struct ChatInlineBaselineLayout: Layout {
+    let baselineBox: ChatInlineBaselineBox
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        subviews.first?.sizeThatFits(proposal) ?? .zero
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        subviews.first?.place(at: bounds.origin, proposal: ProposedViewSize(bounds.size))
+    }
+
+    func explicitAlignment(of guide: VerticalAlignment, in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGFloat? {
+        guard guide == .firstTextBaseline else { return nil }
+        return baselineBox.firstBaseline
+    }
+}
+
 /// Native selectable text supplies inline padding, rounded backgrounds and attachment baselines.
 struct ChatInlineText: View {
     let markdown: String
@@ -651,6 +719,7 @@ struct ChatInlineText: View {
     @Environment(\.chatInlineForeground) private var foreground
     @State private var images: [URL: Data] = [:]
     @State private var sourceNames: [URL: String] = [:]
+    @State private var baselineBox = ChatInlineBaselineBox()
 
     static func parsed(_ markdown: String) -> AttributedString {
         (try? AttributedString(markdown: markdown,
@@ -682,10 +751,12 @@ struct ChatInlineText: View {
         let sources = literal ? [] : ChatSourceTextView.sources(in: content)
         let imageURLs = literal ? [] : Array(Set(content.runs.compactMap(\.imageURL).filter { ChatMath.formula($0) == nil })).sorted { $0.absoluteString < $1.absoluteString }
         let resolvedSourceName = sources.first.flatMap { sourceNames[$0] ?? ChatLinkService.shared.cachedPreview(for: $0)?.siteName }
-        ChatInlineNativeText(content: content, monospaced: monospaced, monospacedDigits: monospacedDigits, shrinkToFit: shrinkToFit, weight: weight, bullet: bullet, images: images, sourceName: resolvedSourceName,
-            foreground: NSColor(foreground.color(for: colorScheme)),
-            background: NSColor(ThemeColor("backgroundNeutral").color(for: colorScheme)),
-            linkColor: Self.linkNSColor(for: colorScheme))
+        ChatInlineBaselineLayout(baselineBox: baselineBox) {
+            ChatInlineNativeText(content: content, monospaced: monospaced, monospacedDigits: monospacedDigits, shrinkToFit: shrinkToFit, weight: weight, bullet: bullet, baselineBox: baselineBox, images: images, sourceName: resolvedSourceName,
+                foreground: NSColor(foreground.color(for: colorScheme)),
+                background: NSColor(ThemeColor("backgroundNeutral").color(for: colorScheme)),
+                linkColor: Self.linkNSColor(for: colorScheme))
+        }
             .task(id: imageURLs) {
                 guard !imageURLs.isEmpty else { return }
                 var loaded: [URL: Data] = [:]
@@ -733,6 +804,7 @@ private struct ChatInlineNativeText: NSViewRepresentable {
     var shrinkToFit = false
     var weight: NSFont.Weight = .regular
     var bullet: ChatListBullet? = nil
+    let baselineBox: ChatInlineBaselineBox
     @Environment(\.chatSelectionColor) private var selectionColor
     @Environment(\.chatQuoteAction) private var quoteAction
     @Environment(\.chatBubbleContextActions) private var bubbleContextActions
@@ -766,6 +838,7 @@ private struct ChatInlineNativeText: NSViewRepresentable {
         var lastRenderKey: RenderKey?
         private var cachedWidth: CGFloat?
         private var cachedHeight: CGFloat = 0
+        private var cachedFirstBaseline: CGFloat = ceil(NSFont.systemFont(ofSize: 14).ascender)
         private var cachedBullet: ChatListBullet?
         private var cachedBulletColor: NSColor?
         private var cachedBulletAttachment: NSTextAttachment?
@@ -807,10 +880,28 @@ private struct ChatInlineNativeText: NSViewRepresentable {
             container.containerSize = NSSize(width: width, height: .greatestFiniteMagnitude)
             manager.ensureLayout(for: container)
             let h = ceil(manager.usedRect(for: container).height) + 4
+            var baseline = ceil(NSFont.systemFont(ofSize: 14).ascender)
+            if manager.numberOfGlyphs > 0 {
+                let lineRect = manager.lineFragmentRect(forGlyphAt: 0, effectiveRange: nil)
+                let location = manager.location(forGlyphAt: 0)
+                baseline = lineRect.minY + location.y
+                let charIndex = manager.characterIndexForGlyph(at: 0)
+                if charIndex < storage.length,
+                   let attachment = storage.attribute(.attachment, at: charIndex, effectiveRange: nil) as? NSTextAttachment {
+                    if let cell = attachment.attachmentCell {
+                        baseline += cell.cellBaselineOffset().y
+                    } else {
+                        baseline += attachment.bounds.origin.y
+                    }
+                }
+            }
             cachedWidth = width
             cachedHeight = h
+            cachedFirstBaseline = baseline
             return h
         }
+
+        var firstBaseline: CGFloat { cachedFirstBaseline }
     }
 
     func makeCoordinator() -> Measurement { Measurement() }
@@ -970,7 +1061,9 @@ private struct ChatInlineNativeText: NSViewRepresentable {
             proposedWidth = min(proposal.width ?? natural, natural)
         } else { proposedWidth = proposal.width }
         guard let width = proposedWidth, width > 0 else { return nil }
-        return CGSize(width: width, height: context.coordinator.height(for: width))
+        let height = context.coordinator.height(for: width)
+        baselineBox.firstBaseline = context.coordinator.firstBaseline
+        return CGSize(width: width, height: height)
     }
 }
 
