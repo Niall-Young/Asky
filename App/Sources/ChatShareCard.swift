@@ -77,7 +77,7 @@ final class ShareCardBackdropCache {
     func backdrop(for appearance: ShareCardAppearance) -> Pair {
         if let cached = cache[appearance] { return cached }
         let sharp = NSImage(named: appearance.assetName) ?? fallbackBackdrop(for: appearance)
-        let blurred = blur(sharp, radius: 28, isDark: appearance == .dark) ?? sharp
+        let blurred = blur(sharp, radius: 22, isDark: appearance == .dark) ?? sharp
         let pair = Pair(sharp: sharp, blurred: blurred)
         cache[appearance] = pair
         return pair
@@ -95,9 +95,9 @@ final class ShareCardBackdropCache {
 
         let colorControls = CIFilter.colorControls()
         colorControls.inputImage = blurred
-        colorControls.saturation = 1.48
-        colorControls.brightness = isDark ? 0.04 : 0.03
-        colorControls.contrast = 1.06
+        colorControls.saturation = 1.32
+        colorControls.brightness = isDark ? 0.02 : 0.01
+        colorControls.contrast = 1.04
 
         let finalImage = (colorControls.outputImage ?? blurred).cropped(to: extent)
         guard let outputCG = ciContext.createCGImage(finalImage, from: extent) else { return nil }
@@ -1056,6 +1056,62 @@ private struct ShareCardInlineImageProvider: InlineImageProvider {
     }
 }
 
+private struct ShareCardFrostedGlassStyle {
+    let isDark: Bool
+
+    var tint: Color {
+        isDark
+            ? Color(red: 0.06, green: 0.08, blue: 0.13).opacity(0.26)
+            : Color.white.opacity(0.28)
+    }
+
+    var sheen: LinearGradient {
+        if isDark {
+            LinearGradient(
+                colors: [Color.white.opacity(0.08), Color.white.opacity(0.01)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        } else {
+            LinearGradient(
+                colors: [Color.white.opacity(0.16), Color.white.opacity(0.03)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        }
+    }
+
+    var border: LinearGradient {
+        if isDark {
+            LinearGradient(
+                colors: [Color.white.opacity(0.22), Color.white.opacity(0.08)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        } else {
+            LinearGradient(
+                colors: [Color.white.opacity(0.58), Color.white.opacity(0.26)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        }
+    }
+
+    var shadowColor: Color {
+        isDark
+            ? Color.black.opacity(0.24)
+            : Color(red: 0.08, green: 0.14, blue: 0.24).opacity(0.08)
+    }
+
+    var shadowRadius: CGFloat {
+        isDark ? 18 : 16
+    }
+
+    var shadowOffsetY: CGFloat {
+        isDark ? 8 : 6
+    }
+}
+
 struct ChatShareCardView: View {
     static let canvasWidth: CGFloat = 600
     private static let outerHorizontalPadding: CGFloat = 36
@@ -1067,79 +1123,8 @@ struct ChatShareCardView: View {
     var images: [URL: CGImage] = [:]
 
     private var isDark: Bool { appearance == .dark }
+    private var frostedStyle: ShareCardFrostedGlassStyle { ShareCardFrostedGlassStyle(isDark: isDark) }
     private var backdrop: ShareCardBackdropCache.Pair { ShareCardBackdropCache.shared.backdrop(for: appearance) }
-
-    private var glassTint: Color {
-        isDark
-            ? Color(red: 0.07, green: 0.09, blue: 0.14).opacity(0.36)
-            : Color.white.opacity(0.46)
-    }
-
-    private var glassSheen: LinearGradient {
-        if isDark {
-            LinearGradient(
-                stops: [
-                    .init(color: Color.white.opacity(0.18), location: 0.0),
-                    .init(color: Color.white.opacity(0.05), location: 0.18),
-                    .init(color: Color.white.opacity(0.01), location: 0.72),
-                    .init(color: Color.white.opacity(0.06), location: 1.0)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        } else {
-            LinearGradient(
-                stops: [
-                    .init(color: Color.white.opacity(0.42), location: 0.0),
-                    .init(color: Color.white.opacity(0.12), location: 0.22),
-                    .init(color: Color.white.opacity(0.04), location: 0.75),
-                    .init(color: Color.white.opacity(0.18), location: 1.0)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        }
-    }
-
-    private var glassBorder: LinearGradient {
-        if isDark {
-            LinearGradient(
-                stops: [
-                    .init(color: Color.white.opacity(0.46), location: 0.0),
-                    .init(color: Color.white.opacity(0.12), location: 0.35),
-                    .init(color: Color.white.opacity(0.08), location: 0.68),
-                    .init(color: Color.white.opacity(0.30), location: 1.0)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        } else {
-            LinearGradient(
-                stops: [
-                    .init(color: Color.white.opacity(0.95), location: 0.0),
-                    .init(color: Color.white.opacity(0.42), location: 0.35),
-                    .init(color: Color.white.opacity(0.30), location: 0.68),
-                    .init(color: Color.white.opacity(0.76), location: 1.0)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        }
-    }
-
-    private var cardShadowColor: Color {
-        isDark
-            ? Color.black.opacity(0.24)
-            : Color(red: 0.08, green: 0.14, blue: 0.24).opacity(0.08)
-    }
-
-    private var cardShadowRadius: CGFloat {
-        isDark ? 18 : 16
-    }
-
-    private var cardShadowOffsetY: CGFloat {
-        isDark ? 8 : 6
-    }
 
     var body: some View {
         let outerH = Self.outerHorizontalPadding
@@ -1171,14 +1156,19 @@ struct ChatShareCardView: View {
                             .offset(x: -outerH, y: -outerV)
                             .frame(width: cardProxy.size.width, height: cardProxy.size.height, alignment: .topLeading)
                     }
-                    .overlay(glassTint)
-                    .overlay(glassSheen)
+                    .overlay(frostedStyle.tint)
+                    .overlay(frostedStyle.sheen)
                     .clipShape(shape)
                     .overlay {
-                        shape.strokeBorder(glassBorder, lineWidth: 1)
+                        shape.strokeBorder(frostedStyle.border, lineWidth: 1)
                     }
                     .compositingGroup()
-                    .shadow(color: cardShadowColor, radius: cardShadowRadius, x: 0, y: cardShadowOffsetY)
+                    .shadow(
+                        color: frostedStyle.shadowColor,
+                        radius: frostedStyle.shadowRadius,
+                        x: 0,
+                        y: frostedStyle.shadowOffsetY
+                    )
                 }
                 .padding(.horizontal, outerH)
                 .padding(.vertical, outerV)
@@ -1767,6 +1757,7 @@ private struct ChatSharePreviewSheet: View {
     }
 
     private var isDark: Bool { appearance == .dark }
+    private var frostedStyle: ShareCardFrostedGlassStyle { ShareCardFrostedGlassStyle(isDark: isDark) }
     private var revealed: Bool { entrance.isPresented || reduceMotion }
     private var backdrop: ShareCardBackdropCache.Pair { ShareCardBackdropCache.shared.backdrop(for: appearance) }
     private var isOverflowing: Bool { cardHeight > Self.maxCardHeight }
@@ -1860,7 +1851,31 @@ private struct ChatSharePreviewSheet: View {
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { cardHeight = $0 }
                     .frame(width: Self.modalWidth - Self.cardHorizontalInset * 2, height: visibleCardHeight, alignment: .top)
                     .clipped()
-                    .nativeGlassBackground(in: cardShape)
+                    .background {
+                        GeometryReader { cardProxy in
+                            let origin = cardProxy.frame(in: .named("share-modal-canvas")).origin
+                            Image(nsImage: backdrop.blurred)
+                                .resizable()
+                                .scaledToFill()
+                                .frame(width: Self.modalWidth, height: Self.modalHeight)
+                                .clipped()
+                                .offset(x: -origin.x, y: -origin.y)
+                                .frame(width: cardProxy.size.width, height: cardProxy.size.height, alignment: .topLeading)
+                        }
+                        .overlay(frostedStyle.tint)
+                        .overlay(frostedStyle.sheen)
+                        .clipShape(cardShape)
+                        .overlay {
+                            cardShape.strokeBorder(frostedStyle.border, lineWidth: 1)
+                        }
+                        .compositingGroup()
+                        .shadow(
+                            color: isOverflowing ? .clear : frostedStyle.shadowColor,
+                            radius: frostedStyle.shadowRadius,
+                            x: 0,
+                            y: frostedStyle.shadowOffsetY
+                        )
+                    }
                     .mask {
                         VStack(spacing: 0) {
                             Color.black
@@ -1932,6 +1947,7 @@ private struct ChatSharePreviewSheet: View {
             }
         }
         .frame(width: Self.modalWidth, height: Self.modalHeight)
+        .coordinateSpace(name: "share-modal-canvas")
         .overlay {
             RoundedRectangle(cornerRadius: 24, style: .continuous)
                 .strokeBorder(Color.white.opacity(isDark ? 0.16 : 0.45), lineWidth: 0.75)
