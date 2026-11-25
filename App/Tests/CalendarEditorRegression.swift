@@ -79,7 +79,7 @@ enum CalendarEditorRegression {
            CommandLine.arguments.indices.contains(dirIndex + 1) {
             let outputDir = URL(fileURLWithPath: CommandLine.arguments[dirIndex + 1], isDirectory: true)
             let app = NSApplication.shared
-            app.setActivationPolicy(.regular)
+            app.setActivationPolicy(.accessory)
             app.finishLaunching()
             Task { @MainActor in
                 do {
@@ -142,6 +142,7 @@ enum CalendarEditorRegression {
             }
             panel.center()
             NSApp.activate(ignoringOtherApps: true)
+            panel.orderFrontRegardless()
             panel.makeKeyAndOrderFront(nil)
             return panel
         }
@@ -241,9 +242,11 @@ enum CalendarEditorRegression {
                 clickCount: 1,
                 pressure: 1
             )!
+            let active = FormPickerOverlayController.active
+            let handled = active?.handleLocalEvent(down)
             precondition(
-                FormPickerOverlayController.active?.handleLocalEvent(down) == true,
-                "Clicking outside the picker overlay must dismiss it and consume the click"
+                handled == true,
+                "Clicking outside the picker overlay must dismiss it and consume the click (active=\(active != nil), isPresented=\(active?.isPresented ?? false), panelWindowMatch=\(active?.panelView?.window === window), panelFrame=\(String(describing: active?.panelView.map { $0.convert($0.bounds, to: nil) })), point=\(point), isKey=\(window.isKeyWindow))"
             )
         }
 

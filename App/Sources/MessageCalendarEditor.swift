@@ -601,8 +601,8 @@ struct MessageCalendarEditorView: View {
         .frame(width: MessageCalendarEditor.windowSize.width, height: MessageCalendarEditor.windowSize.height)
         .environment(\.settingsInputHeight, ChatFormMetrics.controlHeight)
         .environment(\.settingsInputCornerRadius, ChatFormMetrics.controlCornerRadius)
-        .environment(\.formPickerOverlay, formPickerOverlay)
         .modifier(FormPickerOverlayPresentation(controller: formPickerOverlay, topInset: 12))
+        .environment(\.formPickerOverlay, formPickerOverlay)
         .windowSurfaceBackground(in: RoundedRectangle(cornerRadius: MessageCalendarEditor.cornerRadius, style: .circular))
     }
 
