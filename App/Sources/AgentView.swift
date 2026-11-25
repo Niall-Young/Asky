@@ -108,6 +108,7 @@ enum AgentLayout {
     /// Exact half of a single-line text bubble (19 pt optically centered text + 24 pt vertical padding = 43 pt),
     /// so single-line bubbles form a true capsule and multi-line bubbles reuse the same radius.
     static let bubbleCornerRadius: CGFloat = 21.5
+    static let composerCornerRadius: CGFloat = 22
     static let linkedBubbleCornerRadius: CGFloat = 4
     static let linkedBubbleSpacing: CGFloat = 4
     static let groupInternalSpacing: CGFloat = 12
@@ -2761,7 +2762,7 @@ private struct Composer: View {
             .padding(.horizontal, 8)
         }
         .padding(.top, 10).padding(.bottom, 8)
-        .nativeGlassBackground(in: RoundedRectangle(cornerRadius: 16, style: .circular))
+        .nativeGlassBackground(in: RoundedRectangle(cornerRadius: AgentLayout.composerCornerRadius, style: .circular))
         .onChange(of: model.quoteFocusRevision) { _, _ in editorFocused = true }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.data, .image, .text], allowsMultipleSelection: true) { r in
             switch r {
