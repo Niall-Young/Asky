@@ -3,7 +3,7 @@ import SwiftUI
 import Theme
 
 /// Centered in-window Liquid Glass confirmation dialog for permanently deleting a chat message.
-/// Matches Asky's shared SettingsDialog glass chrome, typography, and native macOS 26 capsule controls.
+/// Shares Asky's unified `AppDialogCard` glass chrome, generous spacing, and native macOS 26 capsule controls.
 struct ChatDeleteConfirmPresentation: ViewModifier {
     let isPresented: Bool
     let confirmDisabled: Bool
@@ -11,9 +11,9 @@ struct ChatDeleteConfirmPresentation: ViewModifier {
     let onConfirm: () -> Void
 
     @State private var monitor: Any?
-    @State private var anchorBox = ChatDialogWeakViewBox()
-    @State private var cardBox = ChatDialogWeakViewBox()
-    @State private var previousResponderBox = ChatDialogWeakResponderBox()
+    @State private var anchorBox = AppDialogWeakViewBox()
+    @State private var cardBox = AppDialogWeakViewBox()
+    @State private var previousResponderBox = AppDialogWeakResponderBox()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var cardTransition: AnyTransition {
@@ -40,7 +40,7 @@ struct ChatDeleteConfirmPresentation: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .background(ChatDialogViewReader(box: anchorBox).allowsHitTesting(false))
+            .background(AppDialogViewReader(box: anchorBox).allowsHitTesting(false))
             .overlay {
                 if isPresented {
                     ZStack {
@@ -48,12 +48,33 @@ struct ChatDeleteConfirmPresentation: ViewModifier {
                             .contentShape(.rect)
                             .accessibilityHidden(true)
 
-                        ChatDeleteConfirmCard(
-                            confirmDisabled: confirmDisabled,
-                            onCancel: onCancel,
-                            onConfirm: onConfirm
+                        AppDialogCard(
+                            title: NSLocalizedString("删除这条消息？", comment: ""),
+                            message: NSLocalizedString("这会永久删除你的消息。此操作无法撤销", comment: ""),
+                            buttons: [
+                                AppDialogButtonSpec(
+                                    id: 0,
+                                    title: NSLocalizedString("删除", comment: ""),
+                                    role: .destructive,
+                                    keyEquivalent: "\r",
+                                    isDisabled: confirmDisabled,
+                                    accessibilityID: "chat-delete-confirm-delete",
+                                    action: onConfirm
+                                ),
+                                AppDialogButtonSpec(
+                                    id: 1,
+                                    title: NSLocalizedString("取消", comment: ""),
+                                    role: .neutral,
+                                    keyEquivalent: "\u{1b}",
+                                    accessibilityID: "chat-delete-confirm-cancel",
+                                    action: onCancel
+                                ),
+                            ],
+                            onClose: onCancel,
+                            dialogAccessibilityID: "chat-delete-confirm-dialog",
+                            closeAccessibilityID: "chat-delete-confirm-close"
                         )
-                        .background(ChatDialogViewReader(box: cardBox).allowsHitTesting(false))
+                        .background(AppDialogViewReader(box: cardBox).allowsHitTesting(false))
                         .transition(cardTransition)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -164,230 +185,5 @@ struct ChatDeleteConfirmPresentation: ViewModifier {
     private func stopMonitoring() {
         if let monitor { NSEvent.removeMonitor(monitor) }
         monitor = nil
-    }
-}
-
-private struct ChatDeleteConfirmCard: View {
-    let confirmDisabled: Bool
-    let onCancel: () -> Void
-    let onConfirm: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 12) {
-                Text(NSLocalizedString("删除这条消息？", comment: ""))
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(ThemeColor.kText)
-                    .lineLimit(1)
-                Spacer(minLength: 0)
-                ChatDialogCloseButton(action: onCancel)
-            }
-            .frame(minHeight: 28)
-
-            Text(NSLocalizedString("这会永久删除你的消息。此操作无法撤销", comment: ""))
-                .font(.system(size: 14, weight: .regular))
-                .foregroundStyle(ThemeColor.kTextSubtle)
-                .lineSpacing(4)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.top, 10)
-
-            HStack(spacing: 10) {
-                ChatDialogActionButton(
-                    NSLocalizedString("取消", comment: ""),
-                    role: .neutral,
-                    keyEquivalent: "\u{1b}",
-                    accessibilityID: "chat-delete-confirm-cancel",
-                    action: onCancel
-                )
-                .frame(maxWidth: .infinity)
-                .accessibilityLabel(NSLocalizedString("取消", comment: ""))
-
-                ChatDialogActionButton(
-                    NSLocalizedString("删除", comment: ""),
-                    role: .destructive,
-                    keyEquivalent: "\r",
-                    accessibilityID: "chat-delete-confirm-delete",
-                    action: onConfirm
-                )
-                .frame(maxWidth: .infinity)
-                .disabled(confirmDisabled)
-                .accessibilityLabel(NSLocalizedString("删除", comment: ""))
-            }
-            .padding(.top, 20)
-        }
-        .padding(.horizontal, 20)
-        .padding(.top, 18)
-        .padding(.bottom, 20)
-        .frame(width: 340)
-        .font(.system(size: 14))
-        .foregroundStyle(ThemeColor.kText)
-        .nativeGlassBackground(in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("chat-delete-confirm-dialog")
-    }
-}
-
-private struct ChatDialogCloseButton: NSViewRepresentable {
-    let action: () -> Void
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    @Environment(\.colorSchemeContrast) private var contrast
-
-    func makeCoordinator() -> Coordinator { Coordinator(action: action) }
-
-    func makeNSView(context: Context) -> NSButton {
-        let button = NSButton(title: "", target: context.coordinator, action: #selector(Coordinator.press))
-        button.imagePosition = .imageOnly
-        button.imageScaling = .scaleNone
-        button.setAccessibilityIdentifier("chat-delete-confirm-close")
-        button.setAccessibilityLabel(NSLocalizedString("关闭", comment: ""))
-        return button
-    }
-
-    func updateNSView(_ button: NSButton, context: Context) {
-        context.coordinator.action = action
-        button.image = MingCute.image("xmark", size: 12.5)
-        button.setAccessibilityLabel(NSLocalizedString("关闭", comment: ""))
-        if #available(macOS 26, *), !SurfaceCompatibility.useLegacyMaterial,
-           !reduceTransparency, contrast != .increased {
-            button.bezelStyle = .glass
-            button.borderShape = .circle
-            button.tintProminence = .none
-            button.isBordered = true
-        } else {
-            button.bezelStyle = .circular
-            if #available(macOS 26, *) {
-                button.borderShape = .circle
-                button.tintProminence = .none
-            }
-            button.isBordered = true
-        }
-        button.controlSize = .regular
-    }
-
-    func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSButton, context: Context) -> CGSize? {
-        CGSize(width: 28, height: 28)
-    }
-
-    @MainActor
-    final class Coordinator: NSObject {
-        var action: () -> Void
-        init(action: @escaping () -> Void) { self.action = action }
-        @objc func press() { action() }
-    }
-}
-
-private struct ChatDialogActionButton: NSViewRepresentable {
-    enum Role {
-        case neutral
-        case destructive
-    }
-
-    let title: String
-    let role: Role
-    let keyEquivalent: String
-    let accessibilityID: String
-    let action: () -> Void
-
-    @Environment(\.isEnabled) private var enabled
-    @Environment(\.colorScheme) private var scheme
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    @Environment(\.colorSchemeContrast) private var contrast
-
-    init(
-        _ title: String,
-        role: Role,
-        keyEquivalent: String = "",
-        accessibilityID: String,
-        action: @escaping () -> Void
-    ) {
-        self.title = title
-        self.role = role
-        self.keyEquivalent = keyEquivalent
-        self.accessibilityID = accessibilityID
-        self.action = action
-    }
-
-    func makeCoordinator() -> Coordinator { Coordinator(action: action) }
-
-    func makeNSView(context: Context) -> NSButton {
-        let button = NSButton(title: title, target: context.coordinator, action: #selector(Coordinator.press))
-        button.font = .systemFont(ofSize: 14, weight: role == .destructive ? .medium : .regular)
-        if #available(macOS 26, *) { button.controlSize = .extraLarge } else { button.controlSize = .large }
-        button.setAccessibilityIdentifier(accessibilityID)
-        return button
-    }
-
-    func updateNSView(_ button: NSButton, context: Context) {
-        context.coordinator.action = action
-        button.isEnabled = enabled
-        button.keyEquivalent = keyEquivalent
-        button.title = title
-        button.font = .systemFont(ofSize: 14, weight: role == .destructive ? .medium : .regular)
-        button.setAccessibilityIdentifier(accessibilityID)
-        button.setAccessibilityLabel(title)
-        if #available(macOS 26, *) { button.controlSize = .extraLarge } else { button.controlSize = .large }
-        button.isBordered = true
-
-        if #available(macOS 26, *), !SurfaceCompatibility.useLegacyMaterial,
-           !reduceTransparency, contrast != .increased {
-            button.bezelStyle = .glass
-            button.borderShape = .capsule
-            button.tintProminence = role == .destructive ? .primary : .none
-        } else {
-            button.bezelStyle = .rounded
-            if #available(macOS 26, *) {
-                button.borderShape = .automatic
-                button.tintProminence = role == .destructive ? .primary : .none
-            }
-        }
-
-        if role == .destructive {
-            button.bezelColor = scheme == .dark
-                ? NSColor(srgbRed: 0.88, green: 0.25, blue: 0.24, alpha: 1)
-                : NSColor(srgbRed: 0.86, green: 0.21, blue: 0.20, alpha: 1)
-        } else {
-            button.bezelColor = nil
-        }
-    }
-
-    func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSButton, context: Context) -> CGSize? {
-        let intrinsic = nsView.intrinsicContentSize
-        let width = proposal.width ?? max(intrinsic.width, 120)
-        return CGSize(width: width, height: 36)
-    }
-
-    @MainActor
-    final class Coordinator: NSObject {
-        var action: () -> Void
-        init(action: @escaping () -> Void) { self.action = action }
-        @objc func press() { action() }
-    }
-}
-
-@MainActor
-private final class ChatDialogWeakViewBox {
-    weak var view: NSView?
-}
-
-@MainActor
-private final class ChatDialogWeakResponderBox {
-    weak var responder: NSResponder?
-}
-
-private struct ChatDialogViewReader: NSViewRepresentable {
-    let box: ChatDialogWeakViewBox
-
-    func makeNSView(context: Context) -> NSView {
-        let view = PassiveReaderView()
-        box.view = view
-        return view
-    }
-
-    func updateNSView(_ view: NSView, context: Context) {
-        box.view = view
-    }
-
-    private final class PassiveReaderView: NSView {
-        override func hitTest(_ point: NSPoint) -> NSView? { nil }
     }
 }

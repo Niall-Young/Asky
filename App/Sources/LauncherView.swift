@@ -172,7 +172,9 @@ final class LauncherController {
             guard !ContentPreviewWindow.quick.isShowing(from: self.panel) else { return }
             guard !LauncherPresentationTrace.isEnabled else { return }
             self.model.closeActionsMenu()
-            guard !self.model.isConfirmingQuit, !self.model.isConfirmingPluginCommand else { return }
+            guard !self.model.isConfirmingQuit,
+                  !self.model.isConfirmingPluginCommand,
+                  !AppDialogPresenter.shared.isPresenting(in: self.panel) else { return }
             self.hide()
         }
         panel.onActionKey = { [weak self] event in
@@ -329,7 +331,8 @@ final class LauncherController {
         guard panel.isVisible else { outsideClickDismissal.hide(); return }
         outsideClickDismissal.show(contains: { [weak self] point in
             guard let self else { return false }
-            if self.model.isConfirmingPluginCommand { return true }
+            if self.model.isConfirmingQuit || self.model.isConfirmingPluginCommand
+                || AppDialogPresenter.shared.isPresenting(in: self.panel) { return true }
             if ContentPreviewWindow.quick.contains(point, from: self.panel) { return true }
             let surfaces = [self.panel]
             return surfaces.contains { $0.isVisible && !$0.ignoresMouseEvents && $0.alphaValue > 0 && $0.frame.contains(point) }

@@ -38,6 +38,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let windowPresentation = WindowPresentation()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        AppDialogPresenter.installIfNeeded()
         #if DEBUG
         if CommandLine.arguments.contains("--diagnose-launcher") {
             runLauncherPresentationDiagnostic()

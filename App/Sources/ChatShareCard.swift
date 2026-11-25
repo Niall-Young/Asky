@@ -1404,6 +1404,7 @@ final class ChatShareWindowController: NSWindowController, NSWindowDelegate {
 
     private var isAutoDismissSuspended: Bool {
         autoDismissSuspensionCount > 0 || window?.attachedSheet != nil
+            || AppDialogPresenter.shared.isPresenting(in: window)
     }
 
     func show(text: String, fullTurnText: String? = nil, colorScheme: ColorScheme) {

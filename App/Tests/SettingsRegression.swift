@@ -68,6 +68,11 @@ enum SettingsRegression {
                     try await assertCommandReset(model, root: root)
                     exit(0)
                 }
+                if CommandLine.arguments.contains("--app-dialogs") {
+                    defer { try? FileManager.default.removeItem(at: root) }
+                    try await assertClearHistoryDialog(model)
+                    exit(0)
+                }
                 if CommandLine.arguments.contains("--agent-prompt") {
                     defer { try? FileManager.default.removeItem(at: root) }
                     precondition(SettingsPage.data.title == NSLocalizedString("智能体", comment: ""))
@@ -1387,5 +1392,78 @@ enum SettingsRegression {
                 .write(to: URL(filePath: "build/settings-button-states-\(name).png"))
         }
         window.close()
+    }
+
+    private static func assertClearHistoryDialog(_ model: AppModel) async throws {
+        let conversations = ConversationStore(model.store)
+        let cid = try conversations.create(title: "待清空对话")
+        try conversations.append(conversationID: cid, role: "user", text: "测试消息")
+        precondition(!conversations.list(limit: 10).isEmpty)
+
+        model.settingsTab = SettingsPage.data.rawValue
+        let window = SettingsWindow.make(app: model)
+        let presentation = WindowPresentation()
+        presentation.show(window)
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        try await Task.sleep(for: .milliseconds(350))
+
+        func waitForOverlay() async throws -> AppDialogOverlay {
+            for _ in 0..<50 {
+                if let overlay = AppDialogPresenter.shared.activeOverlay(in: window),
+                   overlay.button(at: 0) != nil,
+                   overlay.button(at: 1) != nil,
+                   overlay.closeButton != nil {
+                    return overlay
+                }
+                try await Task.sleep(for: .milliseconds(30))
+            }
+            fatalError("Clear conversation history must present an in-window Liquid Glass dialog")
+        }
+
+        func capture(_ name: String) throws {
+            let path = "build/settings-clear-history-\(name).png"
+            let capture = Process()
+            capture.executableURL = URL(filePath: "/usr/sbin/screencapture")
+            capture.arguments = ["-x", "-o", "-l", String(window.windowNumber), path]
+            try capture.run()
+            capture.waitUntilExit()
+            precondition(capture.terminationStatus == 0, "screencapture failed for \(path)")
+        }
+
+        // Open dialog, verify geometry & appearance in both light and dark modes, then cancel.
+        let cancelTask = Task { await model.clearConversationHistory() }
+        let overlay = try await waitForOverlay()
+        for (name, appearance) in [("light", "light"), ("dark", "dark")] {
+            model.preferences.appearance = appearance
+            window.appearance = NSAppearance(named: appearance == "dark" ? .darkAqua : .aqua)
+            try await Task.sleep(for: .milliseconds(450))
+            let surface = window.contentView!
+            let confirmBtn = overlay.button(at: 0)!
+            let cancelBtn = overlay.button(at: 1)!
+            let confirmFrame = confirmBtn.convert(confirmBtn.bounds, to: surface)
+            let cancelFrame = cancelBtn.convert(cancelBtn.bounds, to: surface)
+            let pairMidX = (cancelFrame.minX + confirmFrame.maxX) / 2
+            precondition(abs(pairMidX - surface.bounds.midX) < 3,
+                         "Clear history dialog must stay horizontally centered (pairMidX=\(pairMidX), midX=\(surface.bounds.midX))")
+            precondition(abs(confirmFrame.width - cancelFrame.width) < 1.5,
+                         "Cancel and Clear buttons must share equal width")
+            precondition(cancelFrame.maxX < confirmFrame.minX,
+                         "Cancel button must sit to the left of destructive Clear button")
+            try capture(name)
+        }
+        overlay.button(at: 1)!.performClick(nil)
+        await cancelTask.value
+        precondition(!conversations.list(limit: 10).isEmpty, "Cancel must preserve conversation history")
+
+        // Re-open and confirm clears conversation history.
+        let confirmTask = Task { await model.clearConversationHistory() }
+        let secondOverlay = try await waitForOverlay()
+        try await Task.sleep(for: .milliseconds(250))
+        secondOverlay.button(at: 0)!.performClick(nil)
+        await confirmTask.value
+        precondition(conversations.list(limit: 10).isEmpty, "Confirming must clear conversation history")
+        window.close()
+        print("Settings clear-history Liquid Glass dialog regression passed in light and dark")
     }
 }

@@ -99,21 +99,27 @@ enum ApplicationLanguageRegression {
             try snapshot(window, name: "calendar-\(saving ? "saving" : "ready")-\(language)")
             window.close()
         }
+        AppDialogPresenter.installIfNeeded()
         let owner = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 480), styleMask: [.titled], backing: .buffered, defer: false)
         owner.isReleasedWhenClosed = false
         owner.center()
         owner.makeKeyAndOrderFront(nil)
         let center = ConfirmationCenter()
         let task = Task { await center.present(preserved) }
-        for _ in 0..<30 {
-            if owner.attachedSheet?.isVisible == true { break }
-            try await Task.sleep(for: .milliseconds(100))
+        var overlay: AppDialogOverlay?
+        for _ in 0..<40 {
+            if let found = AppDialogPresenter.shared.activeOverlay(in: owner),
+               found.button(at: 0) != nil, found.button(at: 1) != nil {
+                overlay = found
+                break
+            }
+            try await Task.sleep(for: .milliseconds(50))
         }
-        guard let alert = owner.attachedSheet, alert.isVisible else {
-            fatalError("missing confirmation window")
+        guard overlay != nil else {
+            fatalError("missing confirmation dialog overlay")
         }
         try await Task.sleep(for: .milliseconds(400))
-        try snapshot(alert, name: "confirmation-\(language)")
+        try snapshot(owner, name: "confirmation-\(language)")
         center.rejectAll()
         _ = await task.value
         owner.close()

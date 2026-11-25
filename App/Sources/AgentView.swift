@@ -1827,9 +1827,8 @@ private struct ChatBubble: View {
             // hover tracking, so moving to Copy never hides it mid-gesture.
             .contentShape(.rect)
             .onHover { hoverState.bubbleHovered = $0 }
-            .alert(NSLocalizedString("原回复已不可用", comment: ""), isPresented: $replyUnavailable) {
-                Button(NSLocalizedString("确定", comment: ""), role: .cancel) {}
-            }
+            .appDialog(NSLocalizedString("原回复已不可用", comment: ""), isPresented: $replyUnavailable,
+                       message: "", buttons: [NSLocalizedString("确定", comment: "")])
         case .assistant:
             let contextActions = item.id == "streaming" ? nil : assistantContextActions
             let bubbleShape = grouping.shape(for: .leading)

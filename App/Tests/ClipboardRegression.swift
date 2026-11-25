@@ -923,24 +923,29 @@ enum ClipboardRegression {
         let panel = NSApp.windows.first { $0.title == "剪贴板历史" }!
         for approved in [false, true] {
             let task = Task { await controller.clearAll() }
+            var overlay: AppDialogOverlay?
             for _ in 0..<50 {
-                if panel.attachedSheet != nil { break }
-                try await Task.sleep(for: .milliseconds(20))
+                if let found = AppDialogPresenter.shared.activeOverlay(in: panel),
+                   found.button(at: 0) != nil, found.button(at: 1) != nil {
+                    overlay = found
+                    break
+                }
+                try await Task.sleep(for: .milliseconds(25))
             }
-            guard let sheet = panel.attachedSheet else { preconditionFailure("Clear All must present an owned sheet") }
-            try await Task.sleep(for: .milliseconds(250))
+            guard let overlay else { preconditionFailure("Clear All must present an in-window Liquid Glass dialog") }
+            try await Task.sleep(for: .milliseconds(350))
             precondition(store.recent(limit: 1000).count == 127, "Opening confirmation must preserve history")
             if !approved {
                 let url = URL(filePath: FileManager.default.currentDirectoryPath)
                     .appending(path: "build/clipboard-clear-all-list.png")
                 let capture = Process()
                 capture.executableURL = URL(filePath: "/usr/sbin/screencapture")
-                capture.arguments = ["-x", "-l", String(sheet.windowNumber), url.path]
+                capture.arguments = ["-x", "-o", "-l", String(panel.windowNumber), url.path]
                 try capture.run()
                 capture.waitUntilExit()
                 precondition(capture.terminationStatus == 0)
             }
-            panel.endSheet(sheet, returnCode: approved ? .alertFirstButtonReturn : .alertSecondButtonReturn)
+            overlay.button(at: approved ? 0 : 1)!.performClick(nil)
             await task.value
             if approved {
                 precondition(store.recent(limit: 1000).isEmpty && store.search("history").isEmpty)

@@ -70,20 +70,38 @@ enum QuitAskyRegression {
         try snapshot(panel, "build/quit-asky-results-\(appearance).png")
         model.submit(.executeSelection)
         model.submit(.executeSelection)
-        try await Task.sleep(for: .milliseconds(700))
-        guard let sheet = panel.attachedSheet else { throw NSError(domain: "QuitSheetMissing", code: 1) }
+        var overlay: AppDialogOverlay?
+        for _ in 0..<40 {
+            if let found = AppDialogPresenter.shared.activeOverlay(in: panel),
+               found.button(at: 0) != nil, found.button(at: 1) != nil {
+                overlay = found
+                break
+            }
+            try await Task.sleep(for: .milliseconds(30))
+        }
+        guard let overlay else { throw NSError(domain: "QuitDialogMissing", code: 1) }
+        try await Task.sleep(for: .milliseconds(350))
         try require(panel.isVisible && model.isConfirmingQuit && quits == 0, "confirmation must keep launcher visible without quitting")
-        try snapshot(sheet, "build/quit-asky-alert-\(appearance).png")
+        try snapshot(panel, "build/quit-asky-alert-\(appearance).png")
         let alert = QuitAskyCommand.makeAlert()
         try require(alert.buttons.count == 2 && alert.buttons[1].keyEquivalent == "\u{1b}", "cancel must support Escape")
-        panel.endSheet(sheet, returnCode: .alertSecondButtonReturn)
-        try await Task.sleep(for: .milliseconds(700))
+        overlay.button(at: 1)!.performClick(nil)
+        try await Task.sleep(for: .milliseconds(350))
         try require(quits == 0 && !model.isConfirmingQuit && panel.isVisible, "cancel must preserve app and search")
         model.execute(QuitAskyCommand.result, action: .open)
-        try await Task.sleep(for: .milliseconds(700))
-        guard let confirmed = panel.attachedSheet else { throw NSError(domain: "SecondQuitSheetMissing", code: 1) }
-        panel.endSheet(confirmed, returnCode: .alertFirstButtonReturn)
-        try await Task.sleep(for: .milliseconds(700))
+        var confirmedOverlay: AppDialogOverlay?
+        for _ in 0..<40 {
+            if let found = AppDialogPresenter.shared.activeOverlay(in: panel),
+               found.button(at: 0) != nil {
+                confirmedOverlay = found
+                break
+            }
+            try await Task.sleep(for: .milliseconds(30))
+        }
+        guard let confirmedOverlay else { throw NSError(domain: "SecondQuitDialogMissing", code: 1) }
+        try await Task.sleep(for: .milliseconds(250))
+        confirmedOverlay.button(at: 0)!.performClick(nil)
+        try await Task.sleep(for: .milliseconds(350))
         try require(quits == 1 && !model.isConfirmingQuit, "confirmation must request application termination exactly once")
         await app.shutdown()
     }

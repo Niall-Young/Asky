@@ -189,7 +189,11 @@ final class ConfirmationCenter {
         ]
         alert.messageText = request.title ?? NSLocalizedString(titles[request.tool] ?? "执行这项操作？", comment: "")
         alert.informativeText = Self.message(for: request, remaining: queue.count - 1)
-        alert.addButton(withTitle: NSLocalizedString("确认执行", comment: "")).keyEquivalent = "\r"
+        let confirm = alert.addButton(withTitle: NSLocalizedString("确认执行", comment: ""))
+        confirm.keyEquivalent = "\r"
+        if request.tool == "calendar_delete_event" || request.tool == "memory_forget" {
+            confirm.hasDestructiveAction = true
+        }
         alert.addButton(withTitle: NSLocalizedString("不执行", comment: "")).keyEquivalent = "\u{1b}"
         self.alert = alert
 

@@ -59,7 +59,8 @@ struct SettingsEditableList: View {
         .disabled(choosing)
         .appDialog(NSLocalizedString("删除这一项？", comment: ""), isPresented: $confirmingRemoval,
                    message: pendingRemoval ?? "",
-                   buttons: [NSLocalizedString("删除", comment: ""), NSLocalizedString("取消", comment: "")]) { response in
+                   buttons: [NSLocalizedString("删除", comment: ""), NSLocalizedString("取消", comment: "")],
+                   destructive: true) { response in
             if response == 0, let item = pendingRemoval {
                 items.removeAll { $0 == item }
             }

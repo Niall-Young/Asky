@@ -272,8 +272,10 @@ final class AppModel {
         let alert = AppDialog.make()
         alert.messageText = NSLocalizedString("清空对话历史？", comment: "")
         alert.informativeText = NSLocalizedString("删除全部聊天和附件，保留已保存的长期记忆。", comment: "")
-        alert.addButton(withTitle: NSLocalizedString("清空", comment: ""))
-        alert.addButton(withTitle: NSLocalizedString("取消", comment: ""))
+        let confirm = alert.addButton(withTitle: NSLocalizedString("清空", comment: ""))
+        confirm.hasDestructiveAction = true
+        confirm.keyEquivalent = "\r"
+        alert.addButton(withTitle: NSLocalizedString("取消", comment: "")).keyEquivalent = "\u{1b}"
         guard await AppDialog.present(alert) == .alertFirstButtonReturn else { return }
         historyOperations += 1
         defer { historyOperations -= 1 }
@@ -335,6 +337,7 @@ final class AppModel {
     }
 
     init(root: URL = LocalStore.defaultRoot) throws {
+        AppDialogPresenter.installIfNeeded()
         let store = try LocalStore(root: root)
         self.store = store
         conversationHistory = ConversationHistoryService(store: store)
