@@ -528,6 +528,9 @@ struct ChatSourcePreview: View {
     static let cornerRadius: CGFloat = 18
     static let outerPadding: CGFloat = 6
     static let rowCornerRadius: CGFloat = cornerRadius - outerPadding
+    static let titleFontSize: CGFloat = 14
+    static let metaFontSize: CGFloat = 12
+    static let faviconSize: CGFloat = 13
     let sources: [URL]
     var metadata: [URL: ChatLinkService.Preview] = [:]
     var onOpen: ((URL) -> Void)? = nil
@@ -564,16 +567,16 @@ struct ChatSourcePreview: View {
                         HStack(spacing: 6) {
                             ChatSourceFavicon(data: metadata[url]?.favicon)
                             Text(metadata[url]?.siteName ?? ChatSourceTextView.domain(url))
-                                .font(.system(size: 13))
+                                .font(.system(size: Self.metaFontSize))
                                 .foregroundStyle(ThemeColor.kTextSubtle)
                                 .lineLimit(1)
                                 .truncationMode(.tail)
                         }
                         Text(metadata[url]?.title ?? url.absoluteString)
-                            .font(.system(size: 15)).foregroundStyle(ThemeColor.kText)
+                            .font(.system(size: Self.titleFontSize)).foregroundStyle(ThemeColor.kText)
                             .lineLimit(3).fixedSize(horizontal: false, vertical: true)
                         if let date = Self.date(metadata[url]?.publishedAt) {
-                            Text(date).font(.system(size: 13)).foregroundStyle(ThemeColor.kTextSubtle)
+                            Text(date).font(.system(size: Self.metaFontSize)).foregroundStyle(ThemeColor.kTextSubtle)
                         }
                     }.multilineTextAlignment(.leading).frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 8).padding(.vertical, 6)
@@ -596,10 +599,10 @@ private struct ChatSourceFavicon: View {
                     .aspectRatio(contentMode: .fit)
                     .clipShape(RoundedRectangle(cornerRadius: 3))
             } else {
-                Image(mingCute: "globe", size: 13)
+                Image(mingCute: "globe", size: 12)
                     .foregroundStyle(ThemeColor.kTextSubtle)
             }
         }
-        .frame(width: 14, height: 14)
+        .frame(width: ChatSourcePreview.faviconSize, height: ChatSourcePreview.faviconSize)
     }
 }

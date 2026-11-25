@@ -1356,6 +1356,8 @@ enum AgentReplyRegression {
             let tiff = image.tiffRepresentation!
             return NSBitmapImageRep(data: tiff)!.representation(using: .png, properties: [:])!
         }()
+        precondition(ChatSourcePreview.titleFontSize == 14 && ChatSourcePreview.metaFontSize == 12,
+                     "Source card typography should use 14pt title and 12pt metadata")
         let kimi = URL(string: "https://platform.kimi.com/")!
         let kr = URL(string: "https://m.36kr.com/p/4024942758268804")!
         for (name, scheme) in [("light", ColorScheme.light), ("dark", .dark)] {
