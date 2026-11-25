@@ -134,6 +134,71 @@ enum ChatFormParserRegression {
         precondition(!rangeForm.accepts(["slot": ["2026-11-26 19:00 – 20:00"], "dnd": ["18:00 – 09:00"]]))
         let aliasForm = ChatFormParser.form(in: "```asky-form\n{\"title\":\"别名\"}\n{\"id\":\"a\",\"type\":\"datetime-range\",\"label\":\"A\"}\n{\"id\":\"b\",\"type\":\"date-range\",\"label\":\"B\"}\n{\"id\":\"c\",\"type\":\"timerange\",\"label\":\"C\"}\n```")!
         precondition(aliasForm.fields.map(\.type) == [.datetimeRange, .dateRange, .timeRange])
+        // Auto-coalesce split start/end fields into unified range pickers.
+        let splitDateTimeForm = ChatFormParser.form(in: """
+            ```asky-form
+            {"title":"新建日程"}
+            {"id":"title","type":"text","label":"日程标题","required":true}
+            {"id":"start_time","type":"datetime","label":"会议开始时间","required":true,"defaultValue":"2026-11-26 14:00"}
+            {"id":"end_time","type":"datetime","label":"会议结束时间","required":true,"defaultValue":"2026-11-26 15:30"}
+            ```
+            """)!
+        precondition(splitDateTimeForm.fields.count == 2)
+        precondition(splitDateTimeForm.fields[1].type == .datetimeRange)
+        precondition(splitDateTimeForm.fields[1].label == "会议时间")
+        precondition(splitDateTimeForm.prefilling([:])["start_time"] == ["2026-11-26 14:00 – 15:30"])
+        let splitTripleForm = ChatFormParser.form(in: """
+            ```asky-form
+            {"title":"安排日程"}
+            {"id":"date","type":"date","label":"日程日期","required":true,"defaultValue":"2026-11-27"}
+            {"id":"start","type":"time","label":"开始时间","required":true,"defaultValue":"09:30"}
+            {"id":"end","type":"time","label":"结束时间","required":true,"defaultValue":"11:00"}
+            ```
+            """)!
+        precondition(splitTripleForm.fields.count == 1)
+        precondition(splitTripleForm.fields[0].type == .datetimeRange)
+        precondition(splitTripleForm.fields[0].label == "日程时间")
+        precondition(splitTripleForm.prefilling([:])["date"] == ["2026-11-27 09:30 – 11:00"])
+        let splitQuadForm = ChatFormParser.form(in: """
+            ```asky-form
+            {"title":"跨日行程"}
+            {"id":"start_date","type":"date","label":"开始日期","defaultValue":"2026-11-27"}
+            {"id":"start_time","type":"time","label":"开始时间","defaultValue":"18:00"}
+            {"id":"end_date","type":"date","label":"结束日期","defaultValue":"2026-11-28"}
+            {"id":"end_time","type":"time","label":"结束时间","defaultValue":"10:00"}
+            ```
+            """)!
+        precondition(splitQuadForm.fields.count == 1)
+        precondition(splitQuadForm.fields[0].type == .datetimeRange)
+        precondition(splitQuadForm.fields[0].label == "时间段")
+        precondition(splitQuadForm.prefilling([:])["start_date"] == ["2026-11-27 18:00 – 2026-11-28 10:00"])
+        let splitDateAndTimeForm = ChatFormParser.form(in: """
+            ```asky-form
+            {"title":"请假与勿扰"}
+            {"id":"leave_start","type":"date","label":"请假开始日期","defaultValue":"2026-11-26"}
+            {"id":"leave_end","type":"date","label":"请假结束日期","defaultValue":"2026-11-28"}
+            {"id":"workStart","type":"time","label":"工作开始时间","defaultValue":"09:00"}
+            {"id":"workEnd","type":"time","label":"工作结束时间","defaultValue":"18:00"}
+            {"id":"startDate","type":"date","label":"Start Date","defaultValue":"2026-12-01"}
+            {"id":"endDate","type":"date","label":"End Date","defaultValue":"2026-12-03"}
+            ```
+            """)!
+        precondition(splitDateAndTimeForm.fields.map(\.type) == [.dateRange, .timeRange, .dateRange])
+        precondition(splitDateAndTimeForm.fields.map(\.label) == ["请假日期", "工作时间", "Date Range"])
+        precondition(splitDateAndTimeForm.prefilling([:]) == [
+            "leave_start": ["2026-11-26 – 2026-11-28"],
+            "workStart": ["09:00 – 18:00"],
+            "startDate": ["2026-12-01 – 2026-12-03"]
+        ])
+        let mismatchedPrefixForm = ChatFormParser.form(in: """
+            ```asky-form
+            {"title":"不同前缀不合并"}
+            {"id":"outbound_start","type":"datetime","label":"去程开始时间"}
+            {"id":"return_end","type":"datetime","label":"返程结束时间"}
+            ```
+            """)!
+        precondition(mismatchedPrefixForm.fields.map(\.type) == [.datetime, .datetime],
+                     "Mismatched prefixes must not be falsely merged")
         func temporalForm(_ type: String, _ components: String) -> ChatForm? {
             ChatFormParser.form(in: "```asky-form\n{\"title\":\"测试\"}\n{\"id\":\"value\",\"type\":\"\(type)\",\"label\":\"值\",\"components\":\(components)}\n```")
         }

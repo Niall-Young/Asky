@@ -250,40 +250,32 @@ enum CalendarEditorRegression {
             )
         }
 
-        // 4. Interactive Date & Time floating glass overlays (verify in-window overlay, no NSPopover, and click-outside dismissal)
+        // 4. Interactive DateTimeRange floating glass overlay (verify in-window overlay, no NSPopover, and click-outside dismissal)
         for (schemeName, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {
             let model = MessageCalendarEditorModel(draft, calendars: choices, source: "带上新版原型")
             let panel = makeWindow(model: model, appearance: appearance)
             try await Task.sleep(for: .milliseconds(300))
 
             let content = panel.contentView!
-            guard let datePickerMarker = findMarker("calendar-editor-start-date-picker", in: content),
-                  let timePickerMarker = findMarker("calendar-editor-start-time-picker", in: content) else {
-                throw NSError(domain: "CalendarEditorRegression", code: 2, userInfo: [NSLocalizedDescriptionKey: "Missing picker markers"])
+            guard let rangePickerMarker = findMarker("calendar-editor-time-range-picker", in: content) else {
+                throw NSError(domain: "CalendarEditorRegression", code: 2, userInfo: [NSLocalizedDescriptionKey: "Missing time range picker marker"])
             }
 
-            clickCenter(of: datePickerMarker, in: panel)
+            clickCenter(of: rangePickerMarker, in: panel)
             try await Task.sleep(for: .milliseconds(320))
             let hasPopoverWindow = NSApp.windows.contains {
                 $0 !== panel && $0.isVisible && String(describing: type(of: $0)).contains("Popover")
             }
-            precondition(!hasPopoverWindow, "Date picker must render as an in-window glass overlay, not NSPopover")
-            precondition(findMarker("form-picker-overlay", in: content) != nil, "Date overlay did not open")
-            try writeWindowPNG(panel, to: directory.appendingPathComponent("calendar-date-popover-\(schemeName).png"))
+            precondition(!hasPopoverWindow, "Time range picker must render as an in-window glass overlay, not NSPopover")
+            precondition(findMarker("form-picker-overlay", in: content) != nil, "Time range overlay did not open")
+            precondition(findMarker("chat-form-range-start", in: content) != nil, "Range start tab missing")
+            precondition(findMarker("chat-form-range-end", in: content) != nil, "Range end tab missing")
+            try writeWindowPNG(panel, to: directory.appendingPathComponent("calendar-range-popover-\(schemeName).png"))
 
-            // Click outside the floating overlay (empty bottom-left footer area) to confirm and dismiss.
-            clickPoint(NSPoint(x: 40, y: 36), in: panel)
+            // Click outside the floating overlay (top-left header area) to confirm and dismiss.
+            clickPoint(NSPoint(x: 40, y: MessageCalendarEditor.windowSize.height - 28), in: panel)
             try await Task.sleep(for: .milliseconds(250))
-            precondition(findMarker("form-picker-overlay", in: content) == nil, "Clicking outside must dismiss date overlay")
-
-            clickCenter(of: timePickerMarker, in: panel)
-            try await Task.sleep(for: .milliseconds(320))
-            precondition(findMarker("form-picker-overlay", in: content) != nil, "Time overlay did not open")
-            try writeWindowPNG(panel, to: directory.appendingPathComponent("calendar-time-popover-\(schemeName).png"))
-
-            clickPoint(NSPoint(x: 40, y: 36), in: panel)
-            try await Task.sleep(for: .milliseconds(250))
-            precondition(findMarker("form-picker-overlay", in: content) == nil, "Clicking outside must dismiss time overlay")
+            precondition(findMarker("form-picker-overlay", in: content) == nil, "Clicking outside must dismiss time range overlay")
 
             panel.orderOut(nil)
             panel.close()

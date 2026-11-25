@@ -85,6 +85,11 @@ final class MessageCalendarEditorModel {
         }
     }
 
+    func updateRange(start newStart: Date, end newEnd: Date) {
+        start = newStart
+        end = newEnd
+    }
+
     var formattedDuration: String? {
         let interval = end.timeIntervalSince(start)
         guard interval > 0 else { return nil }
@@ -215,7 +220,7 @@ private final class CalendarWindowEntranceAnimator: NSObject {
 
 @MainActor
 enum MessageCalendarEditor {
-    static let windowSize = NSSize(width: 448, height: 592)
+    static let windowSize = NSSize(width: 460, height: 580)
     static let cornerRadius: CGFloat = 24
 
     static func present(_ draft: MessageCalendarDraft, calendars: [MessageCalendarChoice], source: String,
@@ -394,6 +399,11 @@ struct MessageCalendarEditorView: View {
 
     private var revealed: Bool { entrance.isPresented || reduceMotion }
     private var fieldsEnabled: Bool { !model.saving && !model.uncertain }
+    private var timeRangeHint: String? {
+        if model.isStartInPast { return NSLocalizedString("须晚于当前时间", comment: "") }
+        if model.isEndBeforeStart { return NSLocalizedString("须晚于开始时间", comment: "") }
+        return model.formattedDuration
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -411,79 +421,19 @@ struct MessageCalendarEditorView: View {
                     }
 
                     CalendarFormField(
-                        title: NSLocalizedString("开始时间", comment: ""),
+                        title: NSLocalizedString("时间", comment: ""),
                         required: true,
-                        trailingHint: model.isStartInPast ? NSLocalizedString("须晚于当前时间", comment: "") : nil,
-                        trailingHintIsError: model.isStartInPast
+                        trailingHint: timeRangeHint,
+                        trailingHintIsError: model.isStartInPast || model.isEndBeforeStart
                     ) {
-                        HStack(spacing: 10) {
-                            CalendarEditorDateField(
-                                accessibilityLabel: NSLocalizedString("开始时间", comment: ""),
-                                fieldID: "calendar-editor-start-date",
-                                pickerID: "calendar-editor-start-date-picker",
-                                date: Binding(
-                                    get: { model.start },
-                                    set: { model.updateStartDate($0) }
-                                ),
-                                active: fieldsEnabled
-                            )
-                            CalendarEditorTimeField(
-                                accessibilityLabel: NSLocalizedString("开始时间", comment: ""),
-                                fieldID: "calendar-editor-start-time",
-                                pickerID: "calendar-editor-start-time-picker",
-                                date: Binding(
-                                    get: { model.start },
-                                    set: { updated in
-                                        let cal = Calendar.current
-                                        model.updateStartTime(
-                                            hour: cal.component(.hour, from: updated),
-                                            minute: cal.component(.minute, from: updated)
-                                        )
-                                    }
-                                ),
-                                active: fieldsEnabled
-                            )
-                            .frame(width: 156)
-                        }
-                    }
-
-                    CalendarFormField(
-                        title: NSLocalizedString("结束时间", comment: ""),
-                        required: true,
-                        trailingHint: model.isEndBeforeStart
-                            ? NSLocalizedString("须晚于开始时间", comment: "")
-                            : model.formattedDuration,
-                        trailingHintIsError: model.isEndBeforeStart
-                    ) {
-                        HStack(spacing: 10) {
-                            CalendarEditorDateField(
-                                accessibilityLabel: NSLocalizedString("结束时间", comment: ""),
-                                fieldID: "calendar-editor-end-date",
-                                pickerID: "calendar-editor-end-date-picker",
-                                date: Binding(
-                                    get: { model.end },
-                                    set: { model.updateEndDate($0) }
-                                ),
-                                active: fieldsEnabled
-                            )
-                            CalendarEditorTimeField(
-                                accessibilityLabel: NSLocalizedString("结束时间", comment: ""),
-                                fieldID: "calendar-editor-end-time",
-                                pickerID: "calendar-editor-end-time-picker",
-                                date: Binding(
-                                    get: { model.end },
-                                    set: { updated in
-                                        let cal = Calendar.current
-                                        model.updateEndTime(
-                                            hour: cal.component(.hour, from: updated),
-                                            minute: cal.component(.minute, from: updated)
-                                        )
-                                    }
-                                ),
-                                active: fieldsEnabled
-                            )
-                            .frame(width: 156)
-                        }
+                        CalendarEditorDateTimeRangeField(
+                            accessibilityLabel: NSLocalizedString("时间", comment: ""),
+                            fieldID: "calendar-editor-time-range",
+                            pickerID: "calendar-editor-time-range-picker",
+                            start: $model.start,
+                            end: $model.end,
+                            active: fieldsEnabled
+                        )
                     }
 
                     CalendarFormField(title: NSLocalizedString("地点", comment: "")) {
@@ -676,120 +626,10 @@ private struct CalendarFormField<Content: View>: View {
     }
 }
 
-private struct CalendarEditorDateField: View {
-    let accessibilityLabel: String
-    let fieldID: String
-    let pickerID: String
-    @Binding var date: Date
-    let active: Bool
-
-    @State private var draftText: String
-    @State private var anchorBox = ChatBubbleAnchorBox()
-    @FocusState private var inputFocused: Bool
-    @Environment(\.colorScheme) private var scheme
-    @Environment(\.formPickerOverlay) private var pickerOverlay
-
-    init(accessibilityLabel: String, fieldID: String, pickerID: String, date: Binding<Date>, active: Bool) {
-        self.accessibilityLabel = accessibilityLabel
-        self.fieldID = fieldID
-        self.pickerID = pickerID
-        _date = date
-        self.active = active
-        _draftText = State(initialValue: ChatForm.dateString(date.wrappedValue))
-    }
-
-    private var formattedDate: String { ChatForm.dateString(date) }
-    private var isPickerOpen: Bool { pickerOverlay?.isOpen(pickerID) == true }
-
-    private func popoverBinding(overlay: FormPickerOverlayController?) -> Binding<Date> {
-        Binding(
-            get: { date },
-            set: { picked in
-                if let preserved = CalendarMonthPicker.selecting(picked, preservingTimeFrom: date, calendar: .current) {
-                    date = preserved
-                    draftText = ChatForm.dateString(preserved)
-                    overlay?.notifyChanged()
-                }
-            }
-        )
-    }
-
-    var body: some View {
-        HStack(spacing: 6) {
-            TextField("YYYY-MM-DD", text: $draftText,
-                      prompt: Text(verbatim: "YYYY-MM-DD").foregroundStyle(ThemeColor.kTextSubtlest))
-                .labelsHidden()
-                .textFieldStyle(.plain)
-                .font(.system(size: 14).monospacedDigit())
-                .focused($inputFocused)
-                .disabled(!active)
-                .onSubmit { commitDraft() }
-                .onChange(of: inputFocused) { _, focused in
-                    if !focused { commitDraft() }
-                }
-                .onChange(of: draftText) { _, newValue in
-                    guard active, let parsed = ChatForm.parseDateInput(newValue) else { return }
-                    let formatted = ChatForm.dateString(parsed)
-                    if formatted != formattedDate {
-                        date = parsed
-                        pickerOverlay?.notifyChanged()
-                    }
-                }
-                .onChange(of: formattedDate) { _, newFormatted in
-                    if !inputFocused || ChatForm.parseDateInput(draftText).map(ChatForm.dateString) != newFormatted {
-                        draftText = newFormatted
-                    }
-                }
-                .onChange(of: active) { _, isActive in
-                    if !isActive, isPickerOpen { pickerOverlay?.dismiss() }
-                }
-                .accessibilityLabel(accessibilityLabel)
-                .accessibilityIdentifier(fieldID)
-
-            ChatFormInlinePickerIcon(
-                isOpen: isPickerOpen,
-                enabled: active,
-                accessibilityLabel: NSLocalizedString("选择日期", comment: ""),
-                accessibilityIdentifier: pickerID
-            ) {
-                togglePicker()
-            } icon: {
-                Image(mingCute: "calendar", size: 15)
-            }
-        }
-        .settingsInputSurface(scheme: scheme, focused: inputFocused || isPickerOpen)
-        .background(ChatFormControlMarker(id: fieldID))
-        .background(ChatBubbleAnchorReader(box: anchorBox).allowsHitTesting(false))
-    }
-
-    private func togglePicker() {
-        commitDraft()
-        inputFocused = false
-        guard let anchor = anchorBox.swiftUIFrameInWindow() else { return }
-        let overlay = pickerOverlay
-        overlay?.toggle(
-            id: pickerID,
-            anchor: anchor,
-            preferredSize: ChatFormDatePopover.preferredSize
-        ) {
-            AnyView(ChatFormDatePopover(selection: popoverBinding(overlay: overlay)))
-        }
-    }
-
-    private func commitDraft() {
-        if let parsed = ChatForm.parseDateInput(draftText) {
-            date = parsed
-            draftText = ChatForm.dateString(parsed)
-        } else {
-            draftText = formattedDate
-        }
-    }
-}
-
-private struct CalendarEditorTimeField: View {
-    private static let timeField = ChatForm.Field(
-        id: "calendar-time",
-        type: .time,
+private struct CalendarEditorDateTimeRangeField: View {
+    private static let rangeField = ChatForm.Field(
+        id: "calendar-time-range",
+        type: .datetimeRange,
         label: NSLocalizedString("时间", comment: ""),
         required: true,
         options: nil,
@@ -801,7 +641,8 @@ private struct CalendarEditorTimeField: View {
     let accessibilityLabel: String
     let fieldID: String
     let pickerID: String
-    @Binding var date: Date
+    @Binding var start: Date
+    @Binding var end: Date
     let active: Bool
 
     @State private var draftText: String
@@ -810,13 +651,21 @@ private struct CalendarEditorTimeField: View {
     @Environment(\.colorScheme) private var scheme
     @Environment(\.formPickerOverlay) private var pickerOverlay
 
-    init(accessibilityLabel: String, fieldID: String, pickerID: String, date: Binding<Date>, active: Bool) {
+    init(
+        accessibilityLabel: String,
+        fieldID: String,
+        pickerID: String,
+        start: Binding<Date>,
+        end: Binding<Date>,
+        active: Bool
+    ) {
         self.accessibilityLabel = accessibilityLabel
         self.fieldID = fieldID
         self.pickerID = pickerID
-        _date = date
+        _start = start
+        _end = end
         self.active = active
-        _draftText = State(initialValue: Self.formattedTime(date.wrappedValue))
+        _draftText = State(initialValue: Self.formattedRange(start: start.wrappedValue, end: end.wrappedValue))
     }
 
     private static func timeComponents(_ date: Date) -> [Int] {
@@ -824,21 +673,31 @@ private struct CalendarEditorTimeField: View {
         return [cal.component(.hour, from: date), cal.component(.minute, from: date)]
     }
 
-    private static func formattedTime(_ date: Date) -> String {
-        timeField.temporalString(timeComponents(date))
+    private static func formattedRange(start: Date, end: Date) -> String {
+        rangeField.dateTimeRangeString(
+            startDate: start,
+            startTime: timeComponents(start),
+            endDate: end,
+            endTime: timeComponents(end)
+        )
     }
 
-    private var formattedValue: String { Self.formattedTime(date) }
+    private var formattedValue: String { Self.formattedRange(start: start, end: end) }
     private var isPickerOpen: Bool { pickerOverlay?.isOpen(pickerID) == true }
 
-    private func temporalBinding(overlay: FormPickerOverlayController?) -> Binding<[Int]> {
+    private func popoverValueBinding(overlay: FormPickerOverlayController?) -> Binding<String> {
         Binding(
-            get: { Self.timeComponents(date) },
-            set: { numbers in
-                guard numbers.count == 2,
-                      let updated = Calendar.current.date(bySettingHour: numbers[0], minute: numbers[1], second: 0, of: date) else { return }
-                date = updated
-                draftText = Self.timeField.temporalString(numbers)
+            get: {
+                let effectiveEnd = end > start ? end : start.addingTimeInterval(3600)
+                return Self.formattedRange(start: start, end: effectiveEnd)
+            },
+            set: { newValue in
+                guard let parsed = Self.rangeField.dateTimeRangeComponents(newValue),
+                      let newStart = Self.rangeField.combinedInstant(date: parsed.startDate, time: parsed.startTime),
+                      let newEnd = Self.rangeField.combinedInstant(date: parsed.endDate, time: parsed.endTime) else { return }
+                start = newStart
+                end = newEnd
+                draftText = newValue
                 overlay?.notifyChanged()
             }
         )
@@ -846,41 +705,55 @@ private struct CalendarEditorTimeField: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            TextField(Self.timeField.temporalPlaceholder, text: $draftText,
-                      prompt: Text(verbatim: Self.timeField.temporalPlaceholder).foregroundStyle(ThemeColor.kTextSubtlest))
-                .labelsHidden()
-                .textFieldStyle(.plain)
-                .font(.system(size: 14).monospacedDigit())
-                .focused($inputFocused)
-                .disabled(!active)
-                .onSubmit { commitDraft() }
-                .onChange(of: inputFocused) { _, focused in
-                    if !focused { commitDraft() }
+            TextField(
+                Self.rangeField.dateTimeRangePlaceholder,
+                text: $draftText,
+                prompt: Text(verbatim: Self.rangeField.dateTimeRangePlaceholder)
+                    .foregroundStyle(ThemeColor.kTextSubtlest)
+            )
+            .labelsHidden()
+            .textFieldStyle(.plain)
+            .font(.system(size: 14).monospacedDigit())
+            .focused($inputFocused)
+            .disabled(!active)
+            .onSubmit { commitDraft() }
+            .onChange(of: inputFocused) { _, focused in
+                if !focused { commitDraft() }
+            }
+            .onChange(of: draftText) { _, newValue in
+                guard active,
+                      let parsed = Self.rangeField.parseDateTimeRangeInput(newValue),
+                      let newStart = Self.rangeField.combinedInstant(date: parsed.startDate, time: parsed.startTime),
+                      let newEnd = Self.rangeField.combinedInstant(date: parsed.endDate, time: parsed.endTime) else { return }
+                if newStart != start || newEnd != end {
+                    start = newStart
+                    end = newEnd
+                    pickerOverlay?.notifyChanged()
                 }
-                .onChange(of: draftText) { _, newValue in
-                    guard active, let parsed = Self.timeField.parseTemporalInput(newValue), parsed.count == 2 else { return }
-                    let formatted = Self.timeField.temporalString(parsed)
-                    if formatted != formattedValue,
-                       let updated = Calendar.current.date(bySettingHour: parsed[0], minute: parsed[1], second: 0, of: date) {
-                        date = updated
-                        pickerOverlay?.notifyChanged()
-                    }
+            }
+            .onChange(of: formattedValue) { _, newFormatted in
+                let parsedDraft = Self.rangeField.parseDateTimeRangeInput(draftText).map {
+                    Self.rangeField.dateTimeRangeString(
+                        startDate: $0.startDate,
+                        startTime: $0.startTime,
+                        endDate: $0.endDate,
+                        endTime: $0.endTime
+                    )
                 }
-                .onChange(of: formattedValue) { _, newFormatted in
-                    if !inputFocused || Self.timeField.parseTemporalInput(draftText).map(Self.timeField.temporalString) != newFormatted {
-                        draftText = newFormatted
-                    }
+                if !inputFocused || parsedDraft != newFormatted {
+                    draftText = newFormatted
                 }
-                .onChange(of: active) { _, isActive in
-                    if !isActive, isPickerOpen { pickerOverlay?.dismiss() }
-                }
-                .accessibilityLabel(accessibilityLabel)
-                .accessibilityIdentifier(fieldID)
+            }
+            .onChange(of: active) { _, isActive in
+                if !isActive, isPickerOpen { pickerOverlay?.dismiss() }
+            }
+            .accessibilityLabel(accessibilityLabel)
+            .accessibilityIdentifier(fieldID)
 
             ChatFormInlinePickerIcon(
                 isOpen: isPickerOpen,
                 enabled: active,
-                accessibilityLabel: NSLocalizedString("选择时间", comment: ""),
+                accessibilityLabel: NSLocalizedString("选择时间段", comment: ""),
                 accessibilityIdentifier: pickerID
             ) {
                 togglePicker()
@@ -901,17 +774,19 @@ private struct CalendarEditorTimeField: View {
         overlay?.toggle(
             id: pickerID,
             anchor: anchor,
-            preferredSize: ChatFormTemporalPopover.preferredSize(for: Self.timeField)
+            preferredSize: ChatFormDateTimeRangePopover.preferredSize(for: Self.rangeField)
         ) {
-            AnyView(ChatFormTemporalPopover(field: Self.timeField, values: temporalBinding(overlay: overlay)))
+            AnyView(ChatFormDateTimeRangePopover(field: Self.rangeField, value: popoverValueBinding(overlay: overlay)))
         }
     }
 
     private func commitDraft() {
-        if let parsed = Self.timeField.parseTemporalInput(draftText), parsed.count == 2,
-           let updated = Calendar.current.date(bySettingHour: parsed[0], minute: parsed[1], second: 0, of: date) {
-            date = updated
-            draftText = Self.timeField.temporalString(parsed)
+        if let parsed = Self.rangeField.parseDateTimeRangeInput(draftText),
+           let newStart = Self.rangeField.combinedInstant(date: parsed.startDate, time: parsed.startTime),
+           let newEnd = Self.rangeField.combinedInstant(date: parsed.endDate, time: parsed.endTime) {
+            start = newStart
+            end = newEnd
+            draftText = Self.formattedRange(start: newStart, end: newEnd)
         } else {
             draftText = formattedValue
         }

@@ -422,8 +422,11 @@ struct ChatForm: Equatable {
     }
 
     static func date(_ value: String) -> Date? {
-        guard value.count == 10, let date = formatter().date(from: value), dateString(date) == value else { return nil }
-        return date
+        guard value.count == 10 else { return nil }
+        return Self.withDayFormatter { formatter in
+            guard let date = formatter.date(from: value), formatter.string(from: date) == value else { return nil }
+            return date
+        }
     }
     /// Accepts user-typed date variants such as `2026-11-24`, `2026/11/5`, `2026.11.24`, or `20261124`.
     static func parseDateInput(_ raw: String) -> Date? {
@@ -445,14 +448,26 @@ struct ChatForm: Equatable {
               let year = Int(parts[0]), let month = Int(parts[1]), let day = Int(parts[2]) else { return nil }
         return date(String(format: "%04d-%02d-%02d", year, month, day))
     }
-    static func dateString(_ date: Date) -> String { formatter().string(from: date) }
-    private static func formatter(_ format: String = "yyyy-MM-dd") -> DateFormatter {
+    static func dateString(_ date: Date) -> String {
+        Self.withDayFormatter { $0.string(from: date) }
+    }
+    private static let dayFormatterLock = NSLock()
+    private static let cachedDayFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.dateFormat = format
+        formatter.dateFormat = "yyyy-MM-dd"
         formatter.isLenient = false
         return formatter
+    }()
+    private static func withDayFormatter<T>(_ body: (DateFormatter) -> T) -> T {
+        dayFormatterLock.lock()
+        defer { dayFormatterLock.unlock() }
+        let current = TimeZone.current
+        if cachedDayFormatter.timeZone != current {
+            cachedDayFormatter.timeZone = current
+        }
+        return body(cachedDayFormatter)
     }
 }
 
@@ -523,7 +538,8 @@ enum ChatFormParser {
                 }
                 fields.append(field)
             }
-            append(.form(ChatForm(title: header.title, fields: fields, isComplete: closed && !fields.isEmpty)))
+            let normalizedFields = (closed || !streaming) ? coalesceRangeFields(fields) : fields
+            append(.form(ChatForm(title: header.title, fields: normalizedFields, isComplete: closed && !normalizedFields.isEmpty)))
         }
         for (index, line) in lines.enumerated() {
             let line = String(line)
@@ -581,5 +597,330 @@ enum ChatFormParser {
 
     static func form(in text: String) -> ChatForm? {
         parse(text, streaming: false).compactMap { if case .form(let form) = $0.content { form } else { nil } }.first
+    }
+
+    // MARK: - Split Start/End Range Coalescing
+
+    private enum RangeEndpoint { case start, end }
+
+    /// Automatically upgrades adjacent split start/end fields emitted by a model
+    /// (e.g., `开始时间` + `结束时间`, `日期` + `开始时间` + `结束时间`, `开始日期` + `结束日期`)
+    /// into unified range picker fields (`datetime_range`, `date_range`, `time_range`).
+    private static func coalesceRangeFields(_ fields: [ChatForm.Field]) -> [ChatForm.Field] {
+        guard fields.count >= 2 else { return fields }
+        var result: [ChatForm.Field] = []
+        var i = 0
+        while i < fields.count {
+            // Pattern 1: startDate (.date) + startTime (.time) + endDate (.date) + endTime (.time) -> .datetimeRange
+            if i + 3 < fields.count {
+                let sd = fields[i], st = fields[i + 1], ed = fields[i + 2], et = fields[i + 3]
+                if sd.type == .date, st.type == .time, ed.type == .date, et.type == .time,
+                   st.timeUnits == et.timeUnits,
+                   endpointRole(of: sd) == .start, endpointRole(of: st) == .start,
+                   endpointRole(of: ed) == .end, endpointRole(of: et) == .end,
+                   prefixesCompatible(labelPrefix(of: sd.label), labelPrefix(of: ed.label)),
+                   prefixesCompatible(labelPrefix(of: st.label), labelPrefix(of: et.label)) {
+                    let prefix = firstNonEmpty(labelPrefix(of: sd.label), labelPrefix(of: st.label))
+                    let merged = ChatForm.Field(
+                        id: sd.id,
+                        type: .datetimeRange,
+                        label: mergedLabel(prefix: prefix, kind: .datetimeRange, sampleLabel: sd.label),
+                        required: (sd.required == true || st.required == true || ed.required == true || et.required == true) ? true : nil,
+                        options: nil,
+                        allowCustom: nil,
+                        components: st.components,
+                        defaultValue: mergedDateTimeRangeDefault(startDateField: sd, startTimeField: st, endDateField: ed, endTimeField: et)
+                    )
+                    result.append(merged)
+                    i += 4
+                    continue
+                }
+            }
+
+            // Pattern 2: date (.date, neutral) + startTime (.time) + endTime (.time) -> .datetimeRange
+            if i + 2 < fields.count {
+                let d = fields[i], st = fields[i + 1], et = fields[i + 2]
+                if d.type == .date, st.type == .time, et.type == .time,
+                   st.timeUnits == et.timeUnits,
+                   endpointRole(of: d) == nil,
+                   endpointRole(of: st) == .start, endpointRole(of: et) == .end,
+                   prefixesCompatible(labelPrefix(of: st.label), labelPrefix(of: et.label)),
+                   let prefix = compatibleTriplePrefix(datePrefix: labelPrefix(of: d.label),
+                                                       startPrefix: labelPrefix(of: st.label)) {
+                    let merged = ChatForm.Field(
+                        id: d.id,
+                        type: .datetimeRange,
+                        label: mergedLabel(prefix: prefix, kind: .datetimeRange, sampleLabel: d.label),
+                        required: (d.required == true || st.required == true || et.required == true) ? true : nil,
+                        options: nil,
+                        allowCustom: nil,
+                        components: st.components,
+                        defaultValue: mergedDateAndTimeRangeDefault(dateField: d, startTimeField: st, endTimeField: et)
+                    )
+                    result.append(merged)
+                    i += 3
+                    continue
+                }
+            }
+
+            // Pattern 3/4/5: adjacent start + end pair of matching temporal kind
+            if i + 1 < fields.count {
+                let first = fields[i], second = fields[i + 1]
+                if first.type == second.type,
+                   endpointRole(of: first) == .start,
+                   endpointRole(of: second) == .end,
+                   prefixesCompatible(labelPrefix(of: first.label), labelPrefix(of: second.label)) {
+                    let prefix = labelPrefix(of: first.label)
+                    switch first.type {
+                    case .datetime where first.timeUnits == second.timeUnits:
+                        let merged = ChatForm.Field(
+                            id: first.id,
+                            type: .datetimeRange,
+                            label: mergedLabel(prefix: prefix, kind: .datetimeRange, sampleLabel: first.label),
+                            required: (first.required == true || second.required == true) ? true : nil,
+                            options: nil,
+                            allowCustom: nil,
+                            components: first.components,
+                            defaultValue: mergedDateTimePairDefault(startField: first, endField: second)
+                        )
+                        result.append(merged)
+                        i += 2
+                        continue
+                    case .date:
+                        let merged = ChatForm.Field(
+                            id: first.id,
+                            type: .dateRange,
+                            label: mergedLabel(prefix: prefix, kind: .dateRange, sampleLabel: first.label),
+                            required: (first.required == true || second.required == true) ? true : nil,
+                            options: nil,
+                            allowCustom: nil,
+                            components: nil,
+                            defaultValue: mergedDatePairDefault(startField: first, endField: second)
+                        )
+                        result.append(merged)
+                        i += 2
+                        continue
+                    case .time where first.timeUnits == second.timeUnits:
+                        let merged = ChatForm.Field(
+                            id: first.id,
+                            type: .timeRange,
+                            label: mergedLabel(prefix: prefix, kind: .timeRange, sampleLabel: first.label),
+                            required: (first.required == true || second.required == true) ? true : nil,
+                            options: nil,
+                            allowCustom: nil,
+                            components: first.components,
+                            defaultValue: mergedTimePairDefault(startField: first, endField: second)
+                        )
+                        result.append(merged)
+                        i += 2
+                        continue
+                    default:
+                        break
+                    }
+                }
+            }
+
+            result.append(fields[i])
+            i += 1
+        }
+        return result
+    }
+
+    private static func identifierTokens(_ raw: String) -> [String] {
+        var tokens: [String] = []
+        var current = ""
+        for ch in raw {
+            if ch == "_" || ch == "-" || ch == " " {
+                if !current.isEmpty { tokens.append(current.lowercased()); current = "" }
+            } else if ch.isUppercase, !current.isEmpty, current.last?.isLowercase == true {
+                tokens.append(current.lowercased())
+                current = String(ch)
+            } else if ch.isLetter || ch.isNumber {
+                current.append(ch)
+            } else {
+                if !current.isEmpty { tokens.append(current.lowercased()); current = "" }
+            }
+        }
+        if !current.isEmpty { tokens.append(current.lowercased()) }
+        return tokens
+    }
+
+    private static func endpointRole(of field: ChatForm.Field) -> RangeEndpoint? {
+        let startWords: Set<String> = ["start", "begin", "from", "since"]
+        let endWords: Set<String> = ["end", "finish", "until", "to", "stop"]
+
+        let idTokens = identifierTokens(field.id)
+        let idHasStart = idTokens.contains { startWords.contains($0) }
+        let idHasEnd = idTokens.contains { endWords.contains($0) }
+
+        let label = field.label
+        let labelWordTokens = label.lowercased()
+            .split { !($0.isASCII && $0.isLetter) }
+            .map(String.init)
+        let labelHasStart = label.contains("开始") || label.contains("起始")
+            || labelWordTokens.contains { startWords.contains($0) }
+        let labelHasEnd = label.contains("结束") || label.contains("终止") || label.contains("截止")
+            || labelWordTokens.contains { endWords.contains($0) }
+
+        let isStart = (idHasStart || labelHasStart) && !(idHasEnd || labelHasEnd)
+        let isEnd = (idHasEnd || labelHasEnd) && !(idHasStart || labelHasStart)
+        if isStart { return .start }
+        if isEnd { return .end }
+        return nil
+    }
+
+    private static func labelPrefix(of label: String) -> String {
+        var text = label
+        let zhRemovals = ["开始日期时间", "结束日期时间", "起始日期时间", "终止日期时间",
+                          "开始时间", "结束时间", "起始时间", "终止时间", "截止时间",
+                          "开始日期", "结束日期", "起始日期", "终止日期", "截止日期",
+                          "日期时间", "开始", "起始", "结束", "终止", "截止",
+                          "时间", "日期", "时刻", "时段", "范围"]
+        for token in zhRemovals {
+            text = text.replacingOccurrences(of: token, with: "")
+        }
+        let enRemovals: Set<String> = ["start", "begin", "from", "since", "end", "finish", "until", "to",
+                                       "datetime", "date", "time", "at", "of"]
+        let words = text.split { $0.isWhitespace || $0 == "-" || $0 == "_" || $0 == "/" || $0 == ":" || $0 == "：" || $0 == "(" || $0 == ")" || $0 == "（" || $0 == "）" }
+        let filtered = words.filter { !enRemovals.contains($0.lowercased()) }
+        return filtered.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func prefixesCompatible(_ a: String, _ b: String) -> Bool {
+        a.lowercased() == b.lowercased()
+    }
+
+    private static func compatibleTriplePrefix(datePrefix: String, startPrefix: String) -> String? {
+        if datePrefix.isEmpty { return startPrefix }
+        if startPrefix.isEmpty { return datePrefix }
+        return prefixesCompatible(datePrefix, startPrefix) ? datePrefix : nil
+    }
+
+    private static func firstNonEmpty(_ a: String, _ b: String) -> String {
+        a.isEmpty ? b : a
+    }
+
+    private static func isEnglishLabel(_ label: String) -> Bool {
+        let hasASCII = label.unicodeScalars.contains { ($0.value >= 65 && $0.value <= 90) || ($0.value >= 97 && $0.value <= 122) }
+        let hasCJK = label.unicodeScalars.contains { (0x4E00...0x9FFF).contains($0.value) }
+        return hasASCII && !hasCJK
+    }
+
+    private static func mergedLabel(prefix: String, kind: ChatForm.Field.Kind, sampleLabel: String) -> String {
+        if isEnglishLabel(sampleLabel) {
+            if !prefix.isEmpty {
+                return kind == .dateRange ? "\(prefix) Dates" : "\(prefix) Time"
+            }
+            return kind == .dateRange ? "Date Range" : "Time Range"
+        }
+        if !prefix.isEmpty {
+            return kind == .dateRange ? "\(prefix)日期" : "\(prefix)时间"
+        }
+        return kind == .dateRange ? "日期范围" : "时间段"
+    }
+
+    private static func scalarDefault(of field: ChatForm.Field) -> String? {
+        guard case .scalar(let value) = field.defaultValue else { return nil }
+        return value
+    }
+
+    private static func mergedDateTimePairDefault(startField: ChatForm.Field, endField: ChatForm.Field) -> ChatForm.Field.DefaultValue? {
+        guard let startRaw = scalarDefault(of: startField),
+              let start = startField.parseDateTimeInput(startRaw),
+              let startInstant = startField.combinedInstant(date: start.date, time: start.time) else { return nil }
+        let helper = ChatForm.Field(id: startField.id, type: .datetimeRange, label: startField.label,
+                                    required: nil, options: nil, allowCustom: nil,
+                                    components: startField.components, defaultValue: nil)
+        if let endRaw = scalarDefault(of: endField),
+           let end = endField.parseDateTimeInput(endRaw),
+           let endInstant = endField.combinedInstant(date: end.date, time: end.time),
+           endInstant > startInstant {
+            return .scalar(helper.dateTimeRangeString(startDate: start.date, startTime: start.time,
+                                                      endDate: end.date, endTime: end.time))
+        }
+        if scalarDefault(of: endField) == nil {
+            let shifted = startInstant.addingTimeInterval(3600)
+            return .scalar(helper.dateTimeRangeString(startDate: start.date, startTime: start.time,
+                                                      endDate: shifted, endTime: helper.initialTemporalValues(now: shifted)))
+        }
+        return nil
+    }
+
+    private static func mergedDateAndTimeRangeDefault(
+        dateField: ChatForm.Field,
+        startTimeField: ChatForm.Field,
+        endTimeField: ChatForm.Field
+    ) -> ChatForm.Field.DefaultValue? {
+        guard let dateRaw = scalarDefault(of: dateField),
+              let day = ChatForm.parseDateInput(dateRaw),
+              let startRaw = scalarDefault(of: startTimeField),
+              let startTime = startTimeField.parseTemporalInput(startRaw),
+              let startInstant = startTimeField.combinedInstant(date: day, time: startTime) else { return nil }
+        let helper = ChatForm.Field(id: dateField.id, type: .datetimeRange, label: dateField.label,
+                                    required: nil, options: nil, allowCustom: nil,
+                                    components: startTimeField.components, defaultValue: nil)
+        if let endRaw = scalarDefault(of: endTimeField),
+           let endTime = endTimeField.parseTemporalInput(endRaw),
+           let endInstant = endTimeField.combinedInstant(date: day, time: endTime),
+           endInstant > startInstant {
+            return .scalar(helper.dateTimeRangeString(startDate: day, startTime: startTime,
+                                                      endDate: day, endTime: endTime))
+        }
+        if scalarDefault(of: endTimeField) == nil {
+            let shifted = startInstant.addingTimeInterval(3600)
+            return .scalar(helper.dateTimeRangeString(startDate: day, startTime: startTime,
+                                                      endDate: shifted, endTime: helper.initialTemporalValues(now: shifted)))
+        }
+        return nil
+    }
+
+    private static func mergedDateTimeRangeDefault(
+        startDateField: ChatForm.Field,
+        startTimeField: ChatForm.Field,
+        endDateField: ChatForm.Field,
+        endTimeField: ChatForm.Field
+    ) -> ChatForm.Field.DefaultValue? {
+        guard let sdRaw = scalarDefault(of: startDateField),
+              let startDate = ChatForm.parseDateInput(sdRaw),
+              let stRaw = scalarDefault(of: startTimeField),
+              let startTime = startTimeField.parseTemporalInput(stRaw),
+              let startInstant = startTimeField.combinedInstant(date: startDate, time: startTime) else { return nil }
+        let helper = ChatForm.Field(id: startDateField.id, type: .datetimeRange, label: startDateField.label,
+                                    required: nil, options: nil, allowCustom: nil,
+                                    components: startTimeField.components, defaultValue: nil)
+        if let edRaw = scalarDefault(of: endDateField),
+           let endDate = ChatForm.parseDateInput(edRaw),
+           let etRaw = scalarDefault(of: endTimeField),
+           let endTime = endTimeField.parseTemporalInput(etRaw),
+           let endInstant = endTimeField.combinedInstant(date: endDate, time: endTime),
+           endInstant > startInstant {
+            return .scalar(helper.dateTimeRangeString(startDate: startDate, startTime: startTime,
+                                                      endDate: endDate, endTime: endTime))
+        }
+        return nil
+    }
+
+    private static func mergedDatePairDefault(startField: ChatForm.Field, endField: ChatForm.Field) -> ChatForm.Field.DefaultValue? {
+        guard let startRaw = scalarDefault(of: startField),
+              let start = ChatForm.parseDateInput(startRaw),
+              let endRaw = scalarDefault(of: endField),
+              let end = ChatForm.parseDateInput(endRaw),
+              end >= start else { return nil }
+        let helper = ChatForm.Field(id: startField.id, type: .dateRange, label: startField.label,
+                                    required: nil, options: nil, allowCustom: nil,
+                                    components: nil, defaultValue: nil)
+        return .scalar(helper.dateRangeString(start: start, end: end))
+    }
+
+    private static func mergedTimePairDefault(startField: ChatForm.Field, endField: ChatForm.Field) -> ChatForm.Field.DefaultValue? {
+        guard let startRaw = scalarDefault(of: startField),
+              let start = startField.parseTemporalInput(startRaw),
+              let endRaw = scalarDefault(of: endField),
+              let end = endField.parseTemporalInput(endRaw),
+              startField.temporalRank(end) > startField.temporalRank(start) else { return nil }
+        let helper = ChatForm.Field(id: startField.id, type: .timeRange, label: startField.label,
+                                    required: nil, options: nil, allowCustom: nil,
+                                    components: startField.components, defaultValue: nil)
+        return .scalar(helper.timeRangeString(start: start, end: end))
     }
 }
