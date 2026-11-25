@@ -495,7 +495,7 @@ private struct ReminderBannerCard: View {
                 .animation(ReminderBannerCenter.reduceMotion ? nil : .easeOut(duration: 0.14), value: showClose)
             }
 
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 6) {
                 Text(displayText(item.title))
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(ThemeColor.kText)
@@ -503,15 +503,16 @@ private struct ReminderBannerCard: View {
 
                 let lines = bodyLines
                 if lines.count > 1 {
-                    VStack(alignment: .leading, spacing: 4) {
+                    VStack(alignment: .leading, spacing: 6) {
                         Text(lines[0])
-                            .font(.system(size: 12.5, weight: .medium))
-                            .foregroundStyle(ThemeColor.kText.color(for: colorScheme).opacity(0.76))
+                            .font(.system(size: 14, weight: .medium))
+                            .monospacedDigit()
+                            .foregroundStyle(ThemeColor.kText.color(for: colorScheme).opacity(0.92))
                             .lineLimit(1)
                         Text(lines.dropFirst().joined(separator: "\n"))
-                            .font(.system(size: 13, weight: .regular))
+                            .font(.system(size: 12.5, weight: .regular))
                             .lineSpacing(2.5)
-                            .foregroundStyle(ThemeColor.kTextSubtle)
+                            .foregroundStyle(ThemeColor.kTextSubtle.color(for: colorScheme).opacity(0.84))
                             .fixedSize(horizontal: false, vertical: true)
                             .lineLimit(3)
                     }
