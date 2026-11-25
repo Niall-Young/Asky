@@ -719,6 +719,82 @@ server.serve_forever()
         #expect(NativeAgentPrompt.defaultSystemPrompt.contains("分成一条条消息发"))
         #expect(!NativeAgentPrompt.defaultSystemPrompt.contains("<asky-split/>"))
     }
+
+    @Test func steerInjectedAfterToolRoundAndResetsWebGuards() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let (toolStarted, signalStarted) = AsyncStream<Void>.makeStream()
+        let (toolResume, signalResume) = AsyncStream<Void>.makeStream()
+        let script = ModelScript([
+            NativeCompletion(text: "先查一下百度。", calls: [call("web_read_page", ["imagesOnly": true], id: "img-1")]),
+            NativeCompletion(calls: [call("web_search", ["query": "字节跳动"], id: "search-2")]),
+            NativeCompletion(text: "百度和字节一并回答完毕。")
+        ])
+        let definitions = ["web_read_page", "web_search"].map {
+            ToolDefinition(name: $0, summary: $0, source: .web, effect: .read, confirmation: .never, externallyExposable: false)
+        }
+        let agent = host(root: root, script: script, tools: definitions) { request in
+            if request.tool == "web_read_page" {
+                signalStarted.yield(())
+                for await _ in toolResume { break }
+                return ExecutionResult(requestID: request.requestID, status: .completed, output: ["images": []])
+            }
+            return ExecutionResult(requestID: request.requestID, status: .completed, output: ["results": []])
+        }
+        let task = Task { await collect(agent, AgentRequest(sessionID: "s", taskID: "t1", text: "百度为啥不行了")) }
+        for await _ in toolStarted { break }
+        let sent = await agent.steer(taskID: "t1", AgentRequest(sessionID: "s", taskID: "steer-1", text: "也好奇字节是怎么起来的"))
+        #expect(sent)
+        signalResume.yield(())
+        let events = await task.value
+        await agent.shutdown()
+
+        #expect(events.contains(.steerAccepted(taskID: "t1", steerIDs: ["steer-1"])))
+        #expect(events.contains { if case .message(_, "百度和字节一并回答完毕。") = $0 { true } else { false } })
+        #expect(events.filter { if case .toolCall = $0 { true } else { false } }.count == 2,
+                "Steer must reset illustrationsFinished so the follow-up topic can still search the web")
+        let requests = await script.requests
+        try #require(requests.count == 3)
+        let secondMessages = try #require(requests[1]["messages"]?.arrayValue)
+        let lastSecond = try #require(secondMessages.last)
+        #expect(lastSecond["role"] == "user")
+        #expect(lastSecond["content"]?.stringValue?.contains("也好奇字节是怎么起来的") == true)
+        let saved = try await AgentSessionStorage(root: root).load(sessionID: "s", legacyPath: nil)
+        #expect(saved.contains { $0["role"] == "user" && $0["content"]?.stringValue?.contains("也好奇字节是怎么起来的") == true })
+    }
+
+    @Test func steerDuringFinalResponseIsNotAccepted() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let (modelStarted, signalStarted) = AsyncStream<Void>.makeStream()
+        let (modelResume, signalResume) = AsyncStream<Void>.makeStream()
+        let storage = AgentSessionStorage(root: root)
+        let agent = AgentHost(
+            launcher: {
+                NativeRuntime(storage: storage, client: NativeModelClient(transport: { _, delta in
+                    signalStarted.yield(())
+                    for await _ in modelResume { break }
+                    delta("只回复第一个问题。")
+                    return NativeCompletion(text: "只回复第一个问题。")
+                }))
+            },
+            configProvider: { RuntimeLaunchConfig(baseURL: "https://example.test/v1", model: "mock", apiKey: "secret") },
+            toolsProvider: { [] },
+            toolHandler: { .failure($0.requestID, .adapterFailure, "unexpected tool") }
+        )
+        let task = Task { await collect(agent, AgentRequest(sessionID: "s", taskID: "t1", text: "第一个问题")) }
+        for await _ in modelStarted { break }
+        let sent = await agent.steer(taskID: "t1", AgentRequest(sessionID: "s", taskID: "steer-late", text: "第二个问题"))
+        #expect(sent)
+        signalResume.yield(())
+        let events = await task.value
+        await agent.shutdown()
+
+        #expect(!events.contains { if case .steerAccepted = $0 { true } else { false } })
+        #expect(events.contains { if case .message(_, "只回复第一个问题。") = $0 { true } else { false } })
+        let saved = try await AgentSessionStorage(root: root).load(sessionID: "s", legacyPath: nil)
+        #expect(!saved.contains { $0["content"]?.stringValue?.contains("第二个问题") == true })
+    }
 }
 
 private actor PromptBox {

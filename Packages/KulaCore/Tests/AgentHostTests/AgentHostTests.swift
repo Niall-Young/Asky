@@ -297,6 +297,25 @@ func finalState(_ events: [AgentEvent]) -> AgentTaskState? {
         #expect(finalState(events) == .awaitingInput)
         await host.shutdown()
     }
+
+    @Test func steerQueuesBeforeDispatchAndForwardsSteerAccepted() async {
+        let (host, launches) = makeHost(script: { msg, reply, _ in
+            guard msg["type"]?.stringValue == "steer",
+                  let taskID = msg["taskID"]?.stringValue,
+                  let steerID = msg["request"]?["taskID"]?.stringValue else { return }
+            reply(["type": "steerAccepted", "taskID": .string(taskID), "steerIDs": [.string(steerID)]])
+            reply(["type": "message", "taskID": .string(taskID), "text": "merged"])
+            reply(["type": "taskState", "taskID": .string(taskID), "state": "completed"])
+        })
+        let stream = await host.submit(AgentRequest(sessionID: "s", taskID: "t1", text: "first"))
+        let accepted = await host.steer(taskID: "t1", AgentRequest(sessionID: "s", taskID: "m2", text: "second"))
+        #expect(accepted)
+        let events = await collect(stream)
+        #expect(events.contains(.steerAccepted(taskID: "t1", steerIDs: ["m2"])))
+        #expect(finalState(events) == .completed)
+        #expect(launches.last?.seenTypes.contains("steer") == true)
+        await host.shutdown()
+    }
 }
 
 @Suite struct WireProtocolTests {
@@ -323,5 +342,16 @@ func finalState(_ events: [AgentEvent]) -> AgentTaskState? {
         #expect(d.last == 0x0A)
         let p = try HostMessage.prompt(AgentRequest(sessionID: "s", text: "t"), sessionFile: nil).encoded()
         #expect(!String(decoding: p, as: UTF8.self).contains("SECRET"))
+    }
+
+    @Test func encodesSteerAndDecodesSteerAccepted() throws {
+        let frame = try HostMessage.steer(taskID: "t1", AgentRequest(sessionID: "s", taskID: "m2", text: "补充一句")).encoded()
+        let decoded = try JSONDecoder().decode(JSONValue.self, from: frame)
+        #expect(decoded["type"] == "steer" && decoded["taskID"] == "t1")
+        #expect(decoded["request"]?["taskID"] == "m2" && decoded["request"]?["text"] == "补充一句")
+
+        let replyLine = Data(#"{"type":"steerAccepted","taskID":"t1","steerIDs":["m2","m3"]}"#.utf8)
+        let parsed = try RuntimeMessage.decode(replyLine)
+        #expect(parsed == .steerAccepted(taskID: "t1", steerIDs: ["m2", "m3"]))
     }
 }

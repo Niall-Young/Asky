@@ -100,6 +100,7 @@ public enum AgentEvent: Sendable, Hashable {
     case toolResult(taskID: String, ExecutionResult)
     case clarification(taskID: String, question: String)
     case confirmationRequired(taskID: String, ConfirmationRequest)
+    case steerAccepted(taskID: String, steerIDs: [String])
     case error(taskID: String?, String)
     case runtimeExited(code: Int32)
 }

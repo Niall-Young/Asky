@@ -100,6 +100,12 @@ final class AppModel {
     let updater = AppUpdater()
     private(set) var agent: AgentHost?
     private(set) var agentUnavailableReason: String?
+
+    #if DEBUG
+    func replaceAgentForTesting(_ host: AgentHost?) {
+        agent = host
+    }
+    #endif
     private var mcpServer: MCPLinkServer?
     private(set) var mcpServerError: String?
 

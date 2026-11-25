@@ -255,6 +255,219 @@ enum AgentReplyRegression {
         print("Composer Backspace passed: attachment, mixed tags, undo, redo and subsequent typing")
     }
 
+    static func midRunSendRegression(app: AppModel) async throws {
+        actor ScriptedTurns {
+            enum Step: Sendable {
+                case immediate(NativeCompletion)
+                case gated(NativeCompletion)
+            }
+            private var steps: [Step]
+            private(set) var requests: [JSONValue] = []
+            private var startedContinuation: AsyncStream<Int>.Continuation?
+            private var gateWaiter: CheckedContinuation<Void, Never>?
+            private var gateReleased = false
+
+            init(_ steps: [Step]) { self.steps = steps }
+
+            func setStartedSink(_ sink: AsyncStream<Int>.Continuation) {
+                startedContinuation = sink
+            }
+
+            func releaseGate() {
+                if let waiter = gateWaiter {
+                    gateWaiter = nil
+                    waiter.resume()
+                } else {
+                    gateReleased = true
+                }
+            }
+
+            func respond(_ request: URLRequest, delta: @Sendable (String) -> Void) async throws -> NativeCompletion {
+                let body = try JSONDecoder().decode(JSONValue.self, from: request.httpBody ?? Data())
+                requests.append(body)
+                let index = requests.count
+                let step = steps.removeFirst()
+                startedContinuation?.yield(index)
+                switch step {
+                case .immediate(let reply):
+                    if !reply.text.isEmpty { delta(reply.text) }
+                    return reply
+                case .gated(let reply):
+                    if gateReleased {
+                        gateReleased = false
+                    } else {
+                        await withCheckedContinuation { gateWaiter = $0 }
+                    }
+                    try Task.checkCancellation()
+                    if !reply.text.isEmpty { delta(reply.text) }
+                    return reply
+                }
+            }
+        }
+
+        let (toolStarted, toolStartedSink) = AsyncStream<Void>.makeStream()
+        let (toolResume, toolResumeSink) = AsyncStream<Void>.makeStream()
+        let (modelStarted, modelStartedSink) = AsyncStream<Int>.makeStream()
+
+        let searchCall: JSONValue = [
+            "id": "call_baidu",
+            "type": "function",
+            "function": ["name": "web_search", "arguments": "{\"query\":\"百度\"}"]
+        ]
+        let script = ScriptedTurns([
+            // Scenario 1: tool round accepts mid-run steer
+            .immediate(NativeCompletion(text: "查一下百度现在的实际处境再聊。", calls: [searchCall])),
+            .immediate(NativeCompletion(text: "百度和字节都在这里回答了。")),
+            // Scenario 2: late mid-run send during final reply triggers automatic follow-up
+            .gated(NativeCompletion(text: "这是第一个问题的回答。")),
+            .immediate(NativeCompletion(text: "这是自动续答第二个问题的回答。")),
+            // Scenario 3: explicit stop discards unconsumed follow-up
+            .gated(NativeCompletion(text: "不会被发出的回答。"))
+        ])
+        await script.setStartedSink(modelStartedSink)
+
+        let webTool = ToolDefinition(name: "web_search", summary: "search", source: .web,
+                                     effect: .read, confirmation: .never, externallyExposable: false)
+        let storage = AgentSessionStorage(root: app.store.root.appending(path: "runtime"))
+        let host = AgentHost(
+            launcher: {
+                NativeRuntime(storage: storage, client: NativeModelClient(transport: { request, delta in
+                    try await script.respond(request, delta: delta)
+                }))
+            },
+            configProvider: { RuntimeLaunchConfig(baseURL: "https://example.test/v1", model: "mock", apiKey: "secret") },
+            toolsProvider: { [webTool] },
+            toolHandler: { request in
+                toolStartedSink.yield(())
+                for await _ in toolResume { break }
+                return ExecutionResult(requestID: request.requestID, status: .completed, output: ["results": []])
+            }
+        )
+        app.modelConfiguration = ModelConfiguration(baseURL: URL(string: "https://example.test/v1")!,
+                                                    modelName: "mock", credentialRef: "mock-key")
+        app.replaceAgentForTesting(host)
+        defer { Task { await host.shutdown() } }
+
+        let model = AgentModel(app: app)
+        let controller = AgentWindowController(model: model, presentation: WindowPresentation())
+        controller.show()
+        let window = NSApplication.shared.windows.last { $0.title == "Asky AI" }!
+        defer { window.orderOut(nil) }
+        try await Task.sleep(for: .milliseconds(350))
+
+        func pressReturn() {
+            let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
+                timestamp: 0, windowNumber: window.windowNumber, context: nil,
+                characters: "\r", charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 36)!
+            window.sendEvent(event)
+        }
+
+        func waitUntil(_ condition: () -> Bool) async throws {
+            for _ in 0..<200 {
+                if condition() { return }
+                try await Task.sleep(for: .milliseconds(25))
+            }
+            preconditionFailure("Timed out waiting for mid-run send condition")
+        }
+
+        guard let editor = window.firstResponder as? NSTextView else {
+            preconditionFailure("Expected focused ComposerTextView")
+        }
+
+        precondition(model.composerPrimaryAction == .send(enabled: false), "Idle empty composer must show disabled Send")
+
+        // 1. Mid-run steer during tool execution + dynamic Stop/Send button switching + Return key submission
+        editor.insertText("我很好奇百度为啥现在不行了", replacementRange: editor.selectedRange())
+        try await Task.sleep(for: .milliseconds(80))
+        precondition(model.composerPrimaryAction == .send(enabled: true), "Idle non-empty composer must show enabled Send")
+        pressReturn()
+        for await _ in toolStarted { break }
+        try await waitUntil { model.isRunning && model.items.contains { $0.kind == .toolNarration } }
+        try await Task.sleep(for: .milliseconds(120))
+        precondition(model.composerPrimaryAction == .stop,
+                     "Empty composer while running must show Stop button")
+
+        editor.insertText("也好奇字节是怎么起来的", replacementRange: editor.selectedRange())
+        try await Task.sleep(for: .milliseconds(120))
+        precondition(model.isRunning && model.canSend)
+        precondition(model.composerPrimaryAction == .send(enabled: true),
+                     "Non-empty composer while running must switch button to Send")
+
+        pressReturn()
+        try await Task.sleep(for: .milliseconds(120))
+        precondition(model.isComposerEmpty, "Mid-run send must clear composer")
+        precondition(model.items.last?.kind == .user && model.items.last?.text == "也好奇字节是怎么起来的",
+                     "Mid-run user message must appear immediately in transcript")
+        precondition(model.composerPrimaryAction == .stop,
+                     "Clearing composer after mid-run send must restore Stop button while still running")
+        // Pressing Return on an empty composer while running must NOT stop generation.
+        pressReturn()
+        try await Task.sleep(for: .milliseconds(80))
+        precondition(model.isRunning, "Return on empty composer while running must not cancel generation")
+
+        window.contentView?.layoutSubtreeIfNeeded()
+        toolResumeSink.yield(())
+        try await waitUntil { !model.isRunning }
+        try await Task.sleep(for: .milliseconds(120))
+        let replies1 = model.items.filter { $0.kind == .assistant }.map(\.text)
+        precondition(replies1 == ["百度和字节都在这里回答了。"], "Steered turn must finish in one combined reply, got \(replies1)")
+        let reqCount1 = await script.requests.count
+        precondition(reqCount1 == 2, "Steer accepted mid-turn must not trigger a duplicate follow-up turn")
+
+        // 2. Late mid-run send during final reply triggers automatic follow-up without duplicating user bubble
+        var modelIterator = modelStarted.makeAsyncIterator()
+        _ = await modelIterator.next() // request 1
+        _ = await modelIterator.next() // request 2
+
+        editor.insertText("第一个独立问题", replacementRange: editor.selectedRange())
+        try await Task.sleep(for: .milliseconds(80))
+        model.send()
+        let req3 = await modelIterator.next()
+        precondition(req3 == 3)
+
+        editor.insertText("第二个紧接的问题", replacementRange: editor.selectedRange())
+        try await Task.sleep(for: .milliseconds(80))
+        model.send()
+        precondition(model.isRunning && model.items.last?.text == "第二个紧接的问题")
+
+        await script.releaseGate()
+        let req4 = await modelIterator.next()
+        precondition(req4 == 4, "Unconsumed mid-run message must automatically trigger a follow-up turn")
+        try await waitUntil { !model.isRunning }
+        try await Task.sleep(for: .milliseconds(120))
+
+        let user2Count = model.items.filter { $0.kind == .user && $0.text == "第二个紧接的问题" }.count
+        precondition(user2Count == 1, "Follow-up turn must not duplicate the user bubble (count=\(user2Count))")
+        let storedUser2Count = ConversationStore(app.store).timeline(limit: 40).filter { $0.role == "user" && $0.text == "第二个紧接的问题" }.count
+        precondition(storedUser2Count == 1, "Follow-up turn must not duplicate the stored user message (count=\(storedUser2Count))")
+        let allAssistantTexts = model.items.filter { $0.kind == .assistant }.map(\.text)
+        precondition(allAssistantTexts.suffix(2) == ["这是第一个问题的回答。", "这是自动续答第二个问题的回答。"],
+                     "Expected both first answer and auto follow-up answer, got \(allAssistantTexts)")
+        let req4Messages = (await script.requests[3])["messages"]?.arrayValue ?? []
+        let req4UserText = req4Messages.last?["content"]?.stringValue ?? ""
+        precondition(req4UserText.contains("这是第一个问题的回答。") && req4UserText.hasSuffix("第二个紧接的问题"),
+                     "Follow-up turn must include prior reply in history and current prompt as user text")
+
+        // 3. Explicit stop clears unconsumed follow-up
+        editor.insertText("会被停止的问题", replacementRange: editor.selectedRange())
+        try await Task.sleep(for: .milliseconds(80))
+        model.send()
+        let req5 = await modelIterator.next()
+        precondition(req5 == 5)
+        editor.insertText("停止后不该自动续答", replacementRange: editor.selectedRange())
+        try await Task.sleep(for: .milliseconds(80))
+        model.send()
+        model.stop()
+        try await waitUntil { !model.isRunning }
+        await script.releaseGate()
+        try await Task.sleep(for: .milliseconds(150))
+        let reqCountFinal = await script.requests.count
+        precondition(reqCountFinal == 5, "Explicit Stop must cancel unconsumed follow-ups")
+        precondition(model.items.last?.kind == .notice, "Stopped turn must record cancelled notice")
+
+        print("Mid-run send regression passed: dynamic Stop/Send button, tool-boundary steer, auto follow-up without duplication, and explicit Stop")
+    }
+
     static func inlineTagAlignmentRegression(app: AppModel, capturePath: String?) async throws {
         let store = ConversationStore(app.store)
         let cid = try store.create(title: "Inline tag alignment")
@@ -3428,6 +3641,10 @@ enum AgentReplyRegression {
         }
         if CommandLine.arguments.contains("--tool-result-cards") {
             try await toolResultCardsRegression(app: app)
+            return
+        }
+        if CommandLine.arguments.contains("--mid-run-send") {
+            try await midRunSendRegression(app: app)
             return
         }
         if CommandLine.arguments.contains("--table-fade-preview") {

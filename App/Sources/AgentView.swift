@@ -57,7 +57,9 @@ final class AgentWindowController {
         }
         bringToFront()
         if let prompt {
-            if model.isRunning { model.draft = prompt } else {
+            if model.isRunning {
+                model.submitPrompt(prompt)
+            } else {
                 model.draft = prompt
                 model.send()
             }
@@ -638,18 +640,34 @@ private struct Transcript: View {
 
     private var groups: [ChatResponseGroup] {
         var result: [ChatResponseGroup] = []
+        var segmentCounts: [String: Int] = [:]
+        var lastBaseID: String?
         for item in items {
-            let id = item.responseID ?? item.id
-            if result.last?.id == id {
+            let baseID = item.responseID ?? item.id
+            if lastBaseID == baseID, !result.isEmpty {
                 result[result.count - 1].items.append(item)
             } else {
-                result.append(ChatResponseGroup(id: id, items: [item]))
+                let occurrence = segmentCounts[baseID, default: 0]
+                segmentCounts[baseID] = occurrence + 1
+                let groupID = occurrence == 0 ? baseID : "\(baseID)#\(occurrence)"
+                result.append(ChatResponseGroup(id: groupID, items: [item]))
+                lastBaseID = baseID
             }
         }
         if isRunning, let id = taskID {
-            if result.last?.id != id { result.append(ChatResponseGroup(id: id, items: [])) }
+            for index in result.indices where result[index].items.first?.responseID == id {
+                result[index].isRunning = true
+                result[index].suppressThinkingIndicator = true
+            }
+            if lastBaseID != id {
+                let occurrence = segmentCounts[id, default: 0]
+                segmentCounts[id] = occurrence + 1
+                let groupID = occurrence == 0 ? id : "\(id)#\(occurrence)"
+                result.append(ChatResponseGroup(id: groupID, items: []))
+            }
             result[result.count - 1].startedAt = taskStartedAt
             result[result.count - 1].isRunning = true
+            result[result.count - 1].suppressThinkingIndicator = false
             result[result.count - 1].streaming = streaming
             result[result.count - 1].state = state
         }
@@ -1043,7 +1061,7 @@ private struct ModernTranscriptScroll<Content: View>: View {
         }
         .onChange(of: completedReplyID) { oldID, newID in
             viewport.followsLatestContent = false
-            if let newID, newID != oldID, !isWaiting, !viewport.readerMoved {
+            if let newID, newID != oldID, !viewport.readerMoved {
                 bottomTask?.cancel()
                 submissionTask?.cancel()
                 replyTask?.cancel()
@@ -1227,7 +1245,7 @@ private struct LegacyTranscriptScroll<Content: View>: View {
         }
         .onChange(of: completedReplyID) { oldID, newID in
             viewport.followsLatestContent = false
-            if let newID, newID != oldID, !isWaiting, !viewport.readerMoved {
+            if let newID, newID != oldID, !viewport.readerMoved {
                 bottomTask?.cancel()
                 submissionTask?.cancel()
                 replyTask?.cancel()
@@ -1270,6 +1288,7 @@ struct ChatResponseGroup: Identifiable {
     var isRunning = false
     var state: AgentTaskState?
     var streaming = ""
+    var suppressThinkingIndicator = false
 
     var tools: [ChatItem] { items.filter { if case .tool = $0.kind { true } else { false } } }
     var steps: [ChatItem] {
@@ -1299,7 +1318,7 @@ struct ChatResponseGroup: Identifiable {
         return primary + cards
     }
     var workSeconds: Int? { items.compactMap(\.workSeconds).last }
-    var showsThinkingIndicator: Bool { isRunning }
+    var showsThinkingIndicator: Bool { isRunning && !suppressThinkingIndicator }
     var activityLabel: String {
         if state == .running || state == .starting || state == nil {
             if let tool = tools.last(where: { $0.kind == .tool(nil) }) {
@@ -1993,12 +2012,14 @@ private struct Composer: View {
                 .accessibilityLabel(NSLocalizedString("选择文件或图片", comment: ""))
                 Spacer()
                 ApprovalModePicker(model: model, showing: $showingApprovalMenu)
-                Button { if model.isRunning { model.stop() } else { submitDraft() } } label: {
-                    Image(mingCute: model.isRunning ? "stop.fill" : "arrow.up", size: 14).frame(width: 28, height: 28)
+                let primaryAction = model.composerPrimaryAction
+                let showsStop = primaryAction == .stop
+                Button { if showsStop { model.stop() } else { submitDraft() } } label: {
+                    Image(mingCute: showsStop ? "stop.fill" : "arrow.up", size: 14).frame(width: 28, height: 28)
                 }
                 .buttonStyle(ComposerSubmitButtonStyle(color: model.avatarColor.tint))
-                .disabled(!model.isRunning && !model.canSend)
-                .accessibilityLabel(model.isRunning ? NSLocalizedString("停止生成", comment: "") : NSLocalizedString("发送消息", comment: ""))
+                .disabled(primaryAction == .send(enabled: false))
+                .accessibilityLabel(showsStop ? NSLocalizedString("停止生成", comment: "") : NSLocalizedString("发送消息", comment: ""))
             }
             .padding(.horizontal, 8)
         }
