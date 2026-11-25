@@ -21,6 +21,11 @@ enum ModelProviderRegression {
         assert(legacy.baseURL == "https://proxy.example/v1" && legacy.model == "my-model")
         let oldModel = ModelConfigurationDraft(provider: "deepseek", baseURL: "https://api.deepseek.com", model: "deepseek-chat")
         assert(oldModel.provider == "custom" && oldModel.model == "deepseek-chat")
+        let glmLegacy = ModelConfigurationDraft(provider: "glm", baseURL: "https://open.bigmodel.cn/api/paas/v4", model: "glm-5.3")
+        assert(glmLegacy.provider == "glm" && glmLegacy.model == "glm-5.3")
+        fresh.select("glm")
+        assert(fresh.model == "glm-5.3-flash")
+        assert(ModelProviderPreset.find("glm")?.models == ["glm-5.3-flash", "glm-5.3-flashx", "glm-5.3", "glm-5.4"])
         fresh.select("minimax")
         let base = fresh.baseURL
         fresh.select("custom")
