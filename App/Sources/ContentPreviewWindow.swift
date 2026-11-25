@@ -1,5 +1,4 @@
 import AppKit
-import MarkdownUI
 import SwiftUI
 import ToolService
 
@@ -262,16 +261,9 @@ private struct PreviewMarkdown: View {
     let directory: URL
 
     var body: some View {
-        let images = PreviewMarkdownImages(directory: directory)
+        // Same Markdown styling as AI chat replies; the directory scopes relative images.
         ScrollView {
-            Markdown(text, baseURL: directory, imageBaseURL: directory)
-                .markdownTheme(Theme.gitHub.text {
-                    ForegroundColor(.primary)
-                    FontSize(15)
-                })
-                .markdownImageProvider(images)
-                .markdownInlineImageProvider(images)
-                .textSelection(.enabled)
+            ChatMarkdownView(text: text, fileDirectory: directory)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 24)
                 .padding(.vertical, 12)
@@ -284,22 +276,8 @@ private struct PreviewMarkdown: View {
     }
 }
 
-private struct PreviewMarkdownImages: ImageProvider, InlineImageProvider {
-    let directory: URL
-
-    func makeImage(url: URL?) -> some View {
-        PreviewMarkdownBlockImage(url: url, directory: directory)
-    }
-
-    func image(with url: URL, label: String) async throws -> Image {
-        guard let image = await PreviewFile.loadMarkdownImage(at: url, in: directory, maxPixelSize: 24) else {
-            throw CocoaError(.fileReadUnknown)
-        }
-        return Image(image, scale: 2, label: Text(label))
-    }
-}
-
-private struct PreviewMarkdownBlockImage: View {
+/// Block image inside a previewed Markdown file; reads stay inside the file's directory.
+struct PreviewMarkdownBlockImage: View {
     let url: URL?
     let directory: URL
     @State private var image: CGImage?

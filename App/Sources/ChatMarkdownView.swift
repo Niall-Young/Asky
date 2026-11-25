@@ -4,17 +4,26 @@ import MarkdownUI
 import Theme
 import ToolService
 
-/// Shared by live replies and reopened history; the stored content remains Markdown source.
+/// Shared by live replies, reopened history and local file previews; the stored content remains Markdown source.
 struct ChatMarkdownView: View, Equatable {
     let text: String
+    /// Set for local Markdown files: relative images resolve inside this directory,
+    /// and chat-only rewrites (math, photo galleries) are skipped so file content renders as written.
+    var fileDirectory: URL? = nil
     @State private var selectionGroup = ChatSelectionGroup()
     @Environment(\.colorScheme) private var colorScheme
 
-    nonisolated static func == (lhs: Self, rhs: Self) -> Bool { lhs.text == rhs.text }
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.text == rhs.text && lhs.fileDirectory == rhs.fileDirectory
+    }
 
     private static let bodyStyle = TextStyle(size: 14, weight: 400, mode: .default)
 
     private var galleryParts: [ChatGalleryPart] {
+        if fileDirectory != nil {
+            let trimmed = text.trimmingCharacters(in: .newlines)
+            return trimmed.isEmpty ? [] : [.markdown(trimmed)]
+        }
         let mathMarkdown = (text.contains("$") || text.contains("\\(") || text.contains("\\["))
             ? ChatMath.markdown(text) : text
         if mathMarkdown.contains("![") || mathMarkdown.contains("<!-- end list -->") {
@@ -38,7 +47,8 @@ struct ChatMarkdownView: View, Equatable {
     }
 
     private func markdown(_ content: String) -> some View {
-        Markdown(content)
+        let fileDirectory = fileDirectory
+        return Markdown(content, baseURL: fileDirectory, imageBaseURL: fileDirectory)
             // The default theme is basic; setting it here would override the block styles below.
             .markdownTextStyle {
                 FontSize(Self.bodyStyle.size)
@@ -54,7 +64,8 @@ struct ChatMarkdownView: View, Equatable {
             .markdownBlockStyle(\.paragraph) { configuration in
                 let rendered = configuration.content.renderMarkdown()
                 Group {
-                    if rendered.contains("!["), ChatInlineText.isImageOnly(rendered) {
+                    // Local file images load through MarkdownUI's resolved URLs, not the chat image cache.
+                    if rendered.contains("!["), fileDirectory != nil || ChatInlineText.isImageOnly(rendered) {
                         configuration.label
                     } else {
                         ChatInlineText(markdown: rendered)
@@ -136,8 +147,9 @@ struct ChatMarkdownView: View, Equatable {
             // Grid spacing is read by TableView before its themed label is built.
             .markdownTableBorderStyle(.init(.horizontalBorders,
                 color: ThemeColor("border").color(for: colorScheme), width: 0))
-            .markdownImageProvider(ChatImageProvider())
-            .markdownInlineImageProvider(ChatInlineImageProvider(color: NSColor(ThemeColor("text").color(for: colorScheme))))
+            .markdownImageProvider(ChatImageProvider(fileDirectory: fileDirectory))
+            .markdownInlineImageProvider(ChatInlineImageProvider(color: NSColor(ThemeColor("text").color(for: colorScheme)),
+                                                                 fileDirectory: fileDirectory))
             .textSelection(.enabled)
             .environment(\.chatSelectionGroup, selectionGroup)
     }
@@ -1169,15 +1181,29 @@ private struct ChatCodeBlock: View {
 }
 
 private struct ChatImageProvider: ImageProvider {
+    var fileDirectory: URL? = nil
+
     @ViewBuilder func makeImage(url: URL?) -> some View {
-        if let formula = ChatMath.formula(url) { ChatMathBlock(formula: formula) }
+        if let fileDirectory { PreviewMarkdownBlockImage(url: url, directory: fileDirectory) }
+        else if let formula = ChatMath.formula(url) { ChatMathBlock(formula: formula) }
         else if let url { ChatImageGallery(images: [ChatGalleryImage(url: url, label: "")]) }
     }
 }
 
 private struct ChatInlineImageProvider: InlineImageProvider {
     let color: NSColor
+    var fileDirectory: URL? = nil
+
     func image(with url: URL, label: String) async throws -> Image {
+        if let fileDirectory {
+            guard let image = await PreviewFile.loadMarkdownImage(at: url, in: fileDirectory, maxPixelSize: 56) else {
+                if Task.isCancelled { throw CancellationError() }
+                return Image(mingCute: "photo")
+            }
+            let height: CGFloat = 14
+            return Image(nsImage: NSImage(cgImage: image, size: NSSize(
+                width: height * CGFloat(image.width) / CGFloat(max(1, image.height)), height: height)))
+        }
         if let formula = ChatMath.formula(url) {
             return await MainActor.run {
                 if let rendered = ChatMathRenderer.render(formula, color: color) { return Image(nsImage: rendered.image) }
