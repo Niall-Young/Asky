@@ -89,11 +89,13 @@
     "ChatCopy": "custom/copy",
     "Settings-advanced": "settings_3",
     "Settings-model": "ai",
+    "Settings-data": "custom/bot-message-square",
+    "Settings-mcp": "mcp",
     "Settings-hotkey": "keyboard",
     "Settings-aliases": "command",
     "Settings-keywords": "terminal_box",
     "Settings-terminal": "terminal",
-    "Settings-sources": "layers",
+    "Settings-sources": "coin_2",
     "Settings-permissions": "shield",
     "Settings-plugins": "plugin_2",
     "Settings-about": "information",
@@ -103,6 +105,7 @@
   },
   "customIcons": {
     "approval-hand": "App/Artwork/approval-hand.svg",
+    "bot-message-square": "App/Artwork/bot-message-square.svg",
     "copy": "App/Artwork/copy.svg",
     "menu-2-lines": "App/Artwork/menu-2-lines.svg"
   }

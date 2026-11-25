@@ -76,7 +76,13 @@ enum SettingsRegression {
                 if CommandLine.arguments.contains("--agent-prompt") {
                     defer { try? FileManager.default.removeItem(at: root) }
                     precondition(SettingsPage.data.title == NSLocalizedString("智能体", comment: ""))
-                    precondition(SettingsPage.data.iconAsset == "MingCute-brain")
+                    precondition(SettingsPage.model.iconAsset == "Settings-model")
+                    precondition(SettingsPage.data.iconAsset == "Settings-data")
+                    precondition(SettingsPage.sources.iconAsset == "Settings-sources")
+                    precondition(SettingsPage.mcp.iconAsset == "Settings-mcp")
+                    for page in [SettingsPage.model, .data, .sources, .mcp] {
+                        precondition(NSImage(named: page.iconAsset) != nil, "Missing settings icon asset: \(page.iconAsset)")
+                    }
                     precondition(model.settings.agentSystemPrompt == nil)
                     precondition(!model.settings.hasCustomAgentSystemPrompt)
                     precondition(model.settings.effectiveAgentSystemPrompt == NativeAgentPrompt.defaultSystemPrompt)

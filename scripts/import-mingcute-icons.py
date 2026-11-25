@@ -53,5 +53,5 @@ for asset, icon in manifest["assets"].items():
 license_dir = root / "App/Resources/ThirdParty/MingCute"
 license_dir.mkdir(parents=True, exist_ok=True)
 shutil.copyfile(upstream / "LICENSE", license_dir / "LICENSE")
-(license_dir / "NOTICE").write_text(f"MingCute Icons\n{manifest['repository']}\nRevision: {manifest['revision']}\nCopyright MingCute Design\nSelected SVGs are redistributed without modification under Apache-2.0.\nAutomatic approval and copy use project owner supplied MingCute hand_line and copy_2_line SVGs. Opaque color suffixes are normalized for asset catalog compatibility.\n")
+(license_dir / "NOTICE").write_text(f"MingCute Icons\n{manifest['repository']}\nRevision: {manifest['revision']}\nCopyright MingCute Design\nSelected SVGs are redistributed without modification under Apache-2.0.\nAutomatic approval and copy use project owner supplied MingCute hand_line and copy_2_line SVGs. bot_message_square is imported from MingCute Icons revision 9dc7d3ad074fb16477096a6a8109a6467d0e2fe3 under Apache-2.0. Opaque color suffixes are normalized for asset catalog compatibility.\n")
 print(f"Imported {len(set(manifest['symbols'].values()))} MingCute symbols and {len(manifest['assets'])} existing asset aliases.")

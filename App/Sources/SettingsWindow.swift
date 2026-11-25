@@ -46,11 +46,7 @@ enum SettingsPage: String, CaseIterable, Identifiable {
         }
     }
     var iconAsset: String {
-        switch self {
-        case .mcp: "MingCute-link"
-        case .data: "MingCute-brain"
-        default: "Settings-" + rawValue
-        }
+        "Settings-" + rawValue
     }
     var color: Color {
         switch self {
