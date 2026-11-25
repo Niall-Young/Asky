@@ -73,6 +73,116 @@ enum SettingsRegression {
                     try await assertClearHistoryDialog(model)
                     exit(0)
                 }
+                if CommandLine.arguments.contains("--choice-menu") {
+                    defer { try? FileManager.default.removeItem(at: root) }
+                    let window = SettingsWindow.make(app: model)
+                    let presentation = WindowPresentation()
+                    presentation.show(window)
+                    window.makeKeyAndOrderFront(nil)
+                    NSApp.activate(ignoringOtherApps: true)
+                    try await Task.sleep(for: .milliseconds(350))
+
+                    @MainActor func findPopUp(in view: NSView) -> NSPopUpButton? {
+                        if let button = view as? NSPopUpButton { return button }
+                        return view.subviews.lazy.compactMap { findPopUp(in: $0) }.first
+                    }
+                    @MainActor func findChoice(titles: [String], in view: NSView) -> SettingsChoiceAnchorView? {
+                        if let anchor = view as? SettingsChoiceAnchorView, anchor.itemTitles == titles { return anchor }
+                        return view.subviews.lazy.compactMap { findChoice(titles: titles, in: $0) }.first
+                    }
+                    @MainActor func firstChoice(in view: NSView) -> SettingsChoiceAnchorView? {
+                        if let anchor = view as? SettingsChoiceAnchorView { return anchor }
+                        return view.subviews.lazy.compactMap { firstChoice(in: $0) }.first
+                    }
+                    @MainActor func captureWindow(_ name: String) throws {
+                        window.contentView?.layoutSubtreeIfNeeded()
+                        let rect = window.frame
+                        let screenHeight = NSScreen.screens.first?.frame.maxY ?? 900
+                        let capture = Process()
+                        capture.executableURL = URL(filePath: "/usr/sbin/screencapture")
+                        capture.arguments = [
+                            "-x", "-R",
+                            "\(Int(rect.minX)),\(Int(screenHeight - rect.maxY)),\(Int(rect.width)),\(Int(rect.height))",
+                            "build/\(name).png"
+                        ]
+                        try capture.run()
+                        capture.waitUntilExit()
+                        if capture.terminationStatus != 0 {
+                            let view = window.contentView!
+                            guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { fatalError("capture") }
+                            view.cacheDisplay(in: view.bounds, to: bitmap)
+                            try bitmap.representation(using: .png, properties: [:])!.write(to: URL(filePath: "build/\(name).png"))
+                        }
+                    }
+
+                    let styleLabels = ["亲和", "严谨"].map { NSLocalizedString($0, comment: "") }
+                    let themeLabels = ["跟随系统", "浅色", "深色"].map { NSLocalizedString($0, comment: "") }
+
+                    for appearance in ["light", "dark"] {
+                        model.preferences.appearance = appearance
+                        model.settingsTab = SettingsPage.data.rawValue
+                        try await Task.sleep(for: .milliseconds(450))
+                        precondition(findPopUp(in: window.contentView!) == nil, "SettingsChoice must not render NSPopUpButton")
+
+                        let styleChoice = findChoice(titles: styleLabels, in: window.contentView!)!
+                        precondition(styleChoice.selectedIndex == 0)
+                        try captureWindow("settings-choice-data-closed-\(appearance)")
+
+                        styleChoice.openMenu()
+                        try await Task.sleep(for: .milliseconds(350))
+                        guard let overlay = SettingsChoicePresenter.shared.activeOverlay else {
+                            fatalError("Opening SettingsChoice must mount SettingsChoiceOverlay")
+                        }
+                        precondition(overlay.superview === window.contentView, "Overlay must mount directly on window.contentView")
+                        precondition(overlay.model.isExpanded, "Overlay must transition to expanded state")
+                        precondition(styleChoice.isMenuOpen, "In-place trigger must report open state")
+                        try captureWindow("settings-choice-data-open-\(appearance)")
+
+                        overlay.model.onSelect(1)
+                        try await Task.sleep(for: .milliseconds(350))
+                        precondition(model.settings.agentPromptStyle == .rigorous)
+                        precondition(SettingsChoicePresenter.shared.activeOverlay == nil, "Selecting an option must tear down overlay after closing morph")
+                        precondition(!styleChoice.isMenuOpen, "In-place trigger must restore after closing morph")
+
+                        // Reset back to friendly via open + dismiss verification
+                        styleChoice.openMenu()
+                        try await Task.sleep(for: .milliseconds(300))
+                        precondition(SettingsChoicePresenter.shared.activeOverlay != nil)
+                        styleChoice.closeMenu()
+                        try await Task.sleep(for: .milliseconds(320))
+                        precondition(SettingsChoicePresenter.shared.activeOverlay == nil, "Closing menu must remove overlay")
+                        model.settings.agentPromptStyle = .friendly
+
+                        // General page (Appearance + Language)
+                        model.settingsTab = SettingsPage.general.rawValue
+                        try await Task.sleep(for: .milliseconds(400))
+                        precondition(findPopUp(in: window.contentView!) == nil)
+                        let themeChoice = findChoice(titles: themeLabels, in: window.contentView!)!
+                        themeChoice.openMenu()
+                        try await Task.sleep(for: .milliseconds(350))
+                        precondition(SettingsChoicePresenter.shared.activeOverlay?.model.isExpanded == true)
+                        try captureWindow("settings-choice-general-open-\(appearance)")
+                        themeChoice.closeMenu()
+                        try await Task.sleep(for: .milliseconds(300))
+
+                        // Terminal page (icons in trigger & menu)
+                        model.settingsTab = SettingsPage.terminal.rawValue
+                        try await Task.sleep(for: .milliseconds(400))
+                        precondition(findPopUp(in: window.contentView!) == nil)
+                        if let terminalChoice = firstChoice(in: window.contentView!) {
+                            terminalChoice.openMenu()
+                            try await Task.sleep(for: .milliseconds(350))
+                            precondition(SettingsChoicePresenter.shared.activeOverlay?.model.isExpanded == true)
+                            try captureWindow("settings-choice-terminal-open-\(appearance)")
+                            terminalChoice.closeMenu()
+                            try await Task.sleep(for: .milliseconds(300))
+                        }
+                    }
+
+                    print("Settings choice menu: morphing glass overlay, zero NSPopUpButton, selection, close and light/dark renders passed")
+                    window.close()
+                    exit(0)
+                }
                 if CommandLine.arguments.contains("--agent-prompt") {
                     defer { try? FileManager.default.removeItem(at: root) }
                     precondition(SettingsPage.data.title == NSLocalizedString("智能体", comment: ""))
@@ -115,11 +225,11 @@ enum SettingsRegression {
                         allButtons(in: view).first { $0.title == title }
                     }
                     let styleLabels = ["亲和", "严谨"].map { NSLocalizedString($0, comment: "") }
-                    @MainActor func stylePopup(in view: NSView) -> NSPopUpButton? {
-                        if let popup = view as? NSPopUpButton, popup.itemTitles == styleLabels {
-                            return popup
+                    @MainActor func styleChoice(in view: NSView) -> SettingsChoiceAnchorView? {
+                        if let choice = view as? SettingsChoiceAnchorView, choice.itemTitles == styleLabels {
+                            return choice
                         }
-                        return view.subviews.lazy.compactMap { stylePopup(in: $0) }.first
+                        return view.subviews.lazy.compactMap { styleChoice(in: $0) }.first
                     }
                     @MainActor func customEditor(in view: NSView) -> NSTextView? {
                         if let textView = view as? NSTextView,
@@ -139,8 +249,8 @@ enum SettingsRegression {
                     // No raw system prompt edit/collapse button; custom prompt editor starts empty.
                     precondition(button(titled: NSLocalizedString("编辑", comment: ""), in: window.contentView!) == nil,
                                  "Legacy raw system prompt edit button must not appear")
-                    let popup = stylePopup(in: window.contentView!)!
-                    precondition(popup.indexOfSelectedItem == 0)
+                    let choice = styleChoice(in: window.contentView!)!
+                    precondition(choice.selectedIndex == 0)
                     let editor = customEditor(in: window.contentView!)!
                     precondition(editor.string.isEmpty, "Custom prompt editor must start empty and never leak built-in prompt")
                     if let host = editor.enclosingScrollView {
@@ -160,8 +270,7 @@ enum SettingsRegression {
                     try await Task.sleep(for: .milliseconds(250))
 
                     // Switch style to 严谨 and verify persistence.
-                    popup.selectItem(at: 1)
-                    _ = popup.sendAction(popup.action, to: popup.target)
+                    choice.selectItem(at: 1)
                     try await Task.sleep(for: .milliseconds(150))
                     precondition(model.settings.agentPromptStyle == .rigorous)
                     let reloadedStyle = try AppModel(root: root)
@@ -224,15 +333,14 @@ enum SettingsRegression {
                     let presentation = WindowPresentation()
                     presentation.show(window)
                     let labels = ["7 天", "30 天", "90 天", "永久"].map { NSLocalizedString($0, comment: "") }
-                    func popup(in view: NSView) -> NSPopUpButton? {
-                        if let button = view as? NSPopUpButton, button.itemTitles == labels { return button }
-                        return view.subviews.lazy.compactMap { popup(in: $0) }.first
+                    @MainActor func choiceControl(in view: NSView) -> SettingsChoiceAnchorView? {
+                        if let control = view as? SettingsChoiceAnchorView, control.itemTitles == labels { return control }
+                        return view.subviews.lazy.compactMap { choiceControl(in: $0) }.first
                     }
                     try await Task.sleep(for: .milliseconds(350))
-                    let choice = popup(in: window.contentView!)!
-                    precondition(choice.indexOfSelectedItem == 1)
+                    let choice = choiceControl(in: window.contentView!)!
+                    precondition(choice.selectedIndex == 1)
                     choice.selectItem(at: 2)
-                    _ = choice.sendAction(choice.action, to: choice.target)
                     try await Task.sleep(for: .milliseconds(100))
                     precondition(model.settings.conversationRetention == .ninetyDays)
                     let old = Date().addingTimeInterval(-40 * 86400)
@@ -243,7 +351,6 @@ enum SettingsRegression {
                     await model.maintainConversationHistory()
                     precondition(ConversationStore(model.store).list(limit: 10).contains { $0.id == cid })
                     choice.selectItem(at: 0)
-                    _ = choice.sendAction(choice.action, to: choice.target)
                     try await Task.sleep(for: .milliseconds(150))
                     await model.maintainConversationHistory()
                     precondition(model.settings.conversationRetention == .sevenDays)
@@ -269,7 +376,6 @@ enum SettingsRegression {
                         try bitmap.representation(using: .png, properties: [:])!.write(to: URL(filePath: "build/settings-conversation-history-\(appearance).png"))
                     }
                     choice.selectItem(at: 3)
-                    _ = choice.sendAction(choice.action, to: choice.target)
                     try await Task.sleep(for: .milliseconds(100))
                     precondition(model.settings.conversationRetention == .forever)
                     print("Conversation retention settings: native choices, legacy defaults, persistence, immediate cleanup and unchanged memory passed")
@@ -335,25 +441,24 @@ enum SettingsRegression {
                     let window = SettingsWindow.make(app: model)
                     let presentation = WindowPresentation()
                     presentation.show(window)
-                    func retentionPopup(in view: NSView) -> NSPopUpButton? {
-                        if let button = view as? NSPopUpButton, button.numberOfItems == 5 { return button }
-                        return view.subviews.lazy.compactMap { retentionPopup(in: $0) }.first
+                    @MainActor func retentionChoice(in view: NSView) -> SettingsChoiceAnchorView? {
+                        if let control = view as? SettingsChoiceAnchorView, control.itemTitles.count == 5 { return control }
+                        return view.subviews.lazy.compactMap { retentionChoice(in: $0) }.first
                     }
                     for appearance in ["light", "dark"] {
                         model.preferences.appearance = appearance
                         try await Task.sleep(for: .milliseconds(300))
-                        let popup = retentionPopup(in: window.contentView!)!
-                        precondition(popup.itemTitles == ["8 小时", "1 天", "3 天", "7 天", "30 天"].map { NSLocalizedString($0, comment: "") })
+                        let choice = retentionChoice(in: window.contentView!)!
+                        precondition(choice.itemTitles == ["8 小时", "1 天", "3 天", "7 天", "30 天"].map { NSLocalizedString($0, comment: "") })
                         for (index, retention) in ClipboardRetention.allCases.enumerated() {
-                            popup.selectItem(at: index)
-                            NSApp.sendAction(popup.action!, to: popup.target, from: popup)
+                            choice.selectItem(at: index)
+                            try await Task.sleep(for: .milliseconds(50))
                             precondition(model.settings.clipboardRetention == retention)
                             let reloaded = try AppModel(root: root)
                             precondition(reloaded.settings.clipboardRetention == retention)
                             precondition(model.clipboardStore.retentionInterval == retention.interval)
                         }
-                        popup.selectItem(at: 2)
-                        NSApp.sendAction(popup.action!, to: popup.target, from: popup)
+                        choice.selectItem(at: 2)
                         try await Task.sleep(for: .milliseconds(100))
                         let view = window.contentView!
                         view.layoutSubtreeIfNeeded()
@@ -837,20 +942,20 @@ enum SettingsRegression {
                             fatalError("settings title did not follow selection: \(tab)")
                         }
                         if page == .search {
-                            func popup(in view: NSView) -> NSPopUpButton? {
-                                if let button = view as? NSPopUpButton { return button }
-                                return view.subviews.lazy.compactMap { popup(in: $0) }.first
+                            @MainActor func choiceControl(in view: NSView) -> SettingsChoiceAnchorView? {
+                                if let control = view as? SettingsChoiceAnchorView { return control }
+                                return view.subviews.lazy.compactMap { choiceControl(in: $0) }.first
                             }
-                            guard let choice = popup(in: split.splitViewItems[1].viewController.view) else {
+                            guard let choice = choiceControl(in: split.splitViewItems[1].viewController.view) else {
                                 fatalError("missing folder navigation choice")
                             }
                             choice.selectItem(at: 1)
-                            NSApp.sendAction(choice.action!, to: choice.target, from: choice)
+                            try await Task.sleep(for: .milliseconds(50))
                             precondition(model.preferences.folderBackspaceBehavior == .exitNavigation)
                             let reloadedNavigation = try AppModel(root: root)
                             precondition(reloadedNavigation.preferences.folderBackspaceBehavior == .exitNavigation)
                             choice.selectItem(at: 0)
-                            NSApp.sendAction(choice.action!, to: choice.target, from: choice)
+                            try await Task.sleep(for: .milliseconds(50))
                             precondition(model.preferences.folderBackspaceBehavior == .parent)
                         }
                         if page == .mcp {

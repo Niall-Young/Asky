@@ -576,63 +576,93 @@ private struct SettingsNativeSegmentedControl<Value: Hashable>: NSViewRepresenta
     }
 }
 
-/// Choices and text inputs share one surface, including when composited over bright glass.
+/// Liquid Glass select button that morphs in place into an AI-chat-styled floating menu.
 struct SettingsChoice<Value: Hashable>: View {
     @Binding var selection: Value
     let options: [(Value, String)]
     var images: [Value: NSImage] = [:]
-    @Environment(\.colorScheme) private var scheme
-    @FocusState private var focused: Bool
+    @State private var anchorBox = SettingsChoiceAnchorBox()
+    @State private var activeSessionID: UUID?
+    @State private var isPresenting = false
+    @Environment(\.isEnabled) private var enabled
+
+    private var selectedIndex: Int {
+        options.firstIndex(where: { $0.0 == selection }) ?? (options.isEmpty ? -1 : 0)
+    }
+
+    private var selectedOption: (Value, String)? {
+        options.indices.contains(selectedIndex) ? options[selectedIndex] : nil
+    }
+
+    private var selectedTitle: String {
+        selectedOption?.1 ?? ""
+    }
+
+    private var selectedImage: NSImage? {
+        selectedOption.flatMap { images[$0.0] }
+    }
 
     var body: some View {
-        SettingsChoiceControl(selection: $selection, options: options, images: images)
-            .focused($focused)
-            .settingsInputSurface(scheme: scheme, focused: focused)
-    }
-}
-
-private struct SettingsChoiceControl<Value: Hashable>: NSViewRepresentable {
-    @Binding var selection: Value
-    let options: [(Value, String)]
-    var images: [Value: NSImage] = [:]
-    @Environment(\.isEnabled) private var enabled
-    func makeCoordinator() -> Coordinator { Coordinator(selection: $selection, options: options) }
-    func makeNSView(context: Context) -> NSPopUpButton {
-        let button = NSPopUpButton(frame: .zero, pullsDown: false)
-        button.isBordered = false
-        button.focusRingType = .none
-        button.font = .systemFont(ofSize: 14)
-        button.target = context.coordinator
-        button.action = #selector(Coordinator.select(_:))
-        return button
-    }
-    func updateNSView(_ button: NSPopUpButton, context: Context) {
-        context.coordinator.selection = $selection
-        context.coordinator.options = options
-        button.isEnabled = enabled
-        if button.itemTitles != options.map({ $0.1 }) {
-            button.removeAllItems(); button.addItems(withTitles: options.map { $0.1 })
+        Button(action: openMenu) {
+            SettingsChoiceTriggerLabel(
+                title: selectedTitle,
+                image: selectedImage,
+                enabled: enabled
+            )
         }
-        for (index, option) in options.enumerated() {
-            button.item(at: index)?.image = images[option.0].map { image in
-                let thumbnail = (image.copy() as? NSImage) ?? image
-                thumbnail.size = NSSize(width: 16, height: 16)
-                return thumbnail
+        .buttonStyle(SettingsChoiceTriggerButtonStyle())
+        .opacity(isPresenting ? 0 : 1)
+        .allowsHitTesting(!isPresenting)
+        .background(
+            SettingsChoiceAnchorReader(
+                box: anchorBox,
+                titles: options.map(\.1),
+                selectedIndex: selectedIndex,
+                isMenuOpen: isPresenting,
+                onOpen: openMenu,
+                onSelect: selectOption(at:),
+                onClose: closeMenu
+            )
+            .allowsHitTesting(false)
+        )
+        .accessibilityValue(selectedTitle)
+        .accessibilityIdentifier("settings-choice-trigger")
+        .onDisappear {
+            if let activeSessionID {
+                SettingsChoicePresenter.shared.dismiss(sessionID: activeSessionID, animated: false)
             }
+            activeSessionID = nil
+            isPresenting = false
         }
-        if let index = options.firstIndex(where: { $0.0 == selection }) { button.selectItem(at: index) }
     }
-    func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSPopUpButton, context: Context) -> CGSize? {
-        let ideal = nsView.intrinsicContentSize
-        return CGSize(width: min(ideal.width, proposal.width ?? ideal.width), height: ideal.height)
+
+    private func openMenu() {
+        guard enabled, !options.isEmpty, let anchor = anchorBox.view else { return }
+        let items = options.enumerated().map { index, option in
+            SettingsChoiceOption(id: index, title: option.1, image: images[option.0])
+        }
+        activeSessionID = SettingsChoicePresenter.shared.present(
+            from: anchor,
+            options: items,
+            selectedIndex: selectedIndex,
+            onSelect: { index in
+                selectOption(at: index)
+            },
+            onOpenChanged: { open in
+                isPresenting = open
+                if !open { activeSessionID = nil }
+            }
+        )
     }
-    final class Coordinator: NSObject {
-        var selection: Binding<Value>
-        var options: [(Value, String)]
-        init(selection: Binding<Value>, options: [(Value, String)]) { self.selection = selection; self.options = options }
-        @objc func select(_ sender: NSPopUpButton) {
-            guard options.indices.contains(sender.indexOfSelectedItem) else { return }
-            selection.wrappedValue = options[sender.indexOfSelectedItem].0
+
+    private func selectOption(at index: Int) {
+        guard options.indices.contains(index) else { return }
+        selection = options[index].0
+    }
+
+    private func closeMenu() {
+        if let activeSessionID {
+            SettingsChoicePresenter.shared.dismiss(sessionID: activeSessionID, animated: true)
         }
     }
 }

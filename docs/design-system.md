@@ -143,6 +143,8 @@ Theme、ButtonStyle、LabelStyle 或 ViewModifier 只负责样式映射，不重
 
 审批模式收起入口仅显示图标与文字，不绘制玻璃底板、描边或悬停填充，点击不缩放。展开菜单为 220 × 86 pt 的原生 Regular 玻璃（非 interactive，点击时整块菜单不缩放），14 pt 圆角；每行只保留图标、名称与选中勾，不显示二级说明。菜单通过入口锚点挂载到聊天窗口顶层，不嵌在输入框玻璃内，避免上方菜单行超出输入框后失去悬停追踪。入口始终保持原位，点击后在上方 8 pt 弹出独立菜单，仅做 120 ms 淡入淡出，不从按钮变形；菜单行整行可点击，使用共享的 `GlassRowButtonStyle`：悬停（5.5%）与按下（8.5%）仅做轻柔白色玻璃提亮（避免按下色块过重），不缩放、不回弹，不绘制普通灰色悬停底板；气泡更多菜单与网页来源卡片的来源行使用同一样式。减少动态效果时立即显示或关闭，降低透明度、增强对比度及旧系统沿用既有材质回退。
 
+2026-11-25 设置页与设置弹窗中的下拉选择器（`SettingsChoice` / `SettingsChoiceMenu.swift`）不再使用 `NSPopUpButton` 或输入表面边框，改为原生 Regular 液态玻璃胶囊按钮（`28 pt` 高、MingCute `chevron.down`、可选 `16 × 16 pt` 左侧图标，悬停轻柔提亮不缩放）；点击后由 `SettingsChoicePresenter` 挂载到所属 `NSWindow.contentView` 最顶层（高于设置弹窗，`safeAreaRegions = []`），在 `GlassEffectContainer` 内通过相同 `glassEffectID` 与 `.glassEffectTransition(.matchedGeometry)` 执行 `180 ms` `.smooth` 原位变形展开与收回（与剪贴板、启动器底部「更多」按钮的变形机制一致）。展开菜单延续 AI 对话菜单样式：原生 Regular 液态玻璃、`14 pt` 圆角、`6 pt` 内边距、`32 pt` 行高、`8 pt` 同心圆角行态与 `5.5%` 悬停 / `8.5%` 按下 `.plusLighter` 白色玻璃提亮（无缩放）、右侧 `12 pt` MingCute `checkmark`；宽度按选项内容动态计算、优先与按钮右缘对齐并按可用垂直空间自动向下或向上展开，超出可用高度（上限 `320 pt`）时内部滚动。支持 `↑`/`↓`/`Return`/`Space`/`Escape`/`Tab` 键盘导航、外部点击与滚轮/窗口失焦关闭；减少动态效果时立即切换，降低透明度、增强对比度与 macOS 14/15 沿用共享不透明或旧材质回退。验证见[设置页液态玻璃变形选择菜单验证](validation/2026-11-25-settings-choice-morph-menu.md)。
+
 ## Liquid Glass
 
 macOS 14/15 的兼容表面使用 `NSVisualEffectView` 的 `underWindowBackground` 材质与 `behindWindow` 模式，叠加现有 `background` 变量（浅色白 60%、深色黑 60%）及 1pt `border` 描边。设置侧栏与内容区同步适配；按钮降级为原生 bordered / borderedProminent。用户已接受系统控制的背景模糊半径，不要求精确 120px。辅助功能模式保持不透明背景与高对比描边。
