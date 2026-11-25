@@ -96,4 +96,73 @@ private final class DraftProbe: ToolAdapter, Sendable {
         #expect(result.error?.code == .invalidArguments)
         #expect(probe.count == 0)
     }
+
+    @Test func agentDraftPreparesCardWithoutOpeningMessages() async throws {
+        let handoffCalls = OSAllocatedUnfairLock(initialState: 0)
+        let tool = MessagesDraftTool(ContactsBridge(), handoff: { _, _ in
+            handoffCalls.withLock { $0 += 1 }
+            return true
+        })
+        let svc = try service(presenter: { _ in
+            Issue.record("An explicit agent draft request must not ask for confirmation")
+            return .rejected
+        })
+        await svc.register(tool)
+
+        let result = await svc.submit(ActionRequest(tool: tool.definition.name, arguments: arguments,
+                                                    origin: .agent(sessionID: "draft-agent"), intent: .explicitRequest))
+        #expect(result.status == .completed)
+        #expect(handoffCalls.withLock { $0 } == 0)
+        #expect(result.output?["opened"] == false)
+        #expect(result.output?["copiedToClipboard"] == false)
+        #expect(result.output?["sent"] == false)
+        #expect(result.output?["handle"] == "+1 202-555-0100")
+        #expect(result.output?["body"] == "你好")
+
+        let card = ToolResultCard.from(tool: tool.definition.name, arguments: arguments, result: result)
+        #expect(card?.kind == .messagesDraft)
+        #expect(card?.action?.kind == .openMessagesDraft)
+        #expect(card?.action?.target == "+1 202-555-0100")
+        #expect(card?.action?.detail == "你好")
+    }
+
+    @Test func approvedMCPDraftHandsOffToMessages() async throws {
+        let recorded = OSAllocatedUnfairLock(initialState: [(URL, String)]())
+        let tool = MessagesDraftTool(ContactsBridge(), handoff: { url, body in
+            recorded.withLock { $0.append((url, body)) }
+            return true
+        })
+        let svc = try service(presenter: { _ in .approved })
+        await svc.register(tool)
+
+        let result = await svc.submit(ActionRequest(tool: tool.definition.name, arguments: arguments,
+                                                    origin: .mcp(instanceID: "draft-test"), intent: .explicitRequest))
+        #expect(result.status == .completed)
+        #expect(result.output?["opened"] == true)
+        #expect(result.output?["copiedToClipboard"] == true)
+        #expect(result.output?["sent"] == false)
+        let calls = recorded.withLock { $0 }
+        #expect(calls.count == 1)
+        #expect(calls.first?.0 == MessagesDraftTool.draftURL(handle: "+1 202-555-0100", body: "你好"))
+        #expect(calls.first?.1 == "你好")
+    }
+
+    @Test func launcherDraftHandsOffImmediately() async throws {
+        let handoffCalls = OSAllocatedUnfairLock(initialState: 0)
+        let tool = MessagesDraftTool(ContactsBridge(), handoff: { _, _ in
+            handoffCalls.withLock { $0 += 1 }
+            return true
+        })
+        let svc = try service(presenter: { _ in
+            Issue.record("An explicit launcher draft request must not ask for confirmation")
+            return .rejected
+        })
+        await svc.register(tool)
+
+        let result = await svc.submit(ActionRequest(tool: tool.definition.name, arguments: arguments,
+                                                    origin: .launcher, intent: .explicitRequest))
+        #expect(result.status == .completed)
+        #expect(result.output?["opened"] == true)
+        #expect(handoffCalls.withLock { $0 } == 1)
+    }
 }

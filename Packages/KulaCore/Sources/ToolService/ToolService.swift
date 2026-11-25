@@ -37,6 +37,7 @@ public protocol ToolAdapter: Sendable {
     var executionTimeout: Duration? { get }
     var deduplicatesArguments: Bool { get }
     func execute(_ arguments: JSONValue, requestID: String) async throws -> AdapterOutput
+    func execute(_ arguments: JSONValue, requestID: String, origin: CallerOrigin) async throws -> AdapterOutput
     func readback(_ arguments: JSONValue, output: AdapterOutput?, requestID: String) async -> JSONValue?
     /// Validates arguments and resolves the target. Throw `ToolError(.ambiguousTarget, …)` when the user must choose.
     func preview(_ arguments: JSONValue) async throws -> ConfirmationPreview
@@ -51,6 +52,9 @@ extension ToolAdapter {
     public var executionTimeout: Duration? { nil }
     public var deduplicatesArguments: Bool { true }
     public func execute(_ arguments: JSONValue, requestID: String) async throws -> AdapterOutput { try await execute(arguments) }
+    public func execute(_ arguments: JSONValue, requestID: String, origin: CallerOrigin) async throws -> AdapterOutput {
+        try await execute(arguments, requestID: requestID)
+    }
     public func readback(_ arguments: JSONValue, output: AdapterOutput?, requestID: String) async -> JSONValue? { await readback(arguments, output: output) }
     public func preview(_ arguments: JSONValue) async throws -> ConfirmationPreview {
         ConfirmationPreview(target: definition.summary, changes: [])
@@ -205,7 +209,9 @@ public actor ToolService {
 
     private func runRead(_ adapter: any ToolAdapter, _ request: ActionRequest) async -> ExecutionResult {
         do {
-            let out = try await withTimeout(adapter.executionTimeout ?? timeout) { try await adapter.execute(request.arguments, requestID: request.requestID) }
+            let out = try await withTimeout(adapter.executionTimeout ?? timeout) {
+                try await adapter.execute(request.arguments, requestID: request.requestID, origin: request.origin)
+            }
             return ExecutionResult(requestID: request.requestID, status: .completed, targets: out.targets, output: out.output)
         } catch {
             return failure(request, error)
@@ -222,7 +228,9 @@ public actor ToolService {
     private func runWriteLocked(_ adapter: any ToolAdapter, _ request: ActionRequest) async -> ExecutionResult {
         persist(request, status: .pendingVerification, result: nil)
         do {
-            let out = try await withTimeout(adapter.executionTimeout ?? timeout) { try await adapter.execute(request.arguments, requestID: request.requestID) }
+            let out = try await withTimeout(adapter.executionTimeout ?? timeout) {
+                try await adapter.execute(request.arguments, requestID: request.requestID, origin: request.origin)
+            }
             let readback = await adapter.readback(request.arguments, output: out, requestID: request.requestID)
             let status: ExecutionStatus = readback == nil ? .pendingVerification : .completed
             return record(request, ExecutionResult(requestID: request.requestID, status: status, targets: out.targets,

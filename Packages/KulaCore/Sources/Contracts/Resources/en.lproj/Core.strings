@@ -80,7 +80,7 @@
 "向已有备忘录末尾追加文本（明确请求直接执行）" = "Append text to an existing note (executes directly on explicit request)";
 "响应无效" = "Unexpected reply";
 "图片" = "Image";
-"在 Messages 中准备草稿（明确请求直接打开；由用户手动发送）" = "Prepare a draft in Messages (opens directly on explicit request; the user sends it manually)";
+"准备信息草稿（对话中生成草稿卡片，点击按钮后在 Messages 中打开并由用户手动发送）" = "Prepare a Messages draft (shows a draft card in chat; opens in Messages when the user clicks the button to send manually)";
 "在已授权文件夹中找不到该备忘录" = "The note was not found in the authorized folders";
 "在已授权文件夹中新建备忘录" = "Create a note in an authorized folder";
 "在已授权的 Notes 文件夹中按标题或正文搜索" = "Search authorized Notes folders by title or body";
@@ -392,3 +392,4 @@
 "步行" = "Walk";
 "公交" = "Transit";
 "驾车" = "Drive";
+"草稿已准备好，请点击「在信息中打开」在 Messages 中查看并手动发送" = "Draft is ready. Click “Open in Messages” to review and send manually";

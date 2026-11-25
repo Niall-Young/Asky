@@ -84,13 +84,30 @@ public struct ContactsSearchTool: ToolAdapter {
 
 // MARK: Messages draft hand-off
 
-/// Prefills a draft in Messages; never sends and never reads history. Falls back to copying the body.
+/// Prepares a Messages draft without sending or reading history.
+/// In-app Agent calls prepare the draft card without activating Messages so the AI window stays uncovered
+/// until the user clicks "Open in Messages"; external/direct callers hand off to Messages immediately.
 public struct MessagesDraftTool: ToolAdapter {
+    public typealias Handoff = @Sendable (URL, String) async -> Bool
+
     let contacts: ContactsBridge
-    public init(_ c: ContactsBridge) { contacts = c }
+    let handoff: Handoff
+
+    public init(_ c: ContactsBridge, handoff: @escaping Handoff = MessagesDraftTool.defaultHandoff) {
+        contacts = c
+        self.handoff = handoff
+    }
+
+    public static let defaultHandoff: Handoff = { url, body in
+        await MainActor.run {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(body, forType: .string)
+            return NSWorkspace.shared.open(url)
+        }
+    }
 
     public var definition: ToolDefinition {
-        ToolDefinition(name: "messages_prepare_draft", summary: CoreLocalization.text("在 Messages 中准备草稿（明确请求直接打开；由用户手动发送）"),
+        ToolDefinition(name: "messages_prepare_draft", summary: CoreLocalization.text("准备信息草稿（对话中生成草稿卡片，点击按钮后在 Messages 中打开并由用户手动发送）"),
                        inputSchema: Args.schema(["contactID": Args.stringProp,
                                                  "handle": ["type": "string", "description": .string(CoreLocalization.text("电话号码或邮箱；联系人有多个时必填"))],
                                                  "body": Args.stringProp], required: ["body"]),
@@ -137,13 +154,38 @@ public struct MessagesDraftTool: ToolAdapter {
     }
 
     public func execute(_ a: JSONValue) async throws -> AdapterOutput {
+        try await executeDraft(a, openImmediately: true)
+    }
+
+    public func execute(_ a: JSONValue, requestID: String, origin: CallerOrigin) async throws -> AdapterOutput {
+        switch origin {
+        case .agent:
+            return try await executeDraft(a, openImmediately: false)
+        case .launcher, .mcp:
+            return try await executeDraft(a, openImmediately: true)
+        }
+    }
+
+    private func executeDraft(_ a: JSONValue, openImmediately: Bool) async throws -> AdapterOutput {
         let r = try recipient(a)
         let body = try Args.requiredString(a, "body")
-        let opened = await MainActor.run { () -> Bool in
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(body, forType: .string)
-            guard let url = Self.draftURL(handle: r.handle, body: body) else { return false }
-            return NSWorkspace.shared.open(url)
+        let url = Self.draftURL(handle: r.handle, body: body)
+        if !openImmediately {
+            return AdapterOutput(output: ["recipient": .string(r.display), "handle": .string(r.handle),
+                                          "body": .string(body), "opened": .bool(false), "copiedToClipboard": .bool(false),
+                                          "sent": false,
+                                          "note": .string(CoreLocalization.text("草稿已准备好，请点击「在信息中打开」在 Messages 中查看并手动发送"))],
+                                 targets: [TargetRef(kind: "messagesDraft", identifier: r.handle)])
+        }
+        let opened: Bool
+        if let url {
+            opened = await handoff(url, body)
+        } else {
+            await MainActor.run {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(body, forType: .string)
+            }
+            opened = false
         }
         return AdapterOutput(output: ["recipient": .string(r.display), "handle": .string(r.handle),
                                       "body": .string(body), "opened": .bool(opened), "copiedToClipboard": true,
