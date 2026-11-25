@@ -54,7 +54,7 @@ struct ChatMarkdownView: View, Equatable {
                     .markdownMargin(top: 0, bottom: 14)
             }
             .markdownTextStyle(\.link) {
-                ForegroundColor(ThemeColor("textPrimary").color(for: colorScheme))
+                ForegroundColor(ChatInlineText.linkSwiftUIColor(for: colorScheme))
                 UnderlineStyle(.single)
             }
             .markdownBlockStyle(\.bulletedListMarker) { configuration in
@@ -665,6 +665,18 @@ struct ChatInlineText: View {
         }
     }
 
+    static func linkNSColor(for colorScheme: ColorScheme) -> NSColor {
+        colorScheme == .dark
+            ? NSColor(srgbRed: 0.45, green: 0.72, blue: 1.0, alpha: 1.0)
+            : NSColor(srgbRed: 0.08, green: 0.42, blue: 0.85, alpha: 1.0)
+    }
+
+    static func linkSwiftUIColor(for colorScheme: ColorScheme) -> Color {
+        colorScheme == .dark
+            ? Color(red: 0.45, green: 0.72, blue: 1.0)
+            : Color(red: 0.08, green: 0.42, blue: 0.85)
+    }
+
     var body: some View {
         let content = literal ? AttributedString(markdown) : Self.parsed(markdown)
         let sources = literal ? [] : ChatSourceTextView.sources(in: content)
@@ -673,7 +685,7 @@ struct ChatInlineText: View {
         ChatInlineNativeText(content: content, monospaced: monospaced, monospacedDigits: monospacedDigits, shrinkToFit: shrinkToFit, weight: weight, bullet: bullet, images: images, sourceName: resolvedSourceName,
             foreground: NSColor(foreground.color(for: colorScheme)),
             background: NSColor(ThemeColor("backgroundNeutral").color(for: colorScheme)),
-            linkColor: NSColor(ThemeColor("textPrimary").color(for: colorScheme)))
+            linkColor: Self.linkNSColor(for: colorScheme))
             .task(id: imageURLs) {
                 guard !imageURLs.isEmpty else { return }
                 var loaded: [URL: Data] = [:]
@@ -832,7 +844,11 @@ private struct ChatInlineNativeText: NSViewRepresentable {
             selectionGroup?.register(selectable)
             selectable.selectedTextAttributes = [.backgroundColor: NSColor(selectionColor).withAlphaComponent(0.45)]
         }
-        view.linkTextAttributes = [.foregroundColor: linkColor, .underlineStyle: NSUnderlineStyle.single.rawValue]
+        view.linkTextAttributes = [
+            .foregroundColor: linkColor,
+            .underlineStyle: NSUnderlineStyle.single.rawValue,
+            .cursor: NSCursor.pointingHand
+        ]
         let renderKey = Measurement.RenderKey(
             content: content, monospaced: monospaced, monospacedDigits: monospacedDigits,
             weight: weight, bullet: bullet, images: images, sourceName: sourceName,
@@ -871,17 +887,17 @@ private struct ChatInlineNativeText: NSViewRepresentable {
             var attributes: [NSAttributedString.Key: Any] = [
                 .font: font, .foregroundColor: foreground, .paragraphStyle: paragraph
             ]
-            if let link = run.link, link.scheme?.lowercased() == "mailto" {
-                attributes[.link] = link
-                attributes[.foregroundColor] = linkColor
-                attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue
-            }
-            // Source labels remain plain text; the source action belongs at the end of this paragraph.
+            // Citation links collapse into the trailing source badge; all other links remain directly clickable in prose.
             if skippedCitations[runIndex] { continue }
             if run.link == nil, run.imageURL == nil,
                runIndex > 0, runIndex + 1 < runs.count,
                skippedCitations[runIndex - 1], skippedCitations[runIndex + 1],
                String(content[run.range].characters).trimmingCharacters(in: citationSeparators).isEmpty { continue }
+            if run.imageURL == nil, let link = run.link, ChatSourceTextView.isDirectOpenableLink(link) {
+                attributes[.link] = link
+                attributes[.foregroundColor] = linkColor
+                attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue
+            }
             if intent.contains(.strikethrough) { attributes[.strikethroughStyle] = NSUnderlineStyle.single.rawValue }
             if let url = run.imageURL {
                 if let formula = ChatMath.formula(url) {
@@ -925,7 +941,7 @@ private struct ChatInlineNativeText: NSViewRepresentable {
                 name: name.flatMap { $0.isEmpty ? nil : $0 } ?? ChatSourceTextView.domain(first),
                 count: sources.count, foreground: foreground, background: background)
             let fragment = NSMutableAttributedString(attachment: attachment)
-            fragment.addAttributes([.link: first, .chatSources: sources], range: NSRange(location: 0, length: fragment.length))
+            fragment.addAttributes([.link: first, .chatSources: sources, .cursor: NSCursor.arrow], range: NSRange(location: 0, length: fragment.length))
             result.append(fragment)
         }
         }

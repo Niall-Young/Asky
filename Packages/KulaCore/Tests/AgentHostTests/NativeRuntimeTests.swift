@@ -637,6 +637,8 @@ server.serve_forever()
         defer { try? FileManager.default.removeItem(at: root) }
         let assembled = NativeAgentPrompt.system(basePrompt: "你是精简版个人助理。", guidance: [])
         #expect(NativeAgentPrompt.runtimeProtocolPrompt.contains("渲染为来源标签"))
+        #expect(NativeAgentPrompt.runtimeProtocolPrompt.contains("可直接点击跳转的正文链接"))
+        #expect(NativeAgentPrompt.runtimeProtocolPrompt.contains("无需对同一地址重复附 [来源](URL)"))
         #expect(NativeAgentPrompt.runtimeProtocolPrompt.contains("不能只给配图附来源"))
         #expect(assembled.contains("渲染为来源标签"))
         #expect(assembled.contains("不能只给配图附来源"))

@@ -64,6 +64,9 @@ final class ChatLinkServiceTests: XCTestCase {
         // Technical hyphens without CJK or host-stem match must not be misidentified as a site name.
         XCTAssertNil(ChatLinkService.inferSiteName(fromTitle: "Benchmarking GPT-4o", url: URL(string: "https://example.com/post")!))
         XCTAssertNil(ChatLinkService.inferSiteName(fromTitle: "Release Notes 2026-11-19", url: URL(string: "https://example.com/post")!))
+        // Homepage slogans containing clause/list punctuation must not be mistaken for site names.
+        XCTAssertNil(ChatLinkService.inferSiteName(fromTitle: "百度开发者中心 - 汇聚、开放、助力、共赢", url: URL(string: "https://developer.baidu.com")!))
+        XCTAssertNil(ChatLinkService.inferSiteName(fromTitle: "知乎 - 有问题，就会有答案", url: URL(string: "https://www.zhihu.com")!))
     }
 
     func testIconExtractionPrioritizesRasterAndSkipsEmptyDataURIs() {

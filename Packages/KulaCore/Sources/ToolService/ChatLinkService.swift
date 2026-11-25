@@ -695,8 +695,11 @@ public actor ChatLinkService {
         return nil
     }
 
+    private static let siteNameDisallowedPunctuation = CharacterSet(charactersIn: "、，,。！？!?;；")
+
     private static func validateInferredSiteName(_ candidate: String, titlePrefix: String) -> String? {
         guard titlePrefix.count >= 6, candidate.count >= 2, candidate.count <= 24 else { return nil }
+        if candidate.rangeOfCharacter(from: siteNameDisallowedPunctuation) != nil { return nil }
         if candidate.allSatisfy({ $0.isNumber || $0 == "." || $0 == "-" || $0 == "/" }) { return nil }
         if candidate.contains("http://") || candidate.contains("https://") { return nil }
         return cleanSiteName(candidate)

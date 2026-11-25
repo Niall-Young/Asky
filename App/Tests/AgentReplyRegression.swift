@@ -687,7 +687,11 @@ enum AgentReplyRegression {
         precondition(ChatSourceTextView.badgeLabel(name: "Kimi", count: 1) == "Kimi")
         precondition(ChatSourceTextView.isCitation("[12]"))
         precondition(ChatSourceTextView.isCitation("来源"))
+        precondition(ChatSourceTextView.isCitation("来源1"))
+        precondition(ChatSourceTextView.isCitation("参考"))
         precondition(!ChatSourceTextView.isCitation("打开官网"))
+        precondition(!ChatSourceTextView.isCitation("参考文档"))
+        precondition(!ChatSourceTextView.isCitation("https://www.baidu.com"))
         let screen = NSRect(x: -1200, y: -200, width: 1200, height: 900)
         let viewport = NSRect(x: -1000, y: 0, width: 640, height: 500)
         for anchor in [NSRect(x: -500, y: 20, width: 18, height: 18), NSRect(x: -30, y: 450, width: 18, height: 18)] {
@@ -695,8 +699,10 @@ enum AgentReplyRegression {
             precondition(screen.contains(frame), "Card must fit its source's screen, including negative origins")
             if anchor.minY < 100 { precondition(frame.minY >= anchor.maxY + 8, "Low sources must open upward") }
         }
-        let linked = try AttributedString(markdown: "[Moonshot AI 官网](https://example.com) 与 [来源](https://example.com)")
-        precondition(ChatSourceTextView.sources(in: linked).count == 1, "Repeated links in one information block share one favicon")
+        let linked = try AttributedString(markdown: "[Moonshot AI 官网](https://example.com) 与 [来源](https://example.com) [1](https://example.com)")
+        precondition(ChatSourceTextView.sources(in: linked).count == 1, "Repeated citation links in one paragraph share one badge")
+        let directOnly = try AttributedString(markdown: "百度官网是 [https://www.baidu.com](https://www.baidu.com) 或 [百度官网](https://www.baidu.com)")
+        precondition(ChatSourceTextView.sources(in: directOnly).isEmpty, "Non-citation links must not produce trailing source badges")
 
         var scrollState = ChatSourceScrollGuard.WindowScrollState()
         precondition(!scrollState.record(phase: .mayBegin, momentumPhase: [], hasDelta: false, at: 10.0),
@@ -728,14 +734,14 @@ enum AgentReplyRegression {
             - **扫描**：核对权限边界，找出潜在漏洞。[来源](https://devin.ai/)
             - **修复**：使用 `Fix with Devin` 创建修复任务。[2](https://devin.ai/)
 
-            [打开官网](https://devin.ai/) 查看详细信息。
+            [打开官网](https://devin.ai/) 查看详细信息，或直接访问 https://www.baidu.com
             """).padding(28).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .background(scheme == .dark ? Color(white: 0.15) : .white).environment(\.colorScheme, scheme))
             if scheme == .dark {
                 // Exercise a real clip-view offset and a source close to the viewport bottom.
                 let document = NSHostingView(rootView: VStack(spacing: 0) {
                     Color.clear.frame(height: 500)
-                    ChatMarkdownView(text: "[Wikipedia：Moonshot AI](https://devin.ai/)：Kimi 通过网页、API 和移动端提供服务，并支持图像和视频等多模态输入。")
+                    ChatMarkdownView(text: "Wikipedia：Moonshot AI：Kimi 通过网页、API 和移动端提供服务，并支持图像和视频等多模态输入。[来源](https://devin.ai/)")
                         .padding(28)
                     Color.clear.frame(height: 300)
                 }.frame(width: 640, alignment: .topLeading).background(Color(white: 0.15)).environment(\.colorScheme, .dark))
@@ -753,6 +759,7 @@ enum AgentReplyRegression {
             view.layoutSubtreeIfNeeded()
             var badges = 0
             var sourceText: ChatSourceTextView?
+            var directLinkText: ChatSourceTextView?
             func inspect(_ node: NSView) {
                 if let text = node as? ChatSourceTextView, let storage = text.textStorage {
                     var firstSource: Int?
@@ -768,6 +775,9 @@ enum AgentReplyRegression {
                         let sources = storage.attribute(.chatSources, at: range.location, effectiveRange: nil) as! [URL]
                         if sources.count > 1 { precondition(sources.count == 4, "One tag must retain all four sources") }
                     }
+                    if storage.string.contains("打开官网") && storage.string.contains("https://www.baidu.com") {
+                        directLinkText = text
+                    }
                     if let firstSource {
                         let suffix = (storage.string as NSString).substring(from: firstSource)
                         precondition(suffix.allSatisfy { $0 == "\u{fffc}" || $0.isWhitespace }, "Source icons belong after all information text")
@@ -776,7 +786,34 @@ enum AgentReplyRegression {
                 node.subviews.forEach(inspect)
             }
             inspect(window.contentView!)
-            precondition(badges == (scheme == .dark ? 1 : 4), "All paragraph sources must end in favicon attachments")
+            precondition(badges == (scheme == .dark ? 1 : 3), "Only citation links should render as trailing source badges")
+            if scheme == .light {
+                let directText = directLinkText!
+                let storage = directText.textStorage!
+                var hasBadgeOnDirectParagraph = false
+                storage.enumerateAttribute(.chatSources, in: NSRange(location: 0, length: storage.length)) { value, _, _ in
+                    if value != nil { hasBadgeOnDirectParagraph = true }
+                }
+                precondition(!hasBadgeOnDirectParagraph, "Direct inline/bare links must not add a redundant source tag")
+                var directLinks: [(String, URL)] = []
+                storage.enumerateAttribute(.link, in: NSRange(location: 0, length: storage.length)) { value, range, _ in
+                    guard let url = value as? URL else { return }
+                    let segment = (storage.string as NSString).substring(with: range)
+                    let underline = storage.attribute(.underlineStyle, at: range.location, effectiveRange: nil) as? Int
+                    precondition(underline == NSUnderlineStyle.single.rawValue, "Direct link must show underline")
+                    directLinks.append((segment, url))
+                }
+                precondition(directLinks.contains { $0.0 == "打开官网" && $0.1.absoluteString == "https://devin.ai/" },
+                             "Named inline link must stay clickable in prose")
+                precondition(directLinks.contains { $0.0 == "https://www.baidu.com" && $0.1.absoluteString == "https://www.baidu.com" },
+                             "Bare URL must stay clickable in prose")
+                var openedURLs: [URL] = []
+                directText.openLinkHandler = { url in openedURLs.append(url); return true }
+                let bareRange = (storage.string as NSString).range(of: "https://www.baidu.com")
+                precondition(directText.textView(directText, clickedOnLink: URL(string: "https://www.baidu.com")!, at: bareRange.location))
+                precondition(openedURLs == [URL(string: "https://www.baidu.com")!], "Clicking a bare URL must open it directly")
+                precondition(directText.preview?.isShown != true, "Clicking a direct link must not open source preview popover")
+            }
             let surface = window.contentView!
             guard let bitmap = surface.bitmapImageRepForCachingDisplay(in: surface.bounds) else { fatalError("capture") }
             surface.cacheDisplay(in: surface.bounds, to: bitmap)

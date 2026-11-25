@@ -56,12 +56,13 @@ private final class ChatSourceBadgeAttachmentCell: NSTextAttachmentCell {
     }
 }
 
-/// Source attachments are the only hover targets, regardless of the original Markdown label.
+/// Source attachments are the only hover targets; non-citation links stay directly clickable in prose.
 final class ChatSourceTextView: ChatSelectableTextView, NSTextViewDelegate {
     private var hoverTask: Task<Void, Never>?
     private var sourceURL: URL?
     private var sourceTrackingArea: NSTrackingArea?
     private(set) var preview: ChatSourcePopover?
+    var openLinkHandler: (URL) -> Bool = { ToolService.openLauncherURL($0) }
     var hasSourceBadges = false {
         didSet {
             guard hasSourceBadges != oldValue else { return }
@@ -72,14 +73,32 @@ final class ChatSourceTextView: ChatSelectableTextView, NSTextViewDelegate {
     }
 
     static func isCitation(_ label: String) -> Bool {
-        let label = label.trimmingCharacters(in: CharacterSet(charactersIn: "[]【】 "))
-        return Int(label) != nil || ["来源", "引用", "source", "citation"].contains(label.lowercased())
+        let trimmed = label.trimmingCharacters(in: CharacterSet(charactersIn: "[]【】()（） "))
+        guard !trimmed.isEmpty else { return false }
+        if Int(trimmed) != nil { return true }
+        let lower = trimmed.lowercased()
+        if ["来源", "引用", "参考", "出处", "source", "citation", "ref", "reference"].contains(lower) {
+            return true
+        }
+        return lower.range(
+            of: #"^(?:来源|引用|参考|出处|source|citation|ref|reference)\s*[:：#-]?\s*\d+$"#,
+            options: .regularExpression
+        ) != nil
+    }
+
+    static func isDirectOpenableLink(_ url: URL) -> Bool {
+        ChatImageService.supports(url) || url.scheme?.lowercased() == "mailto"
     }
 
     static func sources(in content: AttributedString) -> [URL] {
         var result: [URL] = []
         for run in content.runs {
-            if run.imageURL == nil, let url = run.link, ChatImageService.supports(url), !result.contains(url) { result.append(url) }
+            guard run.imageURL == nil,
+                  let url = run.link,
+                  ChatImageService.supports(url),
+                  isCitation(String(content[run.range].characters)),
+                  !result.contains(url) else { continue }
+            result.append(url)
         }
         return result
     }
@@ -121,12 +140,15 @@ final class ChatSourceTextView: ChatSelectableTextView, NSTextViewDelegate {
     }
 
     func textView(_ textView: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
-        guard let sources = textStorage?.attribute(.chatSources, at: charIndex, effectiveRange: nil) as? [URL],
-              !sources.isEmpty else {
-            if let url = link as? URL, url.scheme?.lowercased() == "mailto" { _ = ToolService.openLauncherURL(url) }
+        if let sources = textStorage?.attribute(.chatSources, at: charIndex, effectiveRange: nil) as? [URL],
+           !sources.isEmpty {
+            openSources(sources, at: charIndex)
             return true
         }
-        openSources(sources, at: charIndex)
+        let url = (link as? URL) ?? (link as? String).flatMap(URL.init(string:))
+        if let url, Self.isDirectOpenableLink(url) {
+            _ = openLinkHandler(url)
+        }
         return true
     }
 
