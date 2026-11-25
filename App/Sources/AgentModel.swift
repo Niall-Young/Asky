@@ -121,6 +121,7 @@ final class AgentModel {
     }
 
     static let firstPage = 40
+    static let scrollPage = 16
     static let window = 120
 
     private(set) var conversations: [ConversationSummary] = []
@@ -449,15 +450,16 @@ final class AgentModel {
         return store.message(item.id, conversationID: cid)
     }
 
-    func loadOlder() {
+    func loadOlder(limit: Int = AgentModel.firstPage) {
         // Keep the active response and its indices intact until it finishes.
+        let pageSize = max(1, limit)
         guard !isRunning, hasOlder, let cursor = items.lazy.compactMap({ self.storedMessage($0) }).first else { return }
         let page = timelineMode
-            ? store.timeline(limit: Self.firstPage, before: cursor)
-            : store.messages(conversationID: cursor.conversationID, limit: Self.firstPage, beforeSeq: cursor.seq)
+            ? store.timeline(limit: pageSize, before: cursor)
+            : store.messages(conversationID: cursor.conversationID, limit: pageSize, beforeSeq: cursor.seq)
         seedSourcePreviews(for: page)
         items.insert(contentsOf: page.map(Self.item), at: 0)
-        hasOlder = page.count == Self.firstPage
+        hasOlder = page.count == pageSize
         if items.count > Self.window {
             items.removeLast(items.count - Self.window)
             hasNewer = true
@@ -465,14 +467,15 @@ final class AgentModel {
         pruneFormValues()
     }
 
-    func loadNewer() {
+    func loadNewer(limit: Int = AgentModel.firstPage) {
+        let pageSize = max(1, limit)
         guard !isRunning, hasNewer, let cursor = items.reversed().lazy.compactMap({ self.storedMessage($0) }).first else { return }
         let page = timelineMode
-            ? store.newerTimeline(after: cursor, limit: Self.firstPage)
-            : store.newerMessages(conversationID: cursor.conversationID, afterSeq: cursor.seq, limit: Self.firstPage)
+            ? store.newerTimeline(after: cursor, limit: pageSize)
+            : store.newerMessages(conversationID: cursor.conversationID, afterSeq: cursor.seq, limit: pageSize)
         seedSourcePreviews(for: page)
         items.append(contentsOf: page.map(Self.item))
-        hasNewer = page.count == Self.firstPage
+        hasNewer = page.count == pageSize
         if items.count > Self.window {
             items.removeFirst(items.count - Self.window)
             hasOlder = true

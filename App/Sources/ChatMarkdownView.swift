@@ -768,8 +768,21 @@ struct ChatInlineText: View {
                 background: NSColor(ThemeColor("backgroundNeutral").color(for: colorScheme)),
                 linkColor: Self.linkNSColor(for: colorScheme))
         }
-            .task(id: imageURLs) {
-                guard !imageURLs.isEmpty else { return }
+        .modifier(ChatInlineImageLoader(imageURLs: imageURLs, images: $images))
+        .modifier(ChatInlineSourceLoader(sources: sources, sourceNames: $sourceNames))
+    }
+}
+
+private struct ChatInlineImageLoader: ViewModifier {
+    let imageURLs: [URL]
+    @Binding var images: [URL: Data]
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if imageURLs.isEmpty {
+            content
+        } else {
+            content.task(id: imageURLs) {
                 var loaded: [URL: Data] = [:]
                 for url in imageURLs {
                     guard !Task.isCancelled else { return }
@@ -778,7 +791,20 @@ struct ChatInlineText: View {
                 guard !Task.isCancelled else { return }
                 images = loaded
             }
-            .task(id: sources) {
+        }
+    }
+}
+
+private struct ChatInlineSourceLoader: ViewModifier {
+    let sources: [URL]
+    @Binding var sourceNames: [URL: String]
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if sources.isEmpty {
+            content
+        } else {
+            content.task(id: sources) {
                 guard let first = sources.first else { return }
                 await withTaskGroup(of: (URL, ChatLinkService.Preview?).self) { group in
                     var pending = sources.makeIterator()
@@ -805,6 +831,7 @@ struct ChatInlineText: View {
                     }
                 }
             }
+        }
     }
 }
 

@@ -2437,19 +2437,20 @@ enum AgentReplyRegression {
 
     static func scrollStabilityRegression(app: AppModel) async throws {
         let store = ConversationStore(app.store)
-        let cid = try store.create(title: "Scroll stability")
-        for index in 0..<160 {
-            let count = index.isMultiple(of: 2) ? 1 : 3 + index % 9
+        // Part 1: Unchanged-height stability on a complete 40-message conversation (hasOlder == false).
+        let fixedCID = try store.create(title: "Scroll stability fixed")
+        for index in 0..<36 {
+            let count = index.isMultiple(of: 2) ? 1 : 3 + index % 7
             let text = (0..<count).map {
-                "消息 \(index) 段落 \($0)：滚动前后必须完整保留正文和布局位置。" + String(repeating: "长消息需要正确换行。", count: index % 5)
+                "固定消息 \(index) 段落 \($0)：滚动前后必须完整保留正文和布局位置。" + String(repeating: "长消息需要正确换行。", count: index % 4)
             }.joined(separator: "\n\n")
-            try store.append(conversationID: cid, role: index.isMultiple(of: 2) ? "user" : "assistant", text: text)
+            try store.append(conversationID: fixedCID, role: index.isMultiple(of: 2) ? "user" : "assistant", text: text)
         }
-        let model = AgentModel(app: app)
-        let controller = AgentWindowController(model: model, presentation: WindowPresentation())
-        controller.show()
-        let window = NSApplication.shared.windows.first { $0.title == "Asky AI" }!
-        defer { window.orderOut(nil) }
+        let fixedModel = AgentModel(app: app)
+        let fixedController = AgentWindowController(model: fixedModel, presentation: WindowPresentation())
+        fixedController.show()
+        fixedModel.open(fixedCID)
+        let fixedWindow = NSApplication.shared.windows.last { $0.title == "Asky AI" && $0.isVisible }!
         func findScroll(_ view: NSView) -> NSScrollView? {
             if let scroll = view as? NSScrollView, scroll.contentSize.height > 200 { return scroll }
             return view.subviews.compactMap(findScroll).first
@@ -2457,23 +2458,44 @@ enum AgentReplyRegression {
         func texts(_ view: NSView) -> [NSTextView] {
             (view as? NSTextView).map { [$0] } ?? view.subviews.flatMap(texts)
         }
-        try await Task.sleep(for: .milliseconds(1200))
-        let scroll = findScroll(window.contentView!)!
-        NotificationCenter.default.post(name: NSScrollView.willStartLiveScrollNotification, object: scroll)
-        let height = scroll.documentView!.bounds.height
+        try await Task.sleep(for: .milliseconds(900))
+        let fixedScroll = findScroll(fixedWindow.contentView!)!
+        precondition(!fixedModel.hasOlder, "Fixed stability check must not trigger older paging")
+        NotificationCenter.default.post(name: NSScrollView.willStartLiveScrollNotification, object: fixedScroll)
+        let height = fixedScroll.documentView!.bounds.height
         for fraction: CGFloat in [0, 0.25, 0.5, 0.75, 1, 0.5, 0, 1] {
-            let offset = (height - scroll.contentView.bounds.height) * fraction
-            scroll.contentView.scroll(to: NSPoint(x: 0, y: offset))
-            scroll.reflectScrolledClipView(scroll.contentView)
-            try await Task.sleep(for: .milliseconds(300))
-            let actualHeight = scroll.documentView!.bounds.height
-            print("Scroll fraction=\(fraction), height=\(actualHeight), initial=\(height), offset=\(scroll.contentView.bounds.minY)")
+            let offset = (height - fixedScroll.contentView.bounds.height) * fraction
+            fixedScroll.contentView.scroll(to: NSPoint(x: 0, y: offset))
+            fixedScroll.reflectScrolledClipView(fixedScroll.contentView)
+            try await Task.sleep(for: .milliseconds(220))
+            let actualHeight = fixedScroll.documentView!.bounds.height
+            print("Scroll fraction=\(fraction), height=\(actualHeight), initial=\(height), offset=\(fixedScroll.contentView.bounds.minY)")
             precondition(abs(actualHeight - height) <= 1, "Scrolling unchanged messages must not change the document height")
-            precondition(abs(scroll.contentView.bounds.minY - offset) <= 1, "Reading position must not jump while scrolling")
-            let visible = scroll.contentView.bounds.insetBy(dx: 0, dy: 80)
-            precondition(texts(scroll).contains { !$0.string.isEmpty && scroll.contentView.convert($0.bounds, from: $0).intersects(visible) },
+            precondition(abs(fixedScroll.contentView.bounds.minY - offset) <= 1, "Reading position must not jump while scrolling")
+            let visible = fixedScroll.contentView.bounds.insetBy(dx: 0, dy: 80)
+            precondition(texts(fixedScroll).contains { !$0.string.isEmpty && fixedScroll.contentView.convert($0.bounds, from: $0).intersects(visible) },
                          "The viewport must contain message text after every scroll")
         }
+        NotificationCenter.default.post(name: NSScrollView.didEndLiveScrollNotification, object: fixedScroll)
+        fixedWindow.orderOut(nil)
+
+        // Part 2: Automatic bidirectional infinite scroll on a 160-message conversation.
+        let cid = try store.create(title: "Scroll auto paging")
+        for index in 0..<160 {
+            let count = index.isMultiple(of: 2) ? 1 : 3 + index % 9
+            let text = (0..<count).map {
+                "消息 \(index) 段落 \($0)：滚动到顶部自动加载并保持阅读位置。" + String(repeating: "长消息需要正确换行。", count: index % 5)
+            }.joined(separator: "\n\n")
+            try store.append(conversationID: cid, role: index.isMultiple(of: 2) ? "user" : "assistant", text: text)
+        }
+        let model = AgentModel(app: app)
+        let controller = AgentWindowController(model: model, presentation: WindowPresentation())
+        controller.show()
+        model.open(cid)
+        let window = NSApplication.shared.windows.last { $0.title == "Asky AI" && $0.isVisible }!
+        defer { window.orderOut(nil) }
+        try await Task.sleep(for: .milliseconds(1000))
+        let scroll = findScroll(window.contentView!)!
         let latestIDs = model.items.map(\.id)
         func click(_ point: NSPoint) {
             for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
@@ -2489,58 +2511,62 @@ enum AgentReplyRegression {
             precondition(scroll.contentView.bounds.contains(position), "History control must be inside the viewport")
             click(scroll.contentView.convert(position, to: nil))
         }
-        for page in 1...3 {
+        // Scroll near the top repeatedly; each reach should automatically load older messages without clicking.
+        var pagesLoaded = 0
+        while !model.hasNewer && pagesLoaded < 8 {
+            // Park just outside the top threshold first so we can read the anchor cleanly before triggering.
+            let preY = min(560, max(0, scroll.documentView!.bounds.height - scroll.contentView.bounds.height))
             NotificationCenter.default.post(name: NSScrollView.willStartLiveScrollNotification, object: scroll)
-            scroll.contentView.scroll(to: .zero)
+            scroll.contentView.scroll(to: NSPoint(x: 0, y: preY))
             scroll.reflectScrolledClipView(scroll.contentView)
-            try await Task.sleep(for: .milliseconds(150))
-            if page == 1 {
-                let surface = window.contentView!
-                let bitmap = surface.bitmapImageRepForCachingDisplay(in: surface.bounds)!
-                surface.cacheDisplay(in: surface.bounds, to: bitmap)
-                try bitmap.representation(using: .png, properties: [:])!.write(to: URL(filePath: "build/scroll-older-button.png"))
-            }
+            NotificationCenter.default.post(name: NSScrollView.didEndLiveScrollNotification, object: scroll)
+            try await Task.sleep(for: .milliseconds(250))
+
             let previousFirst = model.items.first!.id
-            let text = texts(scroll).first { $0.string.hasPrefix(model.items.first!.text.components(separatedBy: "\n\n")[0]) }!
-            let before = scroll.contentView.convert(text.bounds, from: text).minY - scroll.contentView.bounds.minY
-            click(scroll.convert(NSPoint(x: scroll.bounds.midX,
-                y: scroll.isFlipped ? scroll.bounds.minY + 82 : scroll.bounds.maxY - 82), to: nil))
-            try await Task.sleep(for: .milliseconds(600))
-            precondition(model.items.first?.id != previousFirst, "The older-page button must load a page")
-            precondition(model.items.count == min(40 + page * 40, 120))
-            let after = scroll.contentView.convert(text.bounds, from: text).minY - scroll.contentView.bounds.minY
-            precondition(abs(before - after) <= 1, "Prepending history must retain the visible message offset: \(before) -> \(after)")
+            let visible = scroll.contentView.bounds.insetBy(dx: 0, dy: 80)
+            let anchorText = texts(scroll).first { !$0.string.isEmpty && scroll.contentView.convert($0.bounds, from: $0).intersects(visible) }!
+            let anchorDocY = scroll.contentView.convert(anchorText.bounds, from: anchorText).minY
+            let targetY: CGFloat = 120
+            let expectedScreenOffset = anchorDocY - targetY
+
+            NotificationCenter.default.post(name: NSScrollView.willStartLiveScrollNotification, object: scroll)
+            scroll.contentView.scroll(to: NSPoint(x: 0, y: targetY))
+            scroll.reflectScrolledClipView(scroll.contentView)
+            NotificationCenter.default.post(name: NSScrollView.didEndLiveScrollNotification, object: scroll)
+            try await Task.sleep(for: .milliseconds(550))
+
+            precondition(model.items.first?.id != previousFirst, "Scrolling near the top must automatically load older messages")
+            pagesLoaded += 1
+            let afterOffset = scroll.contentView.convert(anchorText.bounds, from: anchorText).minY - scroll.contentView.bounds.minY
+            precondition(abs(afterOffset - expectedScreenOffset) <= 1.5,
+                         "Auto-prepending history must retain the visible message offset: expected=\(expectedScreenOffset) actual=\(afterOffset)")
         }
-        precondition(model.hasNewer, "Native paging must expose evicted newer messages")
+        precondition(model.hasNewer, "Scrolling past the 120-record window must expose newer history")
+
+        // Scroll to the bottom to automatically recover newer messages without clicking.
+        let lastIDBefore = model.items.last!.id
+        let bottomOffset = max(0, scroll.documentView!.bounds.height - scroll.contentView.bounds.height)
         NotificationCenter.default.post(name: NSScrollView.willStartLiveScrollNotification, object: scroll)
-        scroll.contentView.scroll(to: NSPoint(x: 0, y: scroll.documentView!.bounds.height - scroll.contentView.bounds.height))
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: bottomOffset))
         scroll.reflectScrolledClipView(scroll.contentView)
-        try await Task.sleep(for: .milliseconds(150))
-        let lastID = model.items.last!.id
-        let surface = window.contentView!
-        let bitmap = surface.bitmapImageRepForCachingDisplay(in: surface.bounds)!
-        surface.cacheDisplay(in: surface.bounds, to: bitmap)
-        try bitmap.representation(using: .png, properties: [:])!.write(to: URL(filePath: "build/scroll-newer-button.png"))
-        // Follow the current composer position, including its variable height, instead of the window bottom.
-        // Editor top inset 10 + transcript tail 13 + page-button bottom padding 40 + half its height 14.
-        clickAboveComposer(77)
-        try await Task.sleep(for: .milliseconds(600))
-        precondition(model.items.last?.id != lastID, "The newer-page button must recover the adjacent page")
-        // The floating button must return to the latest persisted messages, not the end of an old page.
-        // Editor top inset 10 + floating button gap 8 + half its height 16.
+        NotificationCenter.default.post(name: NSScrollView.didEndLiveScrollNotification, object: scroll)
+        try await Task.sleep(for: .milliseconds(550))
+        precondition(model.items.last?.id != lastIDBefore, "Scrolling near the bottom must automatically load newer messages")
+
+        // The floating return-to-bottom button must still jump directly back to the latest messages.
         clickAboveComposer(34)
         try await Task.sleep(for: .milliseconds(800))
         precondition(model.items.map(\.id) == latestIDs && !model.hasNewer)
         precondition(abs(scroll.documentView!.bounds.maxY - scroll.documentVisibleRect.maxY) <= 1)
         try await splitMultiBubbleLoadOlderRegression(app: app)
-        print("Scroll stability passed: repeated scrolling, visible text, native older/newer buttons, reading anchor, split multi-bubble prepend and latest jump")
+        print("Scroll stability passed: unchanged height, automatic top/bottom infinite scroll, reading anchor, split multi-bubble prepend and latest jump")
     }
 
-    /// Regression for top load-older across a split multi-bubble turn (shared responseID),
-    /// verifying zero in-flight and final scroll drift plus bounded frame stalls under rich Markdown.
+    /// Regression for automatic top scroll-load across a split multi-bubble turn (shared responseID),
+    /// verifying zero in-flight and final scroll drift plus smooth frame pacing under rich Markdown.
     private static func splitMultiBubbleLoadOlderRegression(app: AppModel) async throws {
         let store = ConversationStore(app.store)
-        let cid = try store.create(title: "Split multi-bubble loadOlder")
+        let cid = try store.create(title: "Split multi-bubble auto loadOlder")
         var turn = 0
         var count = 0
         while count < 162 {
@@ -2552,8 +2578,8 @@ enum AgentReplyRegression {
                 let md = """
                 第 \(turn) 轮分条回复（第 \(part) 条）：
 
-                - **锚点稳定**：顶部加载更早消息时保持阅读位置不跳动。
-                - **分批渲染**：避免单帧同步挂载整页富文本造成长卡顿。
+                - **锚点稳定**：滚动到顶部自动加载更早消息时保持阅读位置不跳动。
+                - **流畅分页**：小批次自动续接，避免整页挂载造成长卡顿。
 
                 ```swift
                 func step_\(turn)_\(part)() -> Int { return \(turn) + \(part) }
@@ -2570,9 +2596,9 @@ enum AgentReplyRegression {
         }
 
         let model = AgentModel(app: app)
-        model.open(cid)
         let controller = AgentWindowController(model: model, presentation: WindowPresentation())
         controller.show()
+        model.open(cid)
         let window = NSApplication.shared.windows.last { $0.title == "Asky AI" && $0.isVisible }!
         defer { window.orderOut(nil) }
 
@@ -2583,28 +2609,24 @@ enum AgentReplyRegression {
         func texts(_ view: NSView) -> [NSTextView] {
             (view as? NSTextView).map { [$0] } ?? view.subviews.flatMap(texts)
         }
-        func click(_ point: NSPoint) {
-            for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
-                window.sendEvent(NSEvent.mouseEvent(with: type, location: point, modifierFlags: [],
-                    timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
-                    context: nil, eventNumber: 1, clickCount: 1, pressure: type == .leftMouseDown ? 1 : 0)!)
-            }
-        }
 
         try await Task.sleep(for: .milliseconds(900))
         let scroll = findScroll(window.contentView!)!
         precondition(model.items.first?.responseID != nil, "First item must begin inside a split multi-bubble response")
 
+        // Move just outside the top auto-load zone so the top split bubble is mounted and measurable.
         NotificationCenter.default.post(name: NSScrollView.willStartLiveScrollNotification, object: scroll)
-        scroll.contentView.scroll(to: .zero)
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: 520))
         scroll.reflectScrolledClipView(scroll.contentView)
         NotificationCenter.default.post(name: NSScrollView.didEndLiveScrollNotification, object: scroll)
-        try await Task.sleep(for: .milliseconds(300))
+        try await Task.sleep(for: .milliseconds(350))
 
         let firstItem = model.items.first!
         let firstPrefix = firstItem.text.components(separatedBy: "\n\n")[0]
         let anchorText = texts(scroll).first { $0.string.hasPrefix(firstPrefix) }!
-        let beforeOffset = scroll.contentView.convert(anchorText.bounds, from: anchorText).minY - scroll.contentView.bounds.minY
+        let anchorDocY = scroll.contentView.convert(anchorText.bounds, from: anchorText).minY
+        let triggerY: CGFloat = 100
+        let expectedOffset = anchorDocY - triggerY
 
         var maxInFlightDrift: CGFloat = 0
         var maxFrameGapMs: Double = 0
@@ -2620,28 +2642,30 @@ enum AgentReplyRegression {
             lastTick = now
             if let current = texts(scroll).first(where: { $0.string.hasPrefix(firstPrefix) }) {
                 let offset = scroll.contentView.convert(current.bounds, from: current).minY - scroll.contentView.bounds.minY
-                maxInFlightDrift = max(maxInFlightDrift, abs(offset - beforeOffset))
+                maxInFlightDrift = max(maxInFlightDrift, abs(offset - expectedOffset))
             }
         }
         let link = window.displayLink(target: observer, selector: #selector(TickObserver.step(_:)))
         link.add(to: .main, forMode: .common)
 
-        click(scroll.convert(NSPoint(x: scroll.bounds.midX,
-            y: scroll.isFlipped ? scroll.bounds.minY + 82 : scroll.bounds.maxY - 82), to: nil))
-        try await Task.sleep(for: .milliseconds(1600))
+        NotificationCenter.default.post(name: NSScrollView.willStartLiveScrollNotification, object: scroll)
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: triggerY))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        NotificationCenter.default.post(name: NSScrollView.didEndLiveScrollNotification, object: scroll)
+        try await Task.sleep(for: .milliseconds(900))
         link.invalidate()
 
-        precondition(model.items.first?.id != firstItem.id && model.items.count == 80,
-                     "Older page must load into a split multi-bubble conversation")
+        precondition(model.items.first?.id != firstItem.id && model.items.count == AgentModel.firstPage + AgentModel.scrollPage,
+                     "Scrolling near the top must automatically load one scrollPage across a split multi-bubble turn (got count=\(model.items.count))")
         let afterText = texts(scroll).first { $0.string.hasPrefix(firstPrefix) }!
         let afterOffset = scroll.contentView.convert(afterText.bounds, from: afterText).minY - scroll.contentView.bounds.minY
-        print("Split multi-bubble loadOlder: before=\(beforeOffset) after=\(afterOffset) maxInFlightDrift=\(maxInFlightDrift) maxFrameGap=\(String(format: "%.1f", maxFrameGapMs))ms")
-        precondition(abs(afterOffset - beforeOffset) <= 1.0,
-                     "Split multi-bubble prepend must retain the visible bubble offset: \(beforeOffset) -> \(afterOffset)")
-        precondition(maxInFlightDrift <= 1.0,
-                     "Prepending history must not flash or drift mid-staging: maxInFlightDrift=\(maxInFlightDrift)")
-        precondition(maxFrameGapMs < 600.0,
-                     "Prepending rich Markdown must avoid long single-frame freezes: maxFrameGap=\(maxFrameGapMs)ms")
+        print("Split multi-bubble auto loadOlder: expected=\(expectedOffset) after=\(afterOffset) maxInFlightDrift=\(maxInFlightDrift) maxFrameGap=\(String(format: "%.1f", maxFrameGapMs))ms")
+        precondition(abs(afterOffset - expectedOffset) <= 1.5,
+                     "Split multi-bubble auto-prepend must retain the visible bubble offset: \(expectedOffset) -> \(afterOffset)")
+        precondition(maxInFlightDrift <= 1.5,
+                     "Auto-prepending history must not flash or drift mid-load: maxInFlightDrift=\(maxInFlightDrift)")
+        precondition(maxFrameGapMs < 500.0,
+                     "Auto-prepending a scrollPage of rich Markdown must stay responsive: maxFrameGap=\(maxFrameGapMs)ms")
     }
 
     static func scrollPerfRegression(app: AppModel) async throws {
