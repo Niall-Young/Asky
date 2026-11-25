@@ -132,10 +132,15 @@ struct FormPickerOverlayPresentation: ViewModifier {
                                 .background(ChatFormControlMarker(id: "form-picker-overlay"))
                                 .background(FormPickerViewReader(controller: controller).allowsHitTesting(false))
                                 .fixedSize()
-                                .onGeometryChange(for: CGSize.self) { $0.size } action: { measuredSize = $0 }
+                                .onGeometryChange(for: CGSize.self) { $0.size } action: { newSize in
+                                    if abs(newSize.width - effectiveSize.width) > 1
+                                        || abs(newSize.height - effectiveSize.height) > 1 {
+                                        measuredSize = newSize
+                                    }
+                                }
                                 .anchoredOverlayOrigin(placement.origin)
                                 .transition(
-                                    AnchoredPopoverMotion.transition(
+                                    AnchoredPopoverMotion.pickerTransition(
                                         anchor: anchorPoint,
                                         placedAbove: placement.placedAbove,
                                         reduceMotion: reduceMotion
@@ -146,7 +151,7 @@ struct FormPickerOverlayPresentation: ViewModifier {
                     }
                     .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
                     .animation(
-                        AnchoredPopoverMotion.animation(
+                        AnchoredPopoverMotion.pickerAnimation(
                             isPresented: controller.isPresented,
                             reduceMotion: reduceMotion
                         ),

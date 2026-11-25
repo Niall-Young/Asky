@@ -763,7 +763,7 @@ struct ChatFormDateTimeRangePopover: View {
     }
 
     static func preferredSize(for field: ChatForm.Field) -> CGSize {
-        CGSize(width: 248 + 12 + 1 + 12 + timeColumnsWidth(for: field) + 28, height: 356)
+        CGSize(width: 248 + 12 + 1 + 12 + timeColumnsWidth(for: field) + 28, height: 342)
     }
 
     private var currentRange: (startDate: Date, startTime: [Int], endDate: Date, endTime: [Int]) {
@@ -1172,7 +1172,7 @@ struct ChatFormDateRangePopover: View {
     @Environment(\.colorScheme) private var scheme
     @Environment(\.formPickerOverlay) private var pickerOverlay
 
-    static let preferredSize = CGSize(width: 276, height: 356)
+    static let preferredSize = CGSize(width: 276, height: 342)
 
     private var currentRange: (start: Date, end: Date) {
         if let parsed = field.dateRangeComponents(value) {
@@ -1514,7 +1514,7 @@ struct ChatFormTimeRangePopover: View {
         case 2: 204
         default: 248
         }
-        return CGSize(width: width, height: 300)
+        return CGSize(width: width, height: 286)
     }
 
     private var currentRange: (start: [Int], end: [Int]) {
@@ -1642,9 +1642,9 @@ private struct ChatFormRangeTabs: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 8) {
             ChatFormRangeTabPill(
-                title: NSLocalizedString("开始", comment: ""),
+                accessibilityRole: NSLocalizedString("开始", comment: ""),
                 value: startSummary,
                 active: !editingEnd,
                 identifier: "chat-form-range-start"
@@ -1656,13 +1656,13 @@ private struct ChatFormRangeTabs: View {
                 }
             }
 
-            Text(verbatim: "→")
-                .font(.system(size: 12, weight: .medium))
+            Text(verbatim: "–")
+                .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(ThemeColor.kTextSubtlest.color(for: scheme))
                 .accessibilityHidden(true)
 
             ChatFormRangeTabPill(
-                title: NSLocalizedString("结束", comment: ""),
+                accessibilityRole: NSLocalizedString("结束", comment: ""),
                 value: endSummary,
                 active: editingEnd,
                 identifier: "chat-form-range-end"
@@ -1678,7 +1678,7 @@ private struct ChatFormRangeTabs: View {
 }
 
 private struct ChatFormRangeTabPill: View {
-    let title: String
+    let accessibilityRole: String
     let value: String
     let active: Bool
     let identifier: String
@@ -1703,40 +1703,32 @@ private struct ChatFormRangeTabPill: View {
 
     var body: some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(
-                        active
-                            ? ThemeColor.kTextSubtle.color(for: scheme)
-                            : ThemeColor.kTextSubtlest.color(for: scheme)
-                    )
-                Text(value)
-                    .font(.system(size: 13, weight: active ? .semibold : .regular))
-                    .monospacedDigit()
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.85)
-                    .foregroundStyle(
-                        active
-                            ? ThemeColor.kText.color(for: scheme)
-                            : ThemeColor.kTextSubtle.color(for: scheme)
-                    )
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(fill, in: shape)
-            .overlay {
-                if active {
-                    shape.strokeBorder(ThemeColor.kBorder.color(for: scheme), lineWidth: 1)
-                        .allowsHitTesting(false)
+            Text(value)
+                .font(.system(size: 13, weight: active ? .semibold : .regular))
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+                .foregroundStyle(
+                    active
+                        ? ThemeColor.kText.color(for: scheme)
+                        : ThemeColor.kTextSubtle.color(for: scheme)
+                )
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .background(fill, in: shape)
+                .overlay {
+                    if active {
+                        shape.strokeBorder(ThemeColor.kBorder.color(for: scheme), lineWidth: 1)
+                            .allowsHitTesting(false)
+                    }
                 }
-            }
-            .contentShape(shape)
+                .contentShape(shape)
         }
         .buttonStyle(.plain)
         .onHover { hovered = $0 }
         .background(ChatFormControlMarker(id: identifier))
+        .accessibilityLabel("\(accessibilityRole) \(value)")
         .accessibilityIdentifier(identifier)
         .accessibilityAddTraits(active ? [.isSelected] : [])
     }
