@@ -2140,6 +2140,11 @@ private final class UserMessageHoverState {
     var bubbleHovered = false
 }
 
+@MainActor private enum ChatSideActionButtonLayout {
+    static let iconSize: CGFloat = ApprovalModePicker.iconSize
+    static let buttonSize: CGFloat = 28
+}
+
 private struct ChatCopyButton: View {
     let text: String
     @Binding var copyFeedbackID: UUID?
@@ -2152,12 +2157,13 @@ private struct ChatCopyButton: View {
         } label: {
             Group {
                 if copyFeedbackID != nil {
-                    Image(mingCute: "checkmark", size: 14)
+                    Image(mingCute: "checkmark", size: ChatSideActionButtonLayout.iconSize)
                 } else {
-                    Image("ChatCopy").resizable().scaledToFit().frame(width: 14, height: 14)
+                    Image("ChatCopy").resizable().scaledToFit()
+                        .frame(width: ChatSideActionButtonLayout.iconSize, height: ChatSideActionButtonLayout.iconSize)
                 }
             }
-            .frame(width: 16, height: 16).padding(6)
+            .frame(width: ChatSideActionButtonLayout.buttonSize, height: ChatSideActionButtonLayout.buttonSize)
         }
         .buttonStyle(AgentIconButtonStyle()).foregroundStyle(ThemeColor("iconSubtlest"))
         .accessibilityLabel(copyFeedbackID != nil ? NSLocalizedString("已复制", comment: "") : NSLocalizedString("复制消息", comment: ""))
@@ -2180,8 +2186,8 @@ private struct ChatReplyButton: View {
 
     var body: some View {
         Button(action: action) {
-            Image(mingCute: "share_forward", size: 14)
-                .frame(width: 16, height: 16).padding(6)
+            Image(mingCute: "share_forward", size: ChatSideActionButtonLayout.iconSize)
+                .frame(width: ChatSideActionButtonLayout.buttonSize, height: ChatSideActionButtonLayout.buttonSize)
         }
         .buttonStyle(AgentIconButtonStyle())
         .foregroundStyle(ThemeColor("iconSubtlest"))
@@ -2196,8 +2202,9 @@ private struct ChatEmojiButton: View {
 
     var body: some View {
         Button(action: action) {
-            Image("ChatEmoji").resizable().scaledToFit().frame(width: 14, height: 14)
-                .frame(width: 16, height: 16).padding(6)
+            Image("ChatEmoji").resizable().scaledToFit()
+                .frame(width: ChatSideActionButtonLayout.iconSize, height: ChatSideActionButtonLayout.iconSize)
+                .frame(width: ChatSideActionButtonLayout.buttonSize, height: ChatSideActionButtonLayout.buttonSize)
         }
         .buttonStyle(AgentIconButtonStyle())
         .foregroundStyle(isActive ? ThemeColor.kText : ThemeColor("iconSubtlest"))
@@ -2212,9 +2219,9 @@ private struct ChatMoreButton: View {
 
     var body: some View {
         Button(action: action) {
-            Image(mingCute: "ellipsis.vertical", size: 14)
+            Image(mingCute: "ellipsis.vertical", size: ChatSideActionButtonLayout.iconSize)
                 .rotationEffect(.degrees(90))
-                .frame(width: 16, height: 16).padding(6)
+                .frame(width: ChatSideActionButtonLayout.buttonSize, height: ChatSideActionButtonLayout.buttonSize)
         }
         .buttonStyle(AgentIconButtonStyle())
         .foregroundStyle(isActive ? ThemeColor.kText : ThemeColor("iconSubtlest"))
