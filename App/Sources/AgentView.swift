@@ -96,16 +96,18 @@ final class AgentWindowController {
     }
 }
 
-private enum AgentLayout {
+enum AgentLayout {
     // Figma UI page 22:293, new chat 43:1072, conversation 42:761.
     static let radius: CGFloat = LauncherLayout.shellCornerRadius
     static let message = TextStyle(size: 14, weight: 400, mode: .default)
     static let headerHeight: CGFloat = 64
     static let toastTopInset: CGFloat = 48
-    static let messageHorizontalInset: CGFloat = 18
-    static let messageVerticalInset: CGFloat = 14
-    static let userMessageVerticalInset: CGFloat = 12
-    static let bubbleCornerRadius: CGFloat = 16
+    static let messageHorizontalInset: CGFloat = 14
+    static let messageVerticalInset: CGFloat = 9
+    static let userMessageVerticalInset: CGFloat = 9
+    /// Exact half of a single-line text bubble (21 pt text + 18 pt vertical padding = 39 pt),
+    /// so single-line bubbles form a true capsule and multi-line bubbles reuse the same radius.
+    static let bubbleCornerRadius: CGFloat = 19.5
     static let linkedBubbleCornerRadius: CGFloat = 4
     static let linkedBubbleSpacing: CGFloat = 4
     static let groupInternalSpacing: CGFloat = 12
@@ -1444,7 +1446,7 @@ private struct ChatTypingBubble: View {
                         .opacity(0.35 + wave * 0.65)
                 }
             }
-            .padding(.horizontal, 16).padding(.vertical, 16)
+            .padding(.horizontal, AgentLayout.messageHorizontalInset).padding(.vertical, 17)
             .background {
                 grouping.shape(for: .leading).fill(ThemeColor.kBackgroundNeutral)
                     .matchedGeometryEffect(id: "reply-surface", in: bubbleMotion, properties: reduceMotion ? [] : .frame, anchor: .topLeading)
@@ -1940,10 +1942,12 @@ private struct ChatBubble: View {
             }
         case .notice:
             Text(item.text).textStyle(.secondary).foregroundStyle(ThemeColor.kTextSubtle)
-                .padding(12).background(ThemeColor.kBackgroundNeutral, in: .rect(cornerRadius: 16))
+                .padding(.horizontal, AgentLayout.messageHorizontalInset).padding(.vertical, AgentLayout.messageVerticalInset)
+                .background(ThemeColor.kBackgroundNeutral, in: .rect(cornerRadius: AgentLayout.bubbleCornerRadius))
         case .error:
             Label { Text(item.text) } icon: { Image(mingCute: "warning", size: 16) }.textStyle(.secondary).foregroundStyle(ThemeColor.kTextNegative)
-                .padding(12).background(ThemeColor.kBackgroundNeutral, in: .rect(cornerRadius: 16))
+                .padding(.horizontal, AgentLayout.messageHorizontalInset).padding(.vertical, AgentLayout.messageVerticalInset)
+                .background(ThemeColor.kBackgroundNeutral, in: .rect(cornerRadius: AgentLayout.bubbleCornerRadius))
         }
     }
 

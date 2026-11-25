@@ -184,9 +184,9 @@ extension AgentReplyRegression {
                 let initial = text.convert(text.bounds, to: surface)
                 let answerFrame = answer.convert(answer.bounds, to: surface)
                 let textFrame = text.convert(text.bounds, to: nil)
-                // Left side action bar sits 8 pt left of the bubble (18 pt text inset),
+                // Left side action bar sits 8 pt left of the bubble,
                 // containing More (28 pt) + 2 pt gap + Copy (28 pt), centered vertically.
-                let copyPoint = NSPoint(x: textFrame.minX - 40, y: textFrame.midY)
+                let copyPoint = NSPoint(x: textFrame.minX - AgentLayout.messageHorizontalInset - 8 - 14, y: textFrame.midY)
                 let copyRect = surface.convert(NSRect(x: copyPoint.x - 14, y: copyPoint.y - 14, width: 28, height: 28), from: nil)
                 func snapshot() -> NSBitmapImageRep {
                     let bitmap = surface.bitmapImageRepForCachingDisplay(in: surface.bounds)!
@@ -203,7 +203,7 @@ extension AgentReplyRegression {
                 }
                 let initialBitmap = snapshot()
                 let hiddenCopy = pixels(initialBitmap, in: copyRect)
-                let bubbleRect = initial.insetBy(dx: -18, dy: -14)
+                let bubbleRect = initial.insetBy(dx: -AgentLayout.messageHorizontalInset, dy: -AgentLayout.userMessageVerticalInset)
                 let beforeBubble = pixels(initialBitmap, in: bubbleRect)
                 print("Hover \(sampleIndex) \(name) initial: \(initial)")
                 for index in 0..<12 {
@@ -341,7 +341,7 @@ extension AgentReplyRegression {
             window.makeKeyAndOrderFront(nil)
             move(window.convertPoint(toScreen: NSPoint(x: replyFrame.midX, y: replyFrame.midY)))
             try await Task.sleep(for: .milliseconds(250))
-            let aiBarLeft = replyFrame.maxX + 18 + 8
+            let aiBarLeft = replyFrame.maxX + AgentLayout.messageHorizontalInset + 8
             let aiEmojiPoint = NSPoint(x: aiBarLeft + 14, y: replyFrame.midY)
             let aiMorePoint = NSPoint(x: aiBarLeft + 72, y: replyFrame.midY)
             try await click(aiEmojiPoint, in: window)
@@ -360,7 +360,7 @@ extension AgentReplyRegression {
             window.makeKeyAndOrderFront(nil)
             move(window.convertPoint(toScreen: NSPoint(x: lowerReplyFrame.midX, y: lowerReplyFrame.midY)))
             try await Task.sleep(for: .milliseconds(250))
-            let lowerBarLeft = lowerReplyFrame.maxX + 18 + 8
+            let lowerBarLeft = lowerReplyFrame.maxX + AgentLayout.messageHorizontalInset + 8
             let lowerEmojiPoint = NSPoint(x: lowerBarLeft + 14, y: lowerReplyFrame.midY)
             try await click(lowerEmojiPoint, in: window)
             let lowerExpandPoint = NSPoint(x: min(560 - 12 - 20, lowerEmojiPoint.x + 102), y: lowerReplyFrame.midY + 14 + 6 + 20)
@@ -424,7 +424,7 @@ extension AgentReplyRegression {
             window.makeKeyAndOrderFront(nil)
             move(window.convertPoint(toScreen: NSPoint(x: userFrame.midX, y: userFrame.midY)))
             try await Task.sleep(for: .milliseconds(250))
-            let userMorePoint = NSPoint(x: userFrame.minX - 18 - 8 - 44, y: userFrame.midY)
+            let userMorePoint = NSPoint(x: userFrame.minX - AgentLayout.messageHorizontalInset - 8 - 44, y: userFrame.midY)
             try await click(userMorePoint, in: window)
             try capture("user-more-\(name)")
 

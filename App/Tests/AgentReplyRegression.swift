@@ -855,8 +855,8 @@ enum AgentReplyRegression {
         """
         for (name, scheme) in [("light", ColorScheme.light), ("dark", .dark)] {
             let hosted = NSHostingView(rootView: ChatMarkdownView(text: bulletAlignmentSample)
-                .padding(.horizontal, 18).padding(.vertical, 14)
-                .background(scheme == .dark ? Color(white: 0.18) : Color(white: 0.94), in: RoundedRectangle(cornerRadius: 16))
+                .padding(.horizontal, AgentLayout.messageHorizontalInset).padding(.vertical, AgentLayout.messageVerticalInset)
+                .background(scheme == .dark ? Color(white: 0.18) : Color(white: 0.94), in: RoundedRectangle(cornerRadius: AgentLayout.bubbleCornerRadius))
                 .padding(16)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .background(scheme == .dark ? Color(white: 0.12) : Color(white: 0.96))
@@ -1076,10 +1076,10 @@ enum AgentReplyRegression {
             let content = VStack(alignment: .leading, spacing: 0) {
                 ChatMarkdownView(text: wideTable)
             }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 14)
+            .padding(.horizontal, AgentLayout.messageHorizontalInset)
+            .padding(.vertical, AgentLayout.messageVerticalInset)
             .frame(width: 496, alignment: .topLeading)
-            .background(RoundedRectangle(cornerRadius: 16).fill(scheme == .dark ? Color.white.opacity(0.06) : Color.black.opacity(0.06)))
+            .background(RoundedRectangle(cornerRadius: AgentLayout.bubbleCornerRadius).fill(scheme == .dark ? Color.white.opacity(0.06) : Color.black.opacity(0.06)))
             .padding(20)
             .frame(width: 536, height: 360, alignment: .topLeading)
             .background(scheme == .dark ? Color(white: 0.14) : Color(white: 0.94))
@@ -2382,7 +2382,8 @@ enum AgentReplyRegression {
         func assertAligned(_ id: String) {
             let reply = marker("transcript-reply-" + id)!
             let offset = scroll.contentView.convert(reply.bounds, from: reply).minY - scroll.contentView.bounds.minY
-            precondition(abs(offset - 90) <= 2, "Original reply text must begin below the toolbar: \(offset)")
+            let expectedTopInset = AgentLayout.headerHeight + 12 + AgentLayout.messageVerticalInset
+            precondition(abs(offset - expectedTopInset) <= 2, "Original reply text must begin below the toolbar: \(offset)")
         }
         assertAligned(long.id)
         let surface = window.contentView!
@@ -2700,7 +2701,8 @@ enum AgentReplyRegression {
             let reply = findReply(window.contentView!, id: model.items.last(where: { $0.kind == .assistant })!.id)!
             let rect = scroll.contentView.convert(reply.bounds, from: reply)
             if CommandLine.arguments.contains("--restored-long-reply") {
-                precondition(abs(rect.minY - scroll.contentView.bounds.minY - 90) <= 1,
+                let expectedTopInset = AgentLayout.headerHeight + 12 + AgentLayout.messageVerticalInset
+                precondition(abs(rect.minY - scroll.contentView.bounds.minY - expectedTopInset) <= 1,
                              "A restored long answer must begin below the header with its bubble padding")
             } else {
                 precondition(abs(gap) <= 1, "Restored short replies must stay at the natural bottom without a blank screen")
@@ -2902,7 +2904,8 @@ enum AgentReplyRegression {
         let visible = scroll.contentView.bounds.maxY - rect.minY
         precondition(visible > 250 && rect.height > visible,
                      "Long replies must fill the viewport from their beginning: visible=\(visible)")
-        precondition(abs(rect.minY - scroll.contentView.bounds.minY - 90) <= 1,
+        let expectedTopInset = AgentLayout.headerHeight + 12 + AgentLayout.messageVerticalInset
+        precondition(abs(rect.minY - scroll.contentView.bounds.minY - expectedTopInset) <= 1,
                      "Long answers stop at the beginning of the bubble, allowing the user question to move above it")
         print("Long reply visible height: \(visible)")
         try capture("completed")
@@ -3777,7 +3780,8 @@ enum AgentReplyRegression {
                 failures.append("Last reply marker must already be mounted on first visible frame (\(label), active=\(activeBeforeShow))")
             }
             if expectsReplyTop {
-                let firstTopGap = abs((first.replyClipMinY ?? -999) - 90)
+                let expectedTopInset = AgentLayout.headerHeight + 12 + AgentLayout.messageVerticalInset
+                let firstTopGap = abs((first.replyClipMinY ?? -999) - expectedTopInset)
                 if firstTopGap > 2 {
                     failures.append("First visible frame for long reply must already align to reply top (\(label), active=\(activeBeforeShow), gap=\(firstTopGap))")
                 }
@@ -4550,26 +4554,29 @@ enum AgentReplyRegression {
 
     static func bubbleChainRegression(app: AppModel) async throws {
         // 1. Unit-verify corner radii and spacing rules across solo, 2-bubble, 3-bubble, typing, reaction, and card cases.
+        let r = AgentLayout.bubbleCornerRadius
+        let linked = AgentLayout.linkedBubbleCornerRadius
+        precondition(r == 19.5, "Bubble corner radius must match single-line capsule radius (19.5 pt), got \(r)")
         let soloLeading = ChatBubbleGrouping.solo.cornerRadii(for: .leading)
-        precondition(soloLeading == RectangleCornerRadii(topLeading: 16, bottomLeading: 16, bottomTrailing: 16, topTrailing: 16),
-                     "Solo leading bubble must use full 16pt corners")
+        precondition(soloLeading == RectangleCornerRadii(topLeading: r, bottomLeading: r, bottomTrailing: r, topTrailing: r),
+                     "Solo leading bubble must use full capsule corner radius")
         let soloTrailing = ChatBubbleGrouping.solo.cornerRadii(for: .trailing)
-        precondition(soloTrailing == RectangleCornerRadii(topLeading: 16, bottomLeading: 16, bottomTrailing: 16, topTrailing: 16),
-                     "Solo trailing bubble must use full 16pt corners")
+        precondition(soloTrailing == RectangleCornerRadii(topLeading: r, bottomLeading: r, bottomTrailing: r, topTrailing: r),
+                     "Solo trailing bubble must use full capsule corner radius")
 
         let leadingTop = ChatBubbleGrouping(connectsAbove: false, connectsBelow: true).cornerRadii(for: .leading)
-        precondition(leadingTop == RectangleCornerRadii(topLeading: 16, bottomLeading: 4, bottomTrailing: 16, topTrailing: 16))
+        precondition(leadingTop == RectangleCornerRadii(topLeading: r, bottomLeading: linked, bottomTrailing: r, topTrailing: r))
         let leadingMid = ChatBubbleGrouping(connectsAbove: true, connectsBelow: true).cornerRadii(for: .leading)
-        precondition(leadingMid == RectangleCornerRadii(topLeading: 4, bottomLeading: 4, bottomTrailing: 16, topTrailing: 16))
+        precondition(leadingMid == RectangleCornerRadii(topLeading: linked, bottomLeading: linked, bottomTrailing: r, topTrailing: r))
         let leadingBot = ChatBubbleGrouping(connectsAbove: true, connectsBelow: false).cornerRadii(for: .leading)
-        precondition(leadingBot == RectangleCornerRadii(topLeading: 4, bottomLeading: 16, bottomTrailing: 16, topTrailing: 16))
+        precondition(leadingBot == RectangleCornerRadii(topLeading: linked, bottomLeading: r, bottomTrailing: r, topTrailing: r))
 
         let trailingTop = ChatBubbleGrouping(connectsAbove: false, connectsBelow: true).cornerRadii(for: .trailing)
-        precondition(trailingTop == RectangleCornerRadii(topLeading: 16, bottomLeading: 16, bottomTrailing: 4, topTrailing: 16))
+        precondition(trailingTop == RectangleCornerRadii(topLeading: r, bottomLeading: r, bottomTrailing: linked, topTrailing: r))
         let trailingMid = ChatBubbleGrouping(connectsAbove: true, connectsBelow: true).cornerRadii(for: .trailing)
-        precondition(trailingMid == RectangleCornerRadii(topLeading: 16, bottomLeading: 16, bottomTrailing: 4, topTrailing: 4))
+        precondition(trailingMid == RectangleCornerRadii(topLeading: r, bottomLeading: r, bottomTrailing: linked, topTrailing: linked))
         let trailingBot = ChatBubbleGrouping(connectsAbove: true, connectsBelow: false).cornerRadii(for: .trailing)
-        precondition(trailingBot == RectangleCornerRadii(topLeading: 16, bottomLeading: 16, bottomTrailing: 16, topTrailing: 4))
+        precondition(trailingBot == RectangleCornerRadii(topLeading: r, bottomLeading: r, bottomTrailing: r, topTrailing: linked))
 
         let sampleCard1 = ToolResultCard(
             id: "card-1",
@@ -4689,8 +4696,8 @@ enum AgentReplyRegression {
                 let u2Rect = u2.convert(u2.bounds, to: surface)
                 // In AppKit non-flipped surface coordinates, upper bubble has larger minY.
                 // Outer bubble gap = text vertical distance - 2 * verticalInset.
-                let assistantBubbleGap = (nRect.minY - rRect.maxY) - 28
-                let userBubbleGap = (u1Rect.minY - u2Rect.maxY) - 24
+                let assistantBubbleGap = (nRect.minY - rRect.maxY) - AgentLayout.messageVerticalInset * 2
+                let userBubbleGap = (u1Rect.minY - u2Rect.maxY) - AgentLayout.userMessageVerticalInset * 2
                 print(String(format: "Rendered linked gaps: assistant=%.1f pt, user=%.1f pt", assistantBubbleGap, userBubbleGap))
                 precondition(abs(assistantBubbleGap - 4) <= 2.5,
                              "Linked assistant bubbles must sit ~4pt apart, got \(assistantBubbleGap)")
