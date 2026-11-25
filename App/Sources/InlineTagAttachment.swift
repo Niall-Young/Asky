@@ -137,18 +137,18 @@ final class InlineTagAttachment: NSTextAttachment {
         return floor(bodyFont.descender + (bodyHeight - pillHeight) / 2)
     }()
     static let horizontalMargin: CGFloat = 4
-    static let trailingPadding: CGFloat = 7.5
-    static let iconLeadingPadding: CGFloat = 6
-    static let thumbLeadingPadding: CGFloat = 3
+    static let trailingPadding: CGFloat = 9
+    static let iconLeadingPadding: CGFloat = 7.5
+    static let thumbLeadingPadding: CGFloat = 2.5
     static let iconSpacing: CGFloat = 4.5
     static let thumbSpacing: CGFloat = 5
     static let iconSize: CGFloat = 13
     static let closeIconSize: CGFloat = 12
     static let thumbCloseIconSize: CGFloat = 11
     static let thumbSize: CGFloat = 16
-    static let thumbCornerRadius: CGFloat = 4
+    static let thumbCornerRadius: CGFloat = thumbSize / 2
     static let maxPillWidth: CGFloat = 176
-    static let cornerRadius: CGFloat = 7
+    static let cornerRadius: CGFloat = (pillHeight - 1) / 2
     private static let labelFont = NSFont.systemFont(ofSize: 12.5, weight: .regular)
 
     private struct MarginKey: Hashable {
