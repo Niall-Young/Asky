@@ -479,7 +479,7 @@ final class AgentModel {
             pastedTexts: p?.pastedTexts ?? [], segments: p?.segments,
             agentReaction: p?.agentReaction.flatMap { AgentReactionReply.isEmoji($0) ? $0 : nil },
             userReaction: p?.userReaction.flatMap { AgentReactionReply.isEmoji($0) ? $0 : nil },
-            resultCard: p?.resultCard)
+            resultCard: p?.resultCard?.normalizedForDisplay())
     }
 
     /// Attach or clear the user's emoji reaction on an AI-generated bubble without invoking the agent.

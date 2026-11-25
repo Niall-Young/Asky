@@ -243,4 +243,174 @@ struct ToolResultCardTests {
         #expect(card?.footnote == nil)
         #expect(card?.action?.kind == .openMessagesDraft)
     }
+
+    @Test("Normalizes legacy persisted note, reminder, memory, and mapPlaces cards for display")
+    func normalizesLegacyNoteReminderMemoryAndPlacesCards() {
+        let legacyNote = ToolResultCard(
+            id: "note-legacy",
+            kind: .note,
+            source: .notes,
+            categoryTitle: "备忘录",
+            headline: "asky",
+            title: "定时任务",
+            subtitle: "iCloud › Notes",
+            action: .init(kind: .openNotes, label: "打开备忘录", target: "n-1")
+        ).normalizedForDisplay(calendar: fixedCalendar)
+        #expect(legacyNote.headline == "asky")
+        #expect(legacyNote.title == "定时任务")
+        #expect(legacyNote.subtitle == nil)
+        #expect(legacyNote.metadata.isEmpty)
+
+        let earliestLegacyNote = ToolResultCard(
+            id: "note-v1",
+            kind: .note,
+            source: .notes,
+            categoryTitle: "备忘录",
+            headline: "asky",
+            title: "",
+            subtitle: "iCloud › Notes",
+            footnote: "定时任务",
+            action: .init(kind: .openNotes, label: "打开备忘录", target: "n-1")
+        ).normalizedForDisplay(calendar: fixedCalendar)
+        #expect(earliestLegacyNote.title == "定时任务")
+        #expect(earliestLegacyNote.subtitle == nil)
+        #expect(earliestLegacyNote.footnote == nil)
+
+        let legacyReminder = ToolResultCard(
+            id: "rem-legacy",
+            kind: .reminder,
+            source: .reminders,
+            categoryTitle: "提醒事项",
+            headline: "09:00",
+            title: "定时任务（内容待定）",
+            subtitle: "11月26日 周四 · 提醒",
+            metadata: ["每天 9:00 提醒。具体要做什么还没定，确定后可修改标题或拆成多条提醒。"],
+            action: .init(kind: .openReminders, label: "查看提醒事项")
+        ).normalizedForDisplay(calendar: fixedCalendar)
+        #expect(legacyReminder.headline == "09:00")
+        #expect(legacyReminder.title == "定时任务（内容待定）")
+        #expect(legacyReminder.subtitle == "11月26日 周四")
+        #expect(legacyReminder.metadata.isEmpty)
+
+        let customListReminder = ToolResultCard(
+            id: "rem-custom-list",
+            kind: .reminder,
+            source: .reminders,
+            categoryTitle: "提醒事项",
+            headline: "09:00",
+            title: "交周报",
+            subtitle: "11月26日 周四 · 工作",
+            metadata: ["备注"],
+            action: .init(kind: .openReminders, label: "查看提醒事项")
+        ).normalizedForDisplay(calendar: fixedCalendar)
+        #expect(customListReminder.subtitle == "11月26日 周四 · 工作")
+        #expect(customListReminder.metadata.isEmpty)
+
+        let legacyMemory = ToolResultCard(
+            id: "mem-legacy",
+            kind: .memory,
+            source: .memory,
+            categoryTitle: "记忆",
+            headline: "已记住",
+            title: "偏好深色模式",
+            subtitle: "MEMORY.md",
+            action: .init(kind: .openMemoryFile, label: "查看记忆", target: "MEMORY.md")
+        ).normalizedForDisplay(calendar: fixedCalendar)
+        #expect(legacyMemory.subtitle == nil)
+
+        let legacyPlaces = ToolResultCard(
+            id: "places-legacy",
+            kind: .mapPlaces,
+            source: .maps,
+            categoryTitle: "地点",
+            headline: "2 个地点",
+            rows: [
+                .init(id: "p1", title: "首都机场", subtitle: "顺义区"),
+                .init(id: "p2", title: "大兴机场", subtitle: "大兴区")
+            ],
+            action: .init(kind: .openMaps, label: "在地图中查看")
+        ).normalizedForDisplay(calendar: fixedCalendar)
+        #expect(legacyPlaces.headline == "")
+        #expect(legacyPlaces.rows.count == 2)
+    }
+
+    @Test("Normalizes legacy persisted calendar schedule, all-day event, and reminder list cards without altering new cards")
+    func normalizesLegacyScheduleAndReminderListCards() {
+        let legacySingleSchedule = ToolResultCard(
+            id: "sched-legacy-1",
+            kind: .calendarSchedule,
+            source: .calendar,
+            categoryTitle: "日历日程",
+            headline: "1 个日程",
+            rows: [
+                .init(id: "ev-1", title: "何瑞兆雪的24岁生日", subtitle: "11月28日 · 生日", trailing: "全天")
+            ],
+            action: .init(kind: .openCalendar, label: "查看日历", target: "2026-11-28T00:00:00+08:00")
+        ).normalizedForDisplay(calendar: fixedCalendar)
+        #expect(legacySingleSchedule.headline == "11月28日 周六")
+        #expect(legacySingleSchedule.rows.first?.subtitle == nil)
+        #expect(legacySingleSchedule.rows.first?.trailing == "全天")
+
+        let legacyMultiSchedule = ToolResultCard(
+            id: "sched-legacy-2",
+            kind: .calendarSchedule,
+            source: .calendar,
+            categoryTitle: "日历日程",
+            headline: "2 个日程",
+            rows: [
+                .init(id: "ev-1", title: "何瑞兆雪的24岁生日", subtitle: "11月28日 · 生日", trailing: "全天"),
+                .init(id: "ev-2", title: "产品设计评审", subtitle: "11月30日 · 工作", trailing: "14:00–15:00")
+            ],
+            action: .init(kind: .openCalendar, label: "查看日历", target: "2026-11-28T00:00:00+08:00")
+        ).normalizedForDisplay(calendar: fixedCalendar)
+        #expect(legacyMultiSchedule.headline == "11月28日 – 30日")
+        #expect(legacyMultiSchedule.rows[0].subtitle == nil)
+        #expect(legacyMultiSchedule.rows[0].trailing == "11月28日 全天")
+        #expect(legacyMultiSchedule.rows[1].subtitle == nil)
+        #expect(legacyMultiSchedule.rows[1].trailing == "11月30日 14:00")
+
+        let modernScheduleWithLocation = ToolResultCard(
+            id: "sched-modern",
+            kind: .calendarSchedule,
+            source: .calendar,
+            categoryTitle: "日历日程",
+            headline: "11月30日 周一",
+            rows: [
+                .init(id: "ev-2", title: "产品设计评审", subtitle: "3 号会议室", trailing: "14:00–15:00")
+            ],
+            action: .init(kind: .openCalendar, label: "查看日历", target: "2026-11-30T14:00:00+08:00")
+        ).normalizedForDisplay(calendar: fixedCalendar)
+        #expect(modernScheduleWithLocation.headline == "11月30日 周一")
+        #expect(modernScheduleWithLocation.rows.first?.subtitle == "3 号会议室")
+
+        let legacyAllDay = ToolResultCard(
+            id: "cal-allday-legacy",
+            kind: .calendarEvent,
+            source: .calendar,
+            categoryTitle: "日历",
+            headline: "全天",
+            title: "何瑞兆雪的24岁生日",
+            subtitle: "11月28日 周六 · 生日",
+            action: .init(kind: .openCalendar, label: "查看日历", target: "2026-11-28T00:00:00+08:00")
+        ).normalizedForDisplay(calendar: fixedCalendar)
+        #expect(legacyAllDay.headline == "11月28日 周六")
+        #expect(legacyAllDay.subtitle == "全天 · 生日")
+
+        let legacyReminderList = ToolResultCard(
+            id: "remlist-legacy",
+            kind: .reminderList,
+            source: .reminders,
+            categoryTitle: "提醒事项",
+            headline: "2 条待办",
+            rows: [
+                .init(id: "r1", title: "买牛奶", subtitle: "提醒", trailing: "11月26日 09:00"),
+                .init(id: "r2", title: "交电费", subtitle: "提醒", trailing: "11月26日 18:00")
+            ],
+            action: .init(kind: .openReminders, label: "查看提醒事项")
+        ).normalizedForDisplay(calendar: fixedCalendar)
+        #expect(legacyReminderList.headline == "11月26日")
+        #expect(legacyReminderList.rows.allSatisfy { $0.subtitle == nil })
+        #expect(legacyReminderList.rows[0].trailing == "09:00")
+        #expect(legacyReminderList.rows[1].trailing == "18:00")
+    }
 }

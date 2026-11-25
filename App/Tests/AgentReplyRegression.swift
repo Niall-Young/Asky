@@ -4107,15 +4107,59 @@ enum AgentReplyRegression {
         let store = ConversationStore(app.store)
         let cid = try store.create(title: "Tool result cards preview")
         try store.append(conversationID: cid, role: "user", text: "帮我看看卡片排版")
+        let legacySchedule = ToolResultCard(
+            id: "cal-sched-legacy",
+            kind: .calendarSchedule,
+            source: .calendar,
+            categoryTitle: "日历日程",
+            headline: "1 个日程",
+            rows: [
+                ToolResultCard.DetailRow(
+                    id: "ev-birthday",
+                    title: "何瑞兆雪的24岁生日",
+                    subtitle: "11月28日 · 生日",
+                    trailing: "全天"
+                )
+            ],
+            action: ToolResultCard.Action(kind: .openCalendar, label: "查看日历", target: "2026-11-28T00:00:00+08:00")
+        )
+        let legacyNote = ToolResultCard(
+            id: "note-legacy",
+            kind: .note,
+            source: .notes,
+            categoryTitle: "备忘录",
+            headline: "asky",
+            title: "定时任务",
+            subtitle: "iCloud › Notes",
+            action: ToolResultCard.Action(kind: .openNotes, label: "打开备忘录", target: "note-1")
+        )
+        let legacyReminder = ToolResultCard(
+            id: "rem-legacy",
+            kind: .reminder,
+            source: .reminders,
+            categoryTitle: "提醒事项",
+            headline: "09:00",
+            title: "定时任务（内容待定）",
+            subtitle: "11月26日 周四 · 提醒",
+            metadata: ["每天 9:00 提醒。具体要做什么还没定，确定后可修改标题或拆成多条提醒。"],
+            action: ToolResultCard.Action(kind: .openReminders, label: "查看提醒事项")
+        )
         try store.append(conversationID: cid, role: "tool", text: "调用 calendar_search_events", id: "trc-1",
-            presentation: MessagePresentation(responseID: "trc-r1", toolName: "calendar_search_events", toolStatus: .completed, resultCard: singleSchedule))
+            presentation: MessagePresentation(responseID: "trc-r1", toolName: "calendar_search_events", toolStatus: .completed, resultCard: legacySchedule))
         try store.append(conversationID: cid, role: "tool", text: "调用 notes_create", id: "trc-2",
-            presentation: MessagePresentation(responseID: "trc-r2", toolName: "notes_create", toolStatus: .completed, resultCard: noteCard))
+            presentation: MessagePresentation(responseID: "trc-r2", toolName: "notes_create", toolStatus: .completed, resultCard: legacyNote))
         try store.append(conversationID: cid, role: "tool", text: "调用 reminders_create", id: "trc-3",
-            presentation: MessagePresentation(responseID: "trc-r3", toolName: "reminders_create", toolStatus: .completed, resultCard: reminderCard))
+            presentation: MessagePresentation(responseID: "trc-r3", toolName: "reminders_create", toolStatus: .completed, resultCard: legacyReminder))
 
         let model = AgentModel(app: app)
         model.open(cid)
+        let loadedCards = model.items.compactMap(\.resultCard)
+        precondition(loadedCards.count == 3, "Expected 3 loaded cards")
+        precondition(loadedCards[0].headline == "11月28日 周六" && loadedCards[0].rows.first?.subtitle == nil,
+                     "Expected legacy schedule card to normalize on load, got \(loadedCards[0])")
+        precondition(loadedCards[1].subtitle == nil, "Expected legacy note folder subtitle to be stripped on load")
+        precondition(loadedCards[2].subtitle == "11月26日 周四" && loadedCards[2].metadata.isEmpty,
+                     "Expected legacy reminder card to strip default list and notes metadata on load, got \(loadedCards[2])")
         let controller = AgentWindowController(model: model, presentation: WindowPresentation())
         controller.show()
         let window = NSApplication.shared.windows.last { $0.title == "Asky AI" && $0.isVisible }!

@@ -10,16 +10,20 @@ struct ToolResultCardView: View {
     @Environment(\.colorScheme) private var scheme
     @State private var actionHovered = false
 
+    private var displayCard: ToolResultCard {
+        card.normalizedForDisplay()
+    }
+
     private var usesLargeHeadline: Bool {
-        switch card.kind {
+        switch displayCard.kind {
         case .calendarEvent:
-            return card.headline != card.title
+            return displayCard.headline != displayCard.title
         case .reminder:
-            return !card.title.isEmpty
+            return !displayCard.title.isEmpty
         case .calendarSchedule, .reminderList:
             return true
         case .mapPlaces:
-            return !card.rows.isEmpty
+            return !displayCard.rows.isEmpty
         default:
             return false
         }
@@ -35,7 +39,7 @@ struct ToolResultCardView: View {
 
             content
 
-            if let action = card.action {
+            if let action = displayCard.action {
                 actionButton(action)
                     .padding(.top, 2)
             }
@@ -53,9 +57,9 @@ struct ToolResultCardView: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            DataSourceIcon(source: card.source)
+            DataSourceIcon(source: displayCard.source)
                 .frame(width: 18, height: 18)
-            Text(card.categoryTitle)
+            Text(displayCard.categoryTitle)
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(ThemeColor.kTextSubtle)
             Spacer(minLength: 0)
@@ -65,33 +69,33 @@ struct ToolResultCardView: View {
     @ViewBuilder
     private var content: some View {
         VStack(alignment: .leading, spacing: 6) {
-            if !card.headline.isEmpty {
-                Text(card.headline)
+            if !displayCard.headline.isEmpty {
+                Text(displayCard.headline)
                     .font(.system(size: usesLargeHeadline ? 22 : 16, weight: .semibold))
                     .monospacedDigit()
                     .foregroundStyle(ThemeColor.kText)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            if !card.title.isEmpty {
-                Text(card.title)
+            if !displayCard.title.isEmpty {
+                Text(displayCard.title)
                     .font(.system(size: 14, weight: .regular))
                     .foregroundStyle(usesLargeHeadline ? ThemeColor.kText : ThemeColor.kTextSubtle)
                     .lineLimit(3)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            if let subtitle = card.subtitle, !subtitle.isEmpty {
+            if let subtitle = displayCard.subtitle, !subtitle.isEmpty {
                 Text(subtitle)
                     .font(.system(size: 14, weight: .regular))
-                    .foregroundStyle(card.title.isEmpty ? ThemeColor.kTextSubtle : ThemeColor.kTextSubtlest)
+                    .foregroundStyle(displayCard.title.isEmpty ? ThemeColor.kTextSubtle : ThemeColor.kTextSubtlest)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            if !card.metadata.isEmpty {
+            if !displayCard.metadata.isEmpty {
                 VStack(alignment: .leading, spacing: 3) {
-                    ForEach(card.metadata, id: \.self) { entry in
+                    ForEach(displayCard.metadata, id: \.self) { entry in
                         Text(entry)
                             .font(.system(size: 14, weight: .regular))
                             .foregroundStyle(ThemeColor.kTextSubtlest)
@@ -101,9 +105,9 @@ struct ToolResultCardView: View {
                 }
             }
 
-            if !card.rows.isEmpty {
+            if !displayCard.rows.isEmpty {
                 VStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(card.rows.enumerated()), id: \.element.id) { index, row in
+                    ForEach(Array(displayCard.rows.enumerated()), id: \.element.id) { index, row in
                         if index > 0 {
                             Rectangle()
                                 .fill(ThemeColor.kBorder.color(for: scheme).opacity(scheme == .light ? 0.45 : 0.7))
@@ -140,10 +144,10 @@ struct ToolResultCardView: View {
     }
 
     private var hasTextAboveRows: Bool {
-        !card.headline.isEmpty
-            || !card.title.isEmpty
-            || !(card.subtitle?.isEmpty ?? true)
-            || !card.metadata.isEmpty
+        !displayCard.headline.isEmpty
+            || !displayCard.title.isEmpty
+            || !(displayCard.subtitle?.isEmpty ?? true)
+            || !displayCard.metadata.isEmpty
     }
 
     private func actionButton(_ action: ToolResultCard.Action) -> some View {

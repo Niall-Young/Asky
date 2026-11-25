@@ -132,6 +132,151 @@ public struct ToolResultCard: Sendable, Hashable, Codable, Identifiable {
         }
     }
 
+    /// Normalizes legacy persisted cards (created before noise-cleanup & date-headline updates)
+    /// into the current display representation. Safe and idempotent on newly built cards.
+    public func normalizedForDisplay(calendar: Calendar = .current) -> ToolResultCard {
+        var copy = self
+        copy.footnote = nil
+
+        switch kind {
+        case .note:
+            if copy.title.isEmpty, let legacyExcerpt = Self.nonEmpty(footnote) {
+                copy.title = legacyExcerpt
+            }
+            copy.subtitle = nil
+            copy.metadata = []
+
+        case .reminder:
+            copy.metadata = []
+            if let subtitle = copy.subtitle {
+                let parts = subtitle
+                    .components(separatedBy: " · ")
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty && !Self.isDefaultReminderList($0) }
+                copy.subtitle = parts.isEmpty ? nil : parts.joined(separator: " · ")
+            }
+
+        case .memory:
+            copy.subtitle = nil
+
+        case .mapPlaces:
+            if !copy.rows.isEmpty, Self.isLegacyCountHeadline(copy.headline, suffixes: ["个地点", "places", "place"]) {
+                copy.headline = ""
+            }
+
+        case .calendarEvent:
+            let allDayLabel = CoreLocalization.text("全天")
+            let normalizedHeadline = copy.headline.trimmingCharacters(in: .whitespacesAndNewlines)
+            if (normalizedHeadline == allDayLabel || normalizedHeadline == "全天" || normalizedHeadline.lowercased() == "all day"),
+               normalizedHeadline != copy.title {
+                let parts = (copy.subtitle ?? "")
+                    .components(separatedBy: " · ")
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+                let isoDate = copy.action?.target.flatMap(Self.parseISO)
+                if let isoDate {
+                    copy.headline = Self.formatMonthDayWeekday(isoDate, calendar: calendar)
+                    var remaining = parts
+                    if let first = remaining.first, Self.parseLeadingShortDate(first) != nil {
+                        remaining.removeFirst()
+                    }
+                    copy.subtitle = ([allDayLabel] + remaining).joined(separator: " · ")
+                } else if let first = parts.first, Self.parseLeadingShortDate(first) != nil {
+                    copy.headline = first
+                    let remaining = Array(parts.dropFirst())
+                    copy.subtitle = ([allDayLabel] + remaining).joined(separator: " · ")
+                }
+            }
+
+        case .calendarSchedule:
+            if Self.isLegacyCountHeadline(copy.headline, suffixes: ["个日程", "events", "event"]) {
+                let parsedRowDates = copy.rows.map { row -> (month: Int, day: Int)? in
+                    guard let sub = row.subtitle else { return nil }
+                    return Self.parseLeadingShortDate(sub)?.date
+                }
+                let validDates = parsedRowDates.compactMap { $0 }
+                let allRowsHaveDate = validDates.count == copy.rows.count && !validDates.isEmpty
+                let singleDay: Bool = {
+                    guard allRowsHaveDate, let first = validDates.first else { return false }
+                    return validDates.allSatisfy { $0.month == first.month && $0.day == first.day }
+                }()
+
+                let actionDate = copy.action?.target.flatMap(Self.parseISO)
+                if singleDay, let first = validDates.first {
+                    if let actionDate,
+                       calendar.component(.month, from: actionDate) == first.month,
+                       calendar.component(.day, from: actionDate) == first.day {
+                        copy.headline = Self.formatMonthDayWeekday(actionDate, calendar: calendar)
+                    } else {
+                        copy.headline = "\(first.month)月\(first.day)日"
+                    }
+                } else if !validDates.isEmpty {
+                    let ordered = Self.monthDayRange(validDates)
+                    copy.headline = Self.formatMonthDayRange(ordered.earliest, ordered.latest)
+                } else if let actionDate {
+                    copy.headline = Self.formatMonthDayWeekday(actionDate, calendar: calendar)
+                } else {
+                    copy.headline = ""
+                }
+
+                copy.rows = zip(copy.rows, parsedRowDates).map { row, rowDate in
+                    var updated = row
+                    updated.subtitle = nil
+                    if !singleDay, let rowDate {
+                        let datePrefix = "\(rowDate.month)月\(rowDate.day)日"
+                        if let trailing = Self.nonEmpty(updated.trailing) {
+                            if !trailing.hasPrefix(datePrefix) {
+                                let compactTime = trailing.components(separatedBy: "–").first?.trimmingCharacters(in: .whitespaces) ?? trailing
+                                updated.trailing = "\(datePrefix) \(compactTime)"
+                            }
+                        } else {
+                            updated.trailing = datePrefix
+                        }
+                    }
+                    return updated
+                }
+            }
+
+        case .reminderList:
+            let legacyHeadline = Self.isLegacyCountHeadline(copy.headline, suffixes: ["条待办", "条提醒", "reminders", "reminder", "items", "item"])
+            var parsedRowDates: [(date: (month: Int, day: Int), rest: String)?] = []
+            copy.rows = copy.rows.map { row in
+                var updated = row
+                updated.subtitle = nil
+                parsedRowDates.append(row.trailing.flatMap(Self.parseLeadingShortDate))
+                return updated
+            }
+            if legacyHeadline {
+                let validDates = parsedRowDates.compactMap { $0?.date }
+                let allHaveDue = validDates.count == copy.rows.count && !validDates.isEmpty
+                let singleDay: Bool = {
+                    guard allHaveDue, let first = validDates.first else { return false }
+                    return validDates.allSatisfy { $0.month == first.month && $0.day == first.day }
+                }()
+                if singleDay, let first = validDates.first {
+                    copy.headline = "\(first.month)月\(first.day)日"
+                    copy.rows = zip(copy.rows, parsedRowDates).map { row, parsed in
+                        var updated = row
+                        if let rest = Self.nonEmpty(parsed?.rest) {
+                            updated.trailing = rest
+                        }
+                        return updated
+                    }
+                } else if allHaveDue {
+                    let ordered = Self.monthDayRange(validDates)
+                    copy.headline = Self.formatMonthDayRange(ordered.earliest, ordered.latest)
+                } else {
+                    copy.headline = ""
+                }
+            }
+
+        case .messagesDraft, .mapRoutes, .shortcut:
+            break
+        }
+
+        return copy
+    }
+
     // MARK: - Builders
 
     private static func calendarEventCard(
@@ -496,6 +641,58 @@ public struct ToolResultCard: Sendable, Hashable, Codable, Identifiable {
     private static func isDefaultReminderList(_ name: String) -> Bool {
         let normalized = name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         return normalized == "提醒" || normalized == "提醒事项" || normalized == "reminders"
+    }
+
+    private static func isLegacyCountHeadline(_ headline: String, suffixes: [String]) -> Bool {
+        let trimmed = headline.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        let digits = trimmed.prefix { $0.isASCII && $0.isNumber }
+        guard !digits.isEmpty else { return false }
+        let remainder = trimmed.dropFirst(digits.count)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        return suffixes.contains { remainder == $0.lowercased() }
+    }
+
+    private static func parseLeadingShortDate(_ raw: String) -> (date: (month: Int, day: Int), rest: String)? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let monthDigits = trimmed.prefix { $0.isASCII && $0.isNumber }
+        guard (1...2).contains(monthDigits.count), let month = Int(monthDigits), (1...12).contains(month) else {
+            return nil
+        }
+        let afterMonth = trimmed.dropFirst(monthDigits.count)
+        guard afterMonth.first == "月" else { return nil }
+        let afterMonthMark = afterMonth.dropFirst()
+        let dayDigits = afterMonthMark.prefix { $0.isASCII && $0.isNumber }
+        guard (1...2).contains(dayDigits.count), let day = Int(dayDigits), (1...31).contains(day) else {
+            return nil
+        }
+        let afterDay = afterMonthMark.dropFirst(dayDigits.count)
+        guard afterDay.first == "日" else { return nil }
+        let rest = String(afterDay.dropFirst()).trimmingCharacters(in: .whitespacesAndNewlines)
+        return ((month, day), rest)
+    }
+
+    private static func monthDayRange(_ dates: [(month: Int, day: Int)]) -> (earliest: (month: Int, day: Int), latest: (month: Int, day: Int)) {
+        let key: ((month: Int, day: Int)) -> Int = { $0.month * 100 + $0.day }
+        let minDate = dates.min { key($0) < key($1) }!
+        let maxDate = dates.max { key($0) < key($1) }!
+        if maxDate.month - minDate.month > 6 {
+            let lateYear = dates.filter { $0.month >= 7 }.min { key($0) < key($1) } ?? minDate
+            let earlyYear = dates.filter { $0.month <= 6 }.max { key($0) < key($1) } ?? maxDate
+            return (lateYear, earlyYear)
+        }
+        return (minDate, maxDate)
+    }
+
+    private static func formatMonthDayRange(_ start: (month: Int, day: Int), _ end: (month: Int, day: Int)) -> String {
+        if start.month == end.month && start.day == end.day {
+            return "\(start.month)月\(start.day)日"
+        }
+        if start.month == end.month {
+            return "\(start.month)月\(start.day)日 – \(end.day)日"
+        }
+        return "\(start.month)月\(start.day)日 – \(end.month)月\(end.day)日"
     }
 
     private static func formatDateRange(_ start: Date, _ end: Date, calendar: Calendar) -> String {
