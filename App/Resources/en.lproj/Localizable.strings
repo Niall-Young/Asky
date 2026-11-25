@@ -370,7 +370,7 @@
 "插件" = "Plugins";
 "添加插件" = "Add Plugin";
 "安装插件" = "Install Plugin";
-"GitHub 仓库链接" = "GitHub repository URL";
+"仓库链接" = "Repository";
 "安装" = "Install";
 "插件会在本机执行代码。请只安装你信任的仓库。" = "Plugins execute code on this computer. Only install repositories you trust.";
 "官方插件" = "Official Plugins";

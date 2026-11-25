@@ -145,11 +145,18 @@ private enum PluginSettingsRegression {
         // SwiftUI renders a styled prompt as an attributed placeholder, not `placeholderString`.
         let repositoryField = { descendants(window.contentView!).compactMap { $0 as? NSTextField }.first {
             ($0.placeholderString ?? $0.placeholderAttributedString?.string)
-                == NSLocalizedString("GitHub 仓库链接", comment: "")
+                == "https://github.com/owner/repo"
         } }
         try await until { repositoryField() != nil }
         guard let overlay = window.contentView?.subviews.compactMap({ $0 as? SettingsDialogOverlay }).first else {
             throw NSError(domain: "PluginSettings", code: 4, userInfo: [NSLocalizedDescriptionKey: "Dialog must be mounted above the entire settings window"])
+        }
+        window.contentView?.layoutSubtreeIfNeeded()
+        if let field = repositoryField() {
+            let card = overlay.card.convert(overlay.card.bounds, to: window.contentView)
+            let repoFieldFrame = field.convert(field.bounds, to: window.contentView)
+            try require(repoFieldFrame.width <= 265 && repoFieldFrame.minX > card.minX + 140,
+                        "repository input must sit on the right side of the horizontal form row")
         }
         func checkDialogCenter() throws {
             window.contentView?.layoutSubtreeIfNeeded()
@@ -157,7 +164,7 @@ private enum PluginSettingsRegression {
             let card = overlay.card.convert(overlay.card.bounds, to: window.contentView)
             try require(abs(card.midX - bounds.midX) < 1 && abs(card.midY - bounds.midY) < 1,
                         "dialog must center in the full window, including the sidebar")
-            try require(abs(card.width - 440) < 1, "plugin dialog must keep its compact width")
+            try require(abs(card.width - 480) < 1, "plugin dialog must match the standard 480pt form width")
             let sidebarPoint = NSPoint(x: 100, y: bounds.midY)
             try require(window.contentView?.hitTest(sidebarPoint) === overlay,
                         "dialog must intercept sidebar clicks")

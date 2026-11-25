@@ -246,7 +246,7 @@ struct PluginSettings: View {
     private var addDialog: some View {
         SettingsDialogScaffold(
             title: label("添加插件"),
-            width: 440,
+            width: 480,
             primaryTitle: label("安装"),
             primaryDisabled: busy || trimmedRepository.isEmpty,
             primaryAction: installFromDialog,
@@ -254,14 +254,18 @@ struct PluginSettings: View {
             close: { adding = false }
         ) {
             VStack(alignment: .leading, spacing: 8) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(label("GitHub 仓库链接"))
-                    SettingsInputField(label("GitHub 仓库链接"), text: $repository)
-                        .frame(maxWidth: .infinity)
-                        .onSubmit {
-                            if !busy && !trimmedRepository.isEmpty { installFromDialog() }
-                        }
+                SettingsTextField(
+                    label("仓库链接"),
+                    text: $repository,
+                    prompt: Text(verbatim: "https://github.com/owner/repo")
+                        .foregroundStyle(ThemeColor.kTextSubtlest)
+                )
+                .onSubmit {
+                    if !busy && !trimmedRepository.isEmpty { installFromDialog() }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16).padding(.vertical, 12)
+                .background(SettingsPalette.card(scheme), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .accessibilityIdentifier("plugin-repository")
                 if !repositoryError.isEmpty {
                     Text(repositoryError).font(.system(size: 12))
