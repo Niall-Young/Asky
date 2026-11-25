@@ -12,8 +12,14 @@ struct ToolResultCardView: View {
 
     private var usesLargeHeadline: Bool {
         switch card.kind {
-        case .calendarEvent, .reminder:
-            return card.headline.contains(":") || card.headline == "全天"
+        case .calendarEvent:
+            return card.headline != card.title
+        case .reminder:
+            return !card.title.isEmpty
+        case .calendarSchedule, .reminderList:
+            return true
+        case .mapPlaces:
+            return !card.rows.isEmpty
         default:
             return false
         }
@@ -77,8 +83,8 @@ struct ToolResultCardView: View {
 
             if let subtitle = card.subtitle, !subtitle.isEmpty {
                 Text(subtitle)
-                    .font(.system(size: 13))
-                    .foregroundStyle(ThemeColor.kTextSubtle)
+                    .font(.system(size: 14, weight: .regular))
+                    .foregroundStyle(card.title.isEmpty ? ThemeColor.kTextSubtle : ThemeColor.kTextSubtlest)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -87,13 +93,12 @@ struct ToolResultCardView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     ForEach(card.metadata, id: \.self) { entry in
                         Text(entry)
-                            .font(.system(size: 12))
+                            .font(.system(size: 14, weight: .regular))
                             .foregroundStyle(ThemeColor.kTextSubtlest)
                             .lineLimit(2)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
-                .padding(.top, 2)
             }
 
             if !card.rows.isEmpty {
@@ -106,14 +111,14 @@ struct ToolResultCardView: View {
                                 .padding(.vertical, 8)
                         }
                         HStack(alignment: .firstTextBaseline, spacing: 10) {
-                            VStack(alignment: .leading, spacing: 2) {
+                            VStack(alignment: .leading, spacing: 3) {
                                 Text(row.title)
-                                    .font(.system(size: 13.5, weight: .medium))
+                                    .font(.system(size: 14, weight: .regular))
                                     .foregroundStyle(ThemeColor.kText)
                                     .lineLimit(2)
                                 if let sub = row.subtitle, !sub.isEmpty {
                                     Text(sub)
-                                        .font(.system(size: 12))
+                                        .font(.system(size: 14, weight: .regular))
                                         .foregroundStyle(ThemeColor.kTextSubtlest)
                                         .lineLimit(1)
                                 }
@@ -121,7 +126,7 @@ struct ToolResultCardView: View {
                             Spacer(minLength: 8)
                             if let trailing = row.trailing, !trailing.isEmpty {
                                 Text(trailing)
-                                    .font(.system(size: 13, weight: .medium))
+                                    .font(.system(size: 14, weight: .regular))
                                     .monospacedDigit()
                                     .foregroundStyle(ThemeColor.kTextSubtle)
                                     .lineLimit(1)

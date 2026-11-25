@@ -3336,6 +3336,10 @@ enum AgentReplyRegression {
             try await bubbleChainRegression(app: app)
             return
         }
+        if CommandLine.arguments.contains("--tool-result-cards") {
+            try await toolResultCardsRegression(app: app)
+            return
+        }
         if CommandLine.arguments.contains("--table-fade-preview") {
             try await tableFadePreview(app: app)
             return
@@ -4043,6 +4047,86 @@ enum AgentReplyRegression {
             try bitmap.representation(using: .png, properties: [:])!.write(to: URL(filePath: "build/bubble-chain-\(name).png"))
         }
         print("Bubble chain regression passed: unit corner/spacing matrix and real light/dark window geometry")
+    }
+
+    private static func toolResultCardsRegression(app: AppModel) async throws {
+        let singleSchedule = ToolResultCard(
+            id: "cal-sched-1",
+            kind: .calendarSchedule,
+            source: .calendar,
+            categoryTitle: "日历日程",
+            headline: "1 个日程",
+            rows: [
+                ToolResultCard.DetailRow(
+                    id: "ev-birthday",
+                    title: "何瑞兆雪的24岁生日",
+                    subtitle: "11月28日 · 生日",
+                    trailing: "全天"
+                )
+            ],
+            action: ToolResultCard.Action(kind: .openCalendar, label: "查看日历")
+        )
+        let multiSchedule = ToolResultCard(
+            id: "cal-sched-2",
+            kind: .calendarSchedule,
+            source: .calendar,
+            categoryTitle: "日历日程",
+            headline: "2 个日程",
+            rows: [
+                ToolResultCard.DetailRow(
+                    id: "ev-1",
+                    title: "何瑞兆雪的24岁生日",
+                    subtitle: "11月28日 · 生日",
+                    trailing: "全天"
+                ),
+                ToolResultCard.DetailRow(
+                    id: "ev-2",
+                    title: "产品设计评审",
+                    subtitle: "11月28日 · 3 号会议室",
+                    trailing: "14:00–15:00"
+                )
+            ],
+            action: ToolResultCard.Action(kind: .openCalendar, label: "查看日历")
+        )
+        let createdEvent = ToolResultCard(
+            id: "cal-event-1",
+            kind: .calendarEvent,
+            source: .calendar,
+            categoryTitle: "日历",
+            headline: "14:00 – 15:00",
+            title: "项目周会",
+            subtitle: "11月25日 周三 · 工作",
+            metadata: ["会议室 A"],
+            action: ToolResultCard.Action(kind: .openCalendar, label: "查看日历")
+        )
+
+        let store = ConversationStore(app.store)
+        let cid = try store.create(title: "Tool result cards preview")
+        try store.append(conversationID: cid, role: "user", text: "帮我看看这周日历日程")
+        try store.append(conversationID: cid, role: "tool", text: "调用 calendar_search_events", id: "trc-1",
+            presentation: MessagePresentation(responseID: "trc-r1", toolName: "calendar_search_events", toolStatus: .completed, resultCard: singleSchedule))
+        try store.append(conversationID: cid, role: "tool", text: "调用 calendar_search_events", id: "trc-2",
+            presentation: MessagePresentation(responseID: "trc-r2", toolName: "calendar_search_events", toolStatus: .completed, resultCard: multiSchedule))
+        try store.append(conversationID: cid, role: "tool", text: "调用 calendar_create_event", id: "trc-3",
+            presentation: MessagePresentation(responseID: "trc-r3", toolName: "calendar_create_event", toolStatus: .completed, resultCard: createdEvent))
+
+        let model = AgentModel(app: app)
+        model.open(cid)
+        let controller = AgentWindowController(model: model, presentation: WindowPresentation())
+        controller.show()
+        let window = NSApplication.shared.windows.last { $0.title == "Asky AI" && $0.isVisible }!
+        defer { window.orderOut(nil) }
+
+        for (name, appearance) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
+            window.appearance = NSAppearance(named: appearance)
+            try await Task.sleep(for: .milliseconds(500))
+            window.contentView?.layoutSubtreeIfNeeded()
+            let surface = window.contentView!
+            let bitmap = surface.bitmapImageRepForCachingDisplay(in: surface.bounds)!
+            surface.cacheDisplay(in: surface.bounds, to: bitmap)
+            try bitmap.representation(using: .png, properties: [:])!.write(to: URL(filePath: "build/tool-result-cards-\(name).png"))
+        }
+        print("Tool result cards regression passed: captured real light/dark AgentWindow renders")
     }
 
     private static func runPreview(_ controller: AgentWindowController, application: NSApplication) {
