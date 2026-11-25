@@ -53,7 +53,7 @@ struct ChatFormView: View {
                         if field.required == true {
                             Text(verbatim: "*")
                                 .font(.system(size: 14, weight: .medium))
-                                .foregroundStyle(ThemeColor.kTextSubtlest)
+                                .foregroundStyle(ThemeColor.kTextNegative)
                                 .accessibilityLabel(NSLocalizedString("必填", comment: ""))
                         }
                     }
