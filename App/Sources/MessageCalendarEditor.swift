@@ -399,10 +399,22 @@ struct MessageCalendarEditorView: View {
 
     private var revealed: Bool { entrance.isPresented || reduceMotion }
     private var fieldsEnabled: Bool { !model.saving && !model.uncertain }
-    private var timeRangeHint: String? {
+    private var titleError: String? {
+        model.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? NSLocalizedString("请填写日程标题", comment: "")
+            : nil
+    }
+    private var timeRangeError: String? {
         if model.isStartInPast { return NSLocalizedString("须晚于当前时间", comment: "") }
         if model.isEndBeforeStart { return NSLocalizedString("须晚于开始时间", comment: "") }
-        return model.formattedDuration
+        return nil
+    }
+    private var timeRangeHint: String? {
+        timeRangeError == nil ? model.formattedDuration : nil
+    }
+    private var displayedError: String? {
+        guard let raw = model.error?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else { return nil }
+        return raw.hasSuffix("。") ? String(raw.dropLast()) : raw
     }
 
     var body: some View {
@@ -413,8 +425,8 @@ struct MessageCalendarEditorView: View {
                 .animation(reduceMotion ? nil : .easeOut(duration: 0.22), value: revealed)
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-                    CalendarFormField(title: NSLocalizedString("日程标题", comment: ""), required: true) {
+                VStack(alignment: .leading, spacing: 18) {
+                    CalendarFormField(title: NSLocalizedString("日程标题", comment: ""), required: true, error: titleError) {
                         SettingsInputField(NSLocalizedString("日程标题", comment: ""), text: $model.title)
                             .background(ChatFormControlMarker(id: "calendar-editor-title"))
                             .accessibilityIdentifier("calendar-editor-title")
@@ -424,7 +436,7 @@ struct MessageCalendarEditorView: View {
                         title: NSLocalizedString("时间", comment: ""),
                         required: true,
                         trailingHint: timeRangeHint,
-                        trailingHintIsError: model.isStartInPast || model.isEndBeforeStart
+                        error: timeRangeError
                     ) {
                         CalendarEditorDateTimeRangeField(
                             accessibilityLabel: NSLocalizedString("时间", comment: ""),
@@ -473,6 +485,14 @@ struct MessageCalendarEditorView: View {
                         .accessibilityLabel(NSLocalizedString("备注", comment: ""))
                         .accessibilityIdentifier("calendar-editor-notes")
                     }
+
+                    if let error = displayedError {
+                        Text(error)
+                            .font(.system(size: 12))
+                            .foregroundStyle(ThemeColor.kTextNegative)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("calendar-editor-error")
+                    }
                 }
                 .disabled(!fieldsEnabled)
                 .padding(.horizontal, 20)
@@ -486,33 +506,6 @@ struct MessageCalendarEditorView: View {
                 reduceMotion ? nil : .spring(response: 0.34, dampingFraction: 0.84).delay(0.02),
                 value: revealed
             )
-
-            if let error = model.error {
-                HStack(alignment: .top, spacing: 8) {
-                    Image(mingCute: "exclamationmark.triangle", size: 13.5)
-                        .foregroundStyle(ThemeColor.kTextNegative)
-                        .padding(.top, 1.5)
-                    Text(error)
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(ThemeColor.kTextNegative)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Spacer(minLength: 0)
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 7)
-                .background(
-                    ThemeColor.kTextNegative.color(for: scheme).opacity(0.08),
-                    in: RoundedRectangle(cornerRadius: ChatFormMetrics.controlCornerRadius, style: .continuous)
-                )
-                .overlay {
-                    RoundedRectangle(cornerRadius: ChatFormMetrics.controlCornerRadius, style: .continuous)
-                        .strokeBorder(ThemeColor.kTextNegative.color(for: scheme).opacity(0.24), lineWidth: 1)
-                        .allowsHitTesting(false)
-                }
-                .padding(.horizontal, 20)
-                .padding(.top, 2)
-                .padding(.bottom, 8)
-            }
 
             Rectangle()
                 .fill(ThemeColor.kBorder.color(for: scheme).opacity(0.65))
@@ -597,11 +590,11 @@ private struct CalendarFormField<Content: View>: View {
     let title: String
     var required: Bool = false
     var trailingHint: String? = nil
-    var trailingHintIsError: Bool = false
+    var error: String? = nil
     @ViewBuilder let content: Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 4) {
                 Text(title)
                     .font(.system(size: 13, weight: .medium))
@@ -615,13 +608,19 @@ private struct CalendarFormField<Content: View>: View {
                 Spacer(minLength: 8)
                 if let trailingHint, !trailingHint.isEmpty {
                     Text(trailingHint)
-                        .font(.system(size: 12, weight: trailingHintIsError ? .medium : .regular))
+                        .font(.system(size: 12))
                         .monospacedDigit()
-                        .foregroundStyle(trailingHintIsError ? ThemeColor.kTextNegative : ThemeColor.kTextSubtlest)
+                        .foregroundStyle(ThemeColor.kTextSubtlest)
                         .lineLimit(1)
                 }
             }
             content
+            if let error, !error.isEmpty {
+                Text(error)
+                    .font(.system(size: 12))
+                    .foregroundStyle(ThemeColor.kTextNegative)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 }
