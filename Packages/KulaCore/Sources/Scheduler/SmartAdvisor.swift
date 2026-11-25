@@ -290,15 +290,21 @@ public struct ChatCompletionClient: Sendable {
     }
 
     public func complete(system: String, user: String) async throws -> String {
-        var req = URLRequest(url: try ModelHTTPConnection.endpoint(baseURL.absoluteString), timeoutInterval: 60)
+        let endpoint = try ModelHTTPConnection.endpoint(baseURL.absoluteString)
+        var req = URLRequest(url: endpoint, timeoutInterval: 60)
         req.httpMethod = "POST"
         req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let tokenKey = ModelHTTPConnection.usesMaxCompletionTokens(endpoint: endpoint, model: model)
+            ? "max_completion_tokens" : "max_tokens"
         var body: [String: Any] = [
-            "model": model, "temperature": 0.2, "max_tokens": 1200,
+            "model": model, "temperature": 0.2, tokenKey: 1200,
             "messages": [["role": "system", "content": system], ["role": "user", "content": user]],
         ]
         if baseURL.host?.lowercased() == "api.deepseek.com" { body["thinking"] = ["type": "disabled"] }
+        else if ModelHTTPConnection.usesOpenAIReasoningEffortNone(endpoint: endpoint, model: model) {
+            body["reasoning_effort"] = "none"
+        }
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
         let (data, resp) = try await ModelHTTPConnection.data(for: req)
         guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {

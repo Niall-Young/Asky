@@ -13,22 +13,30 @@ enum ModelCapabilityCheck {
 
     static func run(baseURL: URL, model: String, apiKey: String,
                     transport: Transport = { try await ModelHTTPConnection.data(for: $0) }) async -> Report {
-        let text = await probe(baseURL, apiKey, transport, ["model": model, "max_tokens": 4,
-                                                 "messages": [["role": "user", "content": "ping"]]])
-        let tools = await probe(baseURL, apiKey, transport, [
-            "model": model, "max_tokens": 16,
-            "messages": [["role": "user", "content": "call noop"]],
-            "tools": [["type": "function", "function": ["name": "noop", "description": "no-op",
-                                                         "parameters": ["type": "object", "properties": [String: String]()]]]],
-        ])
+        let endpoint = (try? ModelHTTPConnection.endpoint(baseURL.absoluteString)) ?? baseURL
+        func requestBody(_ messages: [[String: Any]], maxTokens: Int, tools: [[String: Any]]? = nil) -> [String: Any] {
+            let tokenKey = ModelHTTPConnection.usesMaxCompletionTokens(endpoint: endpoint, model: model)
+                ? "max_completion_tokens" : "max_tokens"
+            var body: [String: Any] = ["model": model, tokenKey: maxTokens, "messages": messages]
+            if ModelHTTPConnection.usesOpenAIReasoningEffortNone(endpoint: endpoint, model: model) {
+                body["reasoning_effort"] = "none"
+            }
+            if let tools { body["tools"] = tools }
+            return body
+        }
+        let text = await probe(baseURL, apiKey, transport, requestBody([["role": "user", "content": "ping"]], maxTokens: 4))
+        let tools = await probe(baseURL, apiKey, transport, requestBody(
+            [["role": "user", "content": "call noop"]], maxTokens: 16,
+            tools: [["type": "function", "function": ["name": "noop", "description": "no-op",
+                                                      "parameters": ["type": "object", "properties": [String: String]()]]]]
+        ))
         let png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
-        let image = await probe(baseURL, apiKey, transport, [
-            "model": model, "max_tokens": 4,
-            "messages": [["role": "user", "content": [
+        let image = await probe(baseURL, apiKey, transport, requestBody([
+            ["role": "user", "content": [
                 ["type": "text", "text": "color?"],
                 ["type": "image_url", "image_url": ["url": "data:image/png;base64,\(png)"]],
-            ]]],
-        ])
+            ]],
+        ], maxTokens: 4))
         let failures = [(NSLocalizedString("文本", comment: ""), text),
                         (NSLocalizedString("工具调用", comment: ""), tools),
                         (NSLocalizedString("图像输入", comment: ""), image)].compactMap { label, error in

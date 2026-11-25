@@ -23,6 +23,21 @@ public final class ModelHTTPConnection: Sendable {
         return endpoint
     }
 
+    public static func usesMaxCompletionTokens(endpoint: URL, model: String) -> Bool {
+        guard endpoint.host?.lowercased() == "api.openai.com" else { return false }
+        let name = model.lowercased()
+        return name.hasPrefix("gpt-5") || name.hasPrefix("gpt-6")
+            || (name.hasPrefix("o") && name.dropFirst().first?.isNumber == true)
+    }
+
+    /// OpenAI GPT-5.4+ and GPT-6 Luna require reasoning_effort="none" for Chat Completions tool calling.
+    public static func usesOpenAIReasoningEffortNone(endpoint: URL, model: String) -> Bool {
+        guard endpoint.host?.lowercased() == "api.openai.com" else { return false }
+        let name = model.lowercased()
+        return name == "gpt-6-luna" || name.hasPrefix("gpt-6-luna-")
+            || name.hasPrefix("gpt-5.6") || name.hasPrefix("gpt-5.4")
+    }
+
     public init() {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.httpCookieStorage = nil; configuration.urlCredentialStorage = nil; configuration.urlCache = nil

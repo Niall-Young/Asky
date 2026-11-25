@@ -126,11 +126,16 @@ public struct NativeModelClient: Sendable {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
         request.setValue("Bearer " + config.apiKey, forHTTPHeaderField: "Authorization")
-        var body: [String: JSONValue] = ["model": .string(config.model), "messages": .array(messages), "stream": true, "max_tokens": 8192]
+        var body: [String: JSONValue] = ["model": .string(config.model), "messages": .array(messages), "stream": true]
+        let tokenKey = ModelHTTPConnection.usesMaxCompletionTokens(endpoint: endpoint, model: config.model)
+            ? "max_completion_tokens" : "max_tokens"
+        body[tokenKey] = 8192
         // Matches the former runtime's thinkingLevel=off. Custom endpoints are not given vendor flags.
         if endpoint.host?.lowercased() == "api.deepseek.com" {
             body["thinking"] = ["type": "disabled"]
             body["stream_options"] = ["include_usage": true]
+        } else if ModelHTTPConnection.usesOpenAIReasoningEffortNone(endpoint: endpoint, model: config.model) {
+            body["reasoning_effort"] = "none"
         }
         if !tools.isEmpty { body["tools"] = .array(tools); body["tool_choice"] = "auto" }
         let encoder = JSONEncoder()

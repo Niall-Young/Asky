@@ -12,16 +12,18 @@ struct ModelProviderPreset: Identifiable {
         .init(id: "deepseek", name: "DeepSeek", baseURL: "https://api.deepseek.com",
               models: ["deepseek-flash", "deepseek-v4-pro"], keyURL: URL(string: "https://platform.deepseek.com/api_keys")!),
         .init(id: "minimax", name: "MiniMax", baseURL: "https://api.minimax.cn/v1",
-              models: ["MiniMax-M3", "MiniMax-M2.7", "MiniMax-M2.5"], keyURL: URL(string: "https://platform.minimaxi.com")!),
+              models: ["MiniMax-M3.1-Flash", "MiniMax-M3"], keyURL: URL(string: "https://platform.minimaxi.com")!),
         .init(id: "glm", name: "GLM（智谱）", baseURL: "https://open.bigmodel.cn/api/paas/v4",
               models: ["glm-5.3-flash", "glm-5.3-flashx", "glm-5.3", "glm-5.4"],
               keyURL: URL(string: "https://bigmodel.cn/usercenter/proj-mgmt/apikeys")!),
         .init(id: "kimi", name: "Kimi", baseURL: "https://api.moonshot.ai/v1",
-              models: ["kimi-k3", "kimi-k2.6", "kimi-k2.7-code"], keyURL: URL(string: "https://platform.kimi.ai")!),
+              models: ["kimi-k3.1-pro", "kimi-k3.1-pro-highspeed", "kimi-k3"], keyURL: URL(string: "https://platform.kimi.ai")!),
         .init(id: "qwen", name: "Qwen（通义千问 · 北京）", baseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1",
-              models: ["qwen-plus", "qwen3.8-max"], keyURL: URL(string: "https://bailian.console.aliyun.com")!),
+              models: ["qwen3.8-flash", "qwen3.7-plus", "qwen4-max", "qwen3.8-max", "qwen-plus"],
+              keyURL: URL(string: "https://bailian.console.aliyun.com")!),
         .init(id: "openai", name: "OpenAI", baseURL: "https://api.openai.com/v1",
-              models: ["gpt-4.1", "gpt-4.1-mini"], keyURL: URL(string: "https://platform.openai.com/api-keys")!),
+              models: ["gpt-6-luna", "gpt-5.6-terra", "gpt-5.6-sol", "gpt-5.4"],
+              keyURL: URL(string: "https://platform.openai.com/api-keys")!),
     ]
 
     static func find(_ id: String) -> Self? { all.first { $0.id == id } }
