@@ -86,7 +86,7 @@ enum ChatImageGalleryContent {
         return images.isEmpty ? nil : images
     }
 
-    private static func source(in line: String) -> URL? {
+    static func source(in line: String) -> URL? {
         guard let content = try? AttributedString(markdown: line,
             options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)) else { return nil }
         var links: [URL] = []

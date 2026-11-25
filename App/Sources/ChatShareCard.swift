@@ -125,11 +125,15 @@ struct ChatShareCardContent: View {
     }
 
     private var formattedMarkdown: String {
+        Self.formattedMarkdown(from: text)
+    }
+
+    static func formattedMarkdown(from text: String) -> String {
         let parts = ChatFormParser.parse(text, streaming: false)
         return parts.map { part in
             switch part.content {
             case .markdown(let body):
-                return body
+                return stripCitations(from: body)
             case .form(let form):
                 var lines: [String] = []
                 if !form.title.isEmpty { lines.append("**\(form.title)**") }
@@ -141,6 +145,516 @@ struct ChatShareCardContent: View {
         }
         .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         .joined(separator: "\n\n")
+    }
+
+    private enum InlineToken {
+        case plain(String)
+        case protected(String)
+        case citation
+    }
+
+    private static let citationSeparators = CharacterSet.whitespaces.union(CharacterSet(charactersIn: "、,，;；/"))
+    private static let trailingPunctuation: Set<Character> = Set("。，、；：！？.,;:!?）)】]}》」』”’|")
+    private static let wrapperPairs: [(open: String, close: String)] = [
+        ("（", "）"), ("(", ")"), ("【", "】"), ("[", "]"),
+        ("**", "**"), ("__", "__"), ("*", "*"), ("_", "_")
+    ]
+
+    /// Removes non-clickable source/citation links from share-card Markdown while preserving
+    /// normal descriptive links, images, inline code, fenced code blocks, and surrounding punctuation.
+    static func stripCitations(from markdown: String) -> String {
+        let canonical = MarkdownContent(markdown).renderMarkdown()
+        let lines = canonical.components(separatedBy: "\n")
+        var output: [String] = []
+        var fence: (character: Character, count: Int)?
+        var droppedAnyLine = false
+
+        for line in lines {
+            if let current = fence {
+                output.append(line)
+                if let marker = fenceMarker(in: line),
+                   marker.character == current.character,
+                   marker.count >= current.count,
+                   marker.rest.trimmingCharacters(in: .whitespaces).isEmpty {
+                    fence = nil
+                }
+                continue
+            }
+
+            if let marker = fenceMarker(in: line),
+               !(marker.character == "`" && marker.rest.contains("`")) {
+                fence = (marker.character, marker.count)
+                output.append(line)
+                continue
+            }
+
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed == "<!-- end list -->" {
+                droppedAnyLine = true
+                continue
+            }
+
+            if !trimmed.isEmpty, ChatImageGalleryContent.source(in: trimmed) != nil {
+                droppedAnyLine = true
+                continue
+            }
+
+            let (cleaned, removedAny) = stripInlineCitations(from: line)
+            if removedAny && isEmptyAfterCitationRemoval(cleaned) {
+                droppedAnyLine = true
+                continue
+            }
+            output.append(cleaned)
+        }
+
+        guard droppedAnyLine else {
+            return output.joined(separator: "\n")
+        }
+
+        // Collapse duplicate blank lines introduced by dropping standalone source lines.
+        var collapsed: [String] = []
+        var inFence: (character: Character, count: Int)?
+        for line in output {
+            if let current = inFence {
+                collapsed.append(line)
+                if let marker = fenceMarker(in: line),
+                   marker.character == current.character,
+                   marker.count >= current.count,
+                   marker.rest.trimmingCharacters(in: .whitespaces).isEmpty {
+                    inFence = nil
+                }
+                continue
+            }
+            if let marker = fenceMarker(in: line),
+               !(marker.character == "`" && marker.rest.contains("`")) {
+                inFence = (marker.character, marker.count)
+                collapsed.append(line)
+                continue
+            }
+            if line.trimmingCharacters(in: .whitespaces).isEmpty {
+                if collapsed.isEmpty || collapsed.last?.trimmingCharacters(in: .whitespaces).isEmpty == true {
+                    continue
+                }
+                collapsed.append("")
+            } else {
+                collapsed.append(line)
+            }
+        }
+        while collapsed.last?.trimmingCharacters(in: .whitespaces).isEmpty == true {
+            collapsed.removeLast()
+        }
+        return collapsed.joined(separator: "\n")
+    }
+
+    private static func fenceMarker(in line: String) -> (character: Character, count: Int, rest: Substring)? {
+        var rest = line[...]
+        while true {
+            var spaces = 0
+            while spaces < 3, rest.first == " " {
+                rest = rest.dropFirst()
+                spaces += 1
+            }
+            if rest.first == ">" {
+                rest = rest.dropFirst()
+                if rest.first == " " { rest = rest.dropFirst() }
+            } else {
+                break
+            }
+        }
+        guard let first = rest.first, first == "`" || first == "~" else { return nil }
+        let count = rest.prefix { $0 == first }.count
+        guard count >= 3 else { return nil }
+        return (first, count, rest.dropFirst(count))
+    }
+
+    private static func isEmptyAfterCitationRemoval(_ line: String) -> Bool {
+        let stripped = line.trimmingCharacters(in: .whitespaces)
+        if stripped.isEmpty { return true }
+        return stripped.allSatisfy { $0 == ">" || $0 == " " || $0 == "\t" }
+    }
+
+    private static func stripInlineCitations(from line: String) -> (String, Bool) {
+        let rawTokens = tokenizeLine(line)
+        guard rawTokens.contains(where: { if case .citation = $0 { return true }; return false }) else {
+            return (line, false)
+        }
+
+        // 1 & 2. Merge adjacent citations (and citation-only separators) and strip empty enclosing wrappers
+        //        (e.g. （[来源](url)）, ([1](url), [2](url)), **[来源](url)**) until fixed point.
+        var tokens = rawTokens
+        var changed = true
+        while changed {
+            changed = false
+
+            var merged: [InlineToken] = []
+            var idx = 0
+            while idx < tokens.count {
+                if case .citation = tokens[idx] {
+                    if case .citation = merged.last {
+                        changed = true
+                        idx += 1
+                        continue
+                    }
+                    merged.append(.citation)
+                    idx += 1
+                    continue
+                }
+                if case .plain(let text) = tokens[idx],
+                   case .citation = merged.last,
+                   idx + 1 < tokens.count,
+                   case .citation = tokens[idx + 1],
+                   text.trimmingCharacters(in: citationSeparators).isEmpty {
+                    changed = true
+                    idx += 1
+                    continue
+                }
+                appendToken(tokens[idx], to: &merged)
+                idx += 1
+            }
+            tokens = merged
+
+            for i in tokens.indices {
+                guard case .citation = tokens[i],
+                      i > 0, i + 1 < tokens.count,
+                      case .plain(let before) = tokens[i - 1],
+                      case .plain(let after) = tokens[i + 1] else { continue }
+                let trimmedBefore = trimTrailingHorizontalSpace(before)
+                let trimmedAfter = trimLeadingHorizontalSpace(after)
+                for pair in wrapperPairs where trimmedBefore.hasSuffix(pair.open) && trimmedAfter.hasPrefix(pair.close) {
+                    tokens[i - 1] = .plain(String(trimmedBefore.dropLast(pair.open.count)))
+                    tokens[i + 1] = .plain(String(trimmedAfter.dropFirst(pair.close.count)))
+                    changed = true
+                    break
+                }
+            }
+            if changed {
+                tokens.removeAll { token in
+                    if case .plain(let text) = token { return text.isEmpty }
+                    return false
+                }
+            }
+        }
+
+        // 3. Rejoin tokens while cleaning boundary whitespace around each removed citation.
+        var result = ""
+        var i = 0
+        while i < tokens.count {
+            switch tokens[i] {
+            case .plain(let text), .protected(let text):
+                result.append(text)
+                i += 1
+            case .citation:
+                var nextPlainIndex: Int?
+                if i + 1 < tokens.count, case .plain = tokens[i + 1] {
+                    nextPlainIndex = i + 1
+                }
+                let nextChar = nextNonEmptyCharacter(in: tokens, startingAt: i + 1)
+                let isAtLineEnd = nextChar == nil
+                let isAtLineStart = result.trimmingCharacters(in: .whitespaces).isEmpty
+
+                if isAtLineEnd {
+                    result = trimTrailingHorizontalSpace(result)
+                    if let nextIdx = nextPlainIndex {
+                        tokens[nextIdx] = .plain("")
+                    }
+                } else if let nextChar, trailingPunctuation.contains(nextChar) {
+                    result = trimTrailingHorizontalSpace(result)
+                } else if isAtLineStart {
+                    if let nextIdx = nextPlainIndex, case .plain(let nextText) = tokens[nextIdx] {
+                        tokens[nextIdx] = .plain(trimLeadingHorizontalSpace(nextText))
+                    }
+                } else if endsWithHorizontalSpace(result),
+                          let nextIdx = nextPlainIndex,
+                          case .plain(let nextText) = tokens[nextIdx],
+                          startsWithHorizontalSpace(nextText) {
+                    tokens[nextIdx] = .plain(trimLeadingHorizontalSpace(nextText))
+                }
+                i += 1
+            }
+        }
+
+        return (result, true)
+    }
+
+    private static func appendToken(_ token: InlineToken, to tokens: inout [InlineToken]) {
+        if case .plain(let text) = token, case .plain(let previous) = tokens.last {
+            tokens[tokens.count - 1] = .plain(previous + text)
+        } else {
+            tokens.append(token)
+        }
+    }
+
+    private static func nextNonEmptyCharacter(in tokens: [InlineToken], startingAt start: Int) -> Character? {
+        for idx in start..<tokens.count {
+            switch tokens[idx] {
+            case .plain(let text), .protected(let text):
+                if let first = text.first { return first }
+            case .citation:
+                continue
+            }
+        }
+        return nil
+    }
+
+    private static func endsWithHorizontalSpace(_ text: String) -> Bool {
+        guard let last = text.last else { return false }
+        return last == " " || last == "\t"
+    }
+
+    private static func startsWithHorizontalSpace(_ text: String) -> Bool {
+        guard let first = text.first else { return false }
+        return first == " " || first == "\t"
+    }
+
+    private static func trimTrailingHorizontalSpace(_ text: String) -> String {
+        var end = text.endIndex
+        while end > text.startIndex {
+            let prev = text.index(before: end)
+            if text[prev] == " " || text[prev] == "\t" {
+                end = prev
+            } else {
+                break
+            }
+        }
+        return String(text[..<end])
+    }
+
+    private static func trimLeadingHorizontalSpace(_ text: String) -> String {
+        var start = text.startIndex
+        while start < text.endIndex, text[start] == " " || text[start] == "\t" {
+            start = text.index(after: start)
+        }
+        return String(text[start...])
+    }
+
+    private static func tokenizeLine(_ line: String) -> [InlineToken] {
+        var tokens: [InlineToken] = []
+        var plainBuffer = ""
+        var idx = line.startIndex
+
+        func flushPlain() {
+            guard !plainBuffer.isEmpty else { return }
+            appendToken(.plain(plainBuffer), to: &tokens)
+            plainBuffer.removeAll(keepingCapacity: true)
+        }
+
+        while idx < line.endIndex {
+            let ch = line[idx]
+
+            // Backslash escape: keep escaped characters verbatim.
+            if ch == "\\" {
+                let next = line.index(after: idx)
+                if next < line.endIndex {
+                    let after = line.index(after: next)
+                    flushPlain()
+                    tokens.append(.protected(String(line[idx..<after])))
+                    idx = after
+                    continue
+                }
+            }
+
+            // Inline code span: preserve verbatim.
+            if ch == "`" {
+                var endTicks = idx
+                while endTicks < line.endIndex, line[endTicks] == "`" {
+                    endTicks = line.index(after: endTicks)
+                }
+                let tickCount = line.distance(from: idx, to: endTicks)
+                if let closingEnd = findClosingBackticks(in: line, from: endTicks, count: tickCount) {
+                    flushPlain()
+                    tokens.append(.protected(String(line[idx..<closingEnd])))
+                    idx = closingEnd
+                    continue
+                }
+                plainBuffer.append(contentsOf: line[idx..<endTicks])
+                idx = endTicks
+                continue
+            }
+
+            // Image syntax `![alt](dest)`: never treat as a citation link.
+            if ch == "!" {
+                let next = line.index(after: idx)
+                if next < line.endIndex, line[next] == "[" {
+                    if let parsed = parseInlineLink(in: line, from: next) {
+                        flushPlain()
+                        tokens.append(.protected(String(line[idx..<parsed.end])))
+                        idx = parsed.end
+                        continue
+                    }
+                    plainBuffer.append("![")
+                    idx = line.index(after: next)
+                    continue
+                }
+            }
+
+            // Inline Markdown link `[label](destination)`.
+            if ch == "[", let parsed = parseInlineLink(in: line, from: idx) {
+                flushPlain()
+                if isCitationLink(label: parsed.label, destination: parsed.destination) {
+                    tokens.append(.citation)
+                } else {
+                    tokens.append(.protected(String(line[idx..<parsed.end])))
+                }
+                idx = parsed.end
+                continue
+            }
+
+            plainBuffer.append(ch)
+            idx = line.index(after: idx)
+        }
+
+        flushPlain()
+        return tokens
+    }
+
+    private static func findClosingBackticks(in line: String, from start: String.Index, count: Int) -> String.Index? {
+        var idx = start
+        while idx < line.endIndex {
+            if line[idx] == "`" {
+                var end = idx
+                while end < line.endIndex, line[end] == "`" {
+                    end = line.index(after: end)
+                }
+                if line.distance(from: idx, to: end) == count {
+                    return end
+                }
+                idx = end
+            } else {
+                idx = line.index(after: idx)
+            }
+        }
+        return nil
+    }
+
+    private static func parseInlineLink(in line: String, from start: String.Index)
+        -> (label: String, destination: String, end: String.Index)? {
+        guard start < line.endIndex, line[start] == "[" else { return nil }
+        var idx = line.index(after: start)
+        var bracketDepth = 1
+        var labelEnd: String.Index?
+
+        while idx < line.endIndex {
+            let ch = line[idx]
+            if ch == "\\" {
+                let next = line.index(after: idx)
+                idx = next < line.endIndex ? line.index(after: next) : next
+                continue
+            }
+            if ch == "[" {
+                bracketDepth += 1
+            } else if ch == "]" {
+                bracketDepth -= 1
+                if bracketDepth == 0 {
+                    labelEnd = idx
+                    break
+                }
+            }
+            idx = line.index(after: idx)
+        }
+
+        guard let labelEnd else { return nil }
+        let openParen = line.index(after: labelEnd)
+        guard openParen < line.endIndex, line[openParen] == "(" else { return nil }
+
+        var j = line.index(after: openParen)
+        while j < line.endIndex, line[j] == " " || line[j] == "\t" {
+            j = line.index(after: j)
+        }
+
+        let destination: String
+        if j < line.endIndex, line[j] == "<" {
+            let destStart = line.index(after: j)
+            var scan = destStart
+            var foundClose = false
+            while scan < line.endIndex {
+                if line[scan] == "\\" {
+                    let next = line.index(after: scan)
+                    scan = next < line.endIndex ? line.index(after: next) : next
+                    continue
+                }
+                if line[scan] == ">" {
+                    foundClose = true
+                    break
+                }
+                scan = line.index(after: scan)
+            }
+            guard foundClose else { return nil }
+            destination = String(line[destStart..<scan])
+            j = line.index(after: scan)
+        } else {
+            let destStart = j
+            var parenDepth = 0
+            while j < line.endIndex {
+                let ch = line[j]
+                if ch == "\\" {
+                    let next = line.index(after: j)
+                    j = next < line.endIndex ? line.index(after: next) : next
+                    continue
+                }
+                if ch == "(" {
+                    parenDepth += 1
+                } else if ch == ")" {
+                    if parenDepth == 0 { break }
+                    parenDepth -= 1
+                } else if ch == " " || ch == "\t" {
+                    break
+                }
+                j = line.index(after: j)
+            }
+            destination = String(line[destStart..<j])
+        }
+
+        while j < line.endIndex, line[j] == " " || line[j] == "\t" {
+            j = line.index(after: j)
+        }
+
+        if j < line.endIndex, line[j] == "\"" || line[j] == "'" || line[j] == "(" {
+            let closing: Character = line[j] == "(" ? ")" : line[j]
+            j = line.index(after: j)
+            var closedTitle = false
+            while j < line.endIndex {
+                if line[j] == "\\" {
+                    let next = line.index(after: j)
+                    j = next < line.endIndex ? line.index(after: next) : next
+                    continue
+                }
+                if line[j] == closing {
+                    closedTitle = true
+                    j = line.index(after: j)
+                    break
+                }
+                j = line.index(after: j)
+            }
+            guard closedTitle else { return nil }
+            while j < line.endIndex, line[j] == " " || line[j] == "\t" {
+                j = line.index(after: j)
+            }
+        }
+
+        guard j < line.endIndex, line[j] == ")" else { return nil }
+        let label = String(line[line.index(after: start)..<labelEnd])
+        return (label, destination, line.index(after: j))
+    }
+
+    private static func isCitationLink(label: String, destination: String) -> Bool {
+        let trimmedDest = destination.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: trimmedDest), ChatImageService.supports(url) else { return false }
+        let parsed = ChatInlineText.parsed(label)
+        guard !parsed.runs.contains(where: { $0.imageURL != nil }) else { return false }
+        let plain = String(parsed.characters)
+        if ChatSourceTextView.isCitation(plain) { return true }
+        let trimmed = plain.trimmingCharacters(in: CharacterSet(charactersIn: "[]【】()（） "))
+        guard !trimmed.isEmpty else { return false }
+        let lower = trimmed.lowercased()
+        let exactLabels = ["图片来源", "图源", "photo source", "image source", "credit"]
+        if exactLabels.contains(lower) { return true }
+        let prefixLabels = [
+            "来源", "图片来源", "图源", "引用", "参考", "出处",
+            "source", "photo source", "image source", "citation", "ref", "reference"
+        ]
+        return prefixLabels.contains { prefix in
+            lower.hasPrefix(prefix + ":") || lower.hasPrefix(prefix + "：")
+        }
     }
 
     var body: some View {

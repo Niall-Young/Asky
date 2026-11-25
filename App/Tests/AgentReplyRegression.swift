@@ -4049,17 +4049,62 @@ enum AgentReplyRegression {
         precondition(userMarker != nil, "User bubble must expose TranscriptReplyPosition marker for reply navigation")
         precondition(followUp.presentation?.quotes?.first?.sourceMessageID == userSource.id)
 
-        // 2. Verify AI reply share card rendering in both light and dark appearances.
+        // 2. Verify share card Markdown strips non-clickable citation/source links cleanly while preserving real links and code.
+        let citationMarkdown = """
+        这是百度成立以来广告第一次跌破一半[来源](https://example.com/1)。广告少 34 亿，云多 40 亿 [来源](https://example.com/2)、[来源](https://example.com/3)。
+
+        PB 只有 0.61 倍（[来源](https://example.com/4)），Revenue grew 22% ([source](https://example.com/5), [1](https://example.com/6)).
+
+        参考引用样式[来源][ref1]，完整报告见 [百度财报](https://example.com/report) [来源：官方公告](https://example.com/notice)。
+
+        [来源](https://example.com/standalone)
+
+        来源：[新闻报道](https://example.com/photo-source)
+
+        - **首屏优先**：先呈现骨架与缓存结果。[来源](https://example.com/list)
+        - 保留行内代码 `[来源](https://example.com/code)` 与 `Hello` [source](https://example.com/mid) world
+
+        | 指标 | 数值 |
+        | --- | --- |
+        | 营收 | 308 亿元 [来源](https://example.com/table) |
+
+        ```markdown
+        示例保留：[来源](https://example.com/fenced)
+        ```
+
+        [ref1]: https://example.com/ref1
+        """
+        let strippedShareMarkdown = ChatShareCardContent.formattedMarkdown(from: citationMarkdown)
+        precondition(strippedShareMarkdown.contains("这是百度成立以来广告第一次跌破一半。广告少 34 亿，云多 40 亿。"),
+                     "Expected inline Chinese citations removed cleanly, got:\n\(strippedShareMarkdown)")
+        precondition(strippedShareMarkdown.contains("PB 只有 0.61 倍，Revenue grew 22%."),
+                     "Expected wrapped Chinese/English citations removed cleanly, got:\n\(strippedShareMarkdown)")
+        precondition(strippedShareMarkdown.contains("参考引用样式，完整报告见 [百度财报](https://example.com/report)。"),
+                     "Expected reference-style and prefixed citations stripped while keeping descriptive link, got:\n\(strippedShareMarkdown)")
+        precondition(!strippedShareMarkdown.contains("https://example.com/standalone")
+                     && !strippedShareMarkdown.contains("https://example.com/photo-source")
+                     && !strippedShareMarkdown.contains("新闻报道"),
+                     "Expected standalone source lines dropped, got:\n\(strippedShareMarkdown)")
+        precondition(!strippedShareMarkdown.contains("\n\n\n"),
+                     "Expected no triple newlines after dropping standalone source lines, got:\n\(strippedShareMarkdown)")
+        precondition(strippedShareMarkdown.contains("保留行内代码 `[来源](https://example.com/code)` 与 `Hello` world"),
+                     "Expected inline code preserved and mid-sentence citation spacing collapsed, got:\n\(strippedShareMarkdown)")
+        precondition(strippedShareMarkdown.contains("|营收|308 亿元|"),
+                     "Expected table cell citation removed without breaking table pipes, got:\n\(strippedShareMarkdown)")
+        precondition(strippedShareMarkdown.contains("示例保留：[来源](https://example.com/fenced)"),
+                     "Expected fenced code block preserved verbatim, got:\n\(strippedShareMarkdown)")
+
+        // 2b. Verify AI reply share card rendering in both light and dark appearances (including citations stripped).
         let sampleReply = """
         ### 本周性能优化建议
 
-        把首屏渲染与异步数据加载拆开后，整体响应会明显更轻快：
+        把首屏渲染与异步数据加载拆开后，整体响应会明显更轻快[来源](https://example.com/perf)：
 
-        1. **首屏优先**：先呈现骨架与缓存结果，后台增量刷新远程数据
-        2. **减少主线程解码**：将图片缩放与高斯模糊放到独立渲染管线
-        3. **按需预加载**：列表只维护视口前后一屏的原生视图
+        1. **首屏优先**：先呈现骨架与缓存结果，后台增量刷新远程数据[来源](https://example.com/skeleton)
+        2. **减少主线程解码**：将图片缩放与高斯模糊放到独立渲染管线 [1](https://example.com/decode)
+        3. **按需预加载**：列表只维护视口前后一屏的原生视图（[source](https://example.com/preload)）
 
-        > 建议先用 Instruments 采样 30 秒，优先解决耗时占比最高的前两个热点。
+        > 建议先用 Instruments 采样 30 秒，优先解决耗时占比最高的前两个热点。[来源](https://example.com/instruments)
 
         ```swift
         let png = ChatShareCardRenderer.renderPNG(text: reply, appearance: .dark)
