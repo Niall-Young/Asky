@@ -614,6 +614,113 @@ private extension EnvironmentValues {
     }
 }
 
+@MainActor @Observable
+private final class TranscriptHistoryLoader {
+    var isLoadingOlder = false
+    var isLoadingNewer = false
+    @ObservationIgnored private var pendingDirection: TranscriptViewport.AutoLoadDirection?
+    @ObservationIgnored private var loadTask: Task<Void, Never>?
+
+    /// Minimum deliberate loading beat so reaching the edge feels calm and intentional rather than a sudden hitch.
+    static let minimumDurationSeconds: TimeInterval = 0.40
+    /// Upper bound while waiting for trackpad momentum to finish settling at the edge.
+    static let maxSettleWaitSeconds: TimeInterval = 0.70
+
+    var isLoading: Bool { isLoadingOlder || isLoadingNewer }
+
+    func begin(
+        direction: TranscriptViewport.AutoLoadDirection,
+        scrollActivity: TranscriptScrollActivity,
+        viewport: TranscriptViewport,
+        stillNearEdge: @escaping @MainActor () -> Bool,
+        perform: @escaping @MainActor () -> Void
+    ) {
+        guard loadTask == nil else { return }
+        pendingDirection = direction
+        switch direction {
+        case .older: isLoadingOlder = true
+        case .newer: isLoadingNewer = true
+        }
+        let startedAt = ProcessInfo.processInfo.systemUptime
+        loadTask = Task { @MainActor [weak self] in
+            defer {
+                if let self {
+                    self.isLoadingOlder = false
+                    self.isLoadingNewer = false
+                    self.pendingDirection = nil
+                    self.loadTask = nil
+                }
+            }
+            while !Task.isCancelled {
+                let elapsed = ProcessInfo.processInfo.systemUptime - startedAt
+                if elapsed >= Self.minimumDurationSeconds {
+                    if !scrollActivity.isScrolling || elapsed >= Self.maxSettleWaitSeconds {
+                        break
+                    }
+                }
+                do { try await Task.sleep(for: .milliseconds(24)) } catch { return }
+                guard !Task.isCancelled else { return }
+                if !stillNearEdge() {
+                    viewport.resetAutoLoadLatch()
+                    return
+                }
+            }
+            guard !Task.isCancelled, stillNearEdge() else {
+                viewport.resetAutoLoadLatch()
+                return
+            }
+            perform()
+        }
+    }
+
+    func cancelIfMovedAway(direction: TranscriptViewport.AutoLoadDirection, viewport: TranscriptViewport) {
+        guard pendingDirection == direction else { return }
+        cancel(resetLatchIn: viewport)
+    }
+
+    func cancel(resetLatchIn viewport: TranscriptViewport? = nil) {
+        loadTask?.cancel()
+        loadTask = nil
+        pendingDirection = nil
+        if isLoadingOlder { isLoadingOlder = false }
+        if isLoadingNewer { isLoadingNewer = false }
+        viewport?.resetAutoLoadLatch()
+    }
+}
+
+/// Fixed-height edge slot that displays a subtle loading indicator while waiting to append/prepend history.
+/// Keeping the slot height constant prevents any layout shift when the spinner starts or stops.
+private struct TranscriptHistoryLoadingRow: View {
+    let loader: TranscriptHistoryLoader
+    let direction: TranscriptViewport.AutoLoadDirection
+    let label: String
+
+    private var isActive: Bool {
+        switch direction {
+        case .older: loader.isLoadingOlder
+        case .newer: loader.isLoadingNewer
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if isActive {
+                ProgressView()
+                    .controlSize(.small)
+                    .scaleEffect(0.72)
+                    .frame(width: 12, height: 12)
+            }
+            Text(label)
+                .font(.system(size: 12))
+                .foregroundStyle(ThemeColor("textSubtle"))
+                .opacity(isActive ? 0.9 : 0.42)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 36)
+        .accessibilityElement(children: .combine)
+    }
+}
+
 private struct Transcript: View {
     let model: AgentModel
     let bottomInset: CGFloat
@@ -631,6 +738,7 @@ private struct Transcript: View {
     @State private var viewport = TranscriptViewport()
     @State private var pacer = TranscriptPrependPacer()
     @State private var scrollActivity = TranscriptScrollActivity()
+    @State private var historyLoader = TranscriptHistoryLoader()
 
     init(model: AgentModel, bottomInset: CGFloat, bubblePopover: ChatBubblePopoverController) {
         self.model = model
@@ -646,21 +754,39 @@ private struct Transcript: View {
     }
 
     private func triggerAutoLoadOlder() {
-        guard !isRunning, model.hasOlder, !pacer.isStaging else { return }
+        guard !isRunning, model.hasOlder, !pacer.isStaging, !historyLoader.isLoading else { return }
         guard viewport.beginAutoLoadIfAllowed(direction: .older) else { return }
-        let previousFirstID = model.items.first?.id
-        viewport.preserveReadingPosition {
-            model.loadOlder(limit: AgentModel.scrollPage)
-            pacer.beginPrepend(previousFirstID: previousFirstID, updatedItems: model.items, viewport: viewport)
-        }
+        historyLoader.begin(
+            direction: .older,
+            scrollActivity: scrollActivity,
+            viewport: viewport,
+            stillNearEdge: { [viewport] in viewport.isNearAutoLoadEdge(.older, tolerance: 180) },
+            perform: {
+                guard !model.isRunning, model.hasOlder, !pacer.isStaging else { return }
+                let previousFirstID = model.items.first?.id
+                viewport.preserveReadingPosition {
+                    model.loadOlder(limit: AgentModel.scrollPage)
+                    pacer.beginPrepend(previousFirstID: previousFirstID, updatedItems: model.items, viewport: viewport)
+                }
+            }
+        )
     }
 
     private func triggerAutoLoadNewer() {
-        guard !isRunning, model.hasNewer, !pacer.isStaging else { return }
+        guard !isRunning, model.hasNewer, !pacer.isStaging, !historyLoader.isLoading else { return }
         guard viewport.beginAutoLoadIfAllowed(direction: .newer) else { return }
-        viewport.preserveReadingPosition {
-            model.loadNewer(limit: AgentModel.scrollPage)
-        }
+        historyLoader.begin(
+            direction: .newer,
+            scrollActivity: scrollActivity,
+            viewport: viewport,
+            stillNearEdge: { [viewport] in viewport.isNearAutoLoadEdge(.newer, tolerance: 180) },
+            perform: {
+                guard !model.isRunning, model.hasNewer, !pacer.isStaging else { return }
+                viewport.preserveReadingPosition {
+                    model.loadNewer(limit: AgentModel.scrollPage)
+                }
+            }
+        )
     }
 
     var body: some View {
@@ -679,6 +805,7 @@ private struct Transcript: View {
                 replyNavigation: model.replyNavigation,
                 hasNewer: model.hasNewer,
                 loadLatest: {
+                    historyLoader.cancel(resetLatchIn: viewport)
                     pacer.cancel(viewport: viewport)
                     model.loadLatestMessages()
                 },
@@ -688,6 +815,13 @@ private struct Transcript: View {
                 // The model already bounds this window to 120 records. Measure it eagerly:
                 // lazy height estimates changed during scrolling and moved native text offscreen.
                 VStack(alignment: .leading, spacing: 0) {
+                    if hasOlder && !isRunning {
+                        TranscriptHistoryLoadingRow(
+                            loader: historyLoader,
+                            direction: .older,
+                            label: NSLocalizedString("加载更早的消息", comment: "")
+                        )
+                    }
                     let latestIndex = allGroups.count - 1
                     let navigationTarget = model.replyNavigation?.messageID
                     let groupLayouts = ChatTranscriptBubbleLayout.resolve(allGroups)
@@ -719,6 +853,13 @@ private struct Transcript: View {
                             .background { TranscriptGroupPosition(id: group.id) }
                             .padding(.top, layout.topSpacing)
                     }
+                    if model.hasNewer && !isRunning {
+                        TranscriptHistoryLoadingRow(
+                            loader: historyLoader,
+                            direction: .newer,
+                            label: NSLocalizedString("加载更新的消息", comment: "")
+                        )
+                    }
                     // Scroll content continues behind the floating composer; its tail remains readable.
                     Color.clear.frame(height: bottomInset + 13)
                 }
@@ -729,9 +870,18 @@ private struct Transcript: View {
             }
             .environment(\.transcriptScrollActivity, scrollActivity)
             .onChange(of: model.replyNavigation) { _, request in
-                if request != nil { pacer.cancel(viewport: viewport) }
+                if request != nil {
+                    historyLoader.cancel(resetLatchIn: viewport)
+                    pacer.cancel(viewport: viewport)
+                }
+            }
+            .onChange(of: isRunning) { _, running in
+                if running {
+                    historyLoader.cancel(resetLatchIn: viewport)
+                }
             }
             .onDisappear {
+                historyLoader.cancel(resetLatchIn: viewport)
                 pacer.cancel(viewport: viewport)
                 scrollActivity.reset()
             }
@@ -989,7 +1139,7 @@ private final class TranscriptViewport {
     func beginAutoLoadIfAllowed(direction: AutoLoadDirection) -> Bool {
         guard canCheckAutoLoad else { return false }
         let now = ProcessInfo.processInfo.systemUptime
-        guard now - lastAutoLoadAt >= 0.16 else { return false }
+        guard now - lastAutoLoadAt >= 0.25 else { return false }
         // Require a scroll movement since the previous auto-load so tiny pages cannot loop endlessly.
         if lastAutoLoadScrollGeneration == scrollGeneration {
             return false
@@ -997,6 +1147,25 @@ private final class TranscriptViewport {
         lastAutoLoadAt = now
         lastAutoLoadScrollGeneration = scrollGeneration
         return true
+    }
+
+    func resetAutoLoadLatch() {
+        lastAutoLoadScrollGeneration = -1
+        lastAutoLoadAt = 0
+    }
+
+    func isNearAutoLoadEdge(_ direction: AutoLoadDirection, tolerance: CGFloat) -> Bool {
+        guard let scroll, let document = scroll.documentView else { return false }
+        let clipBounds = scroll.contentView.bounds
+        let maxY = max(0, document.bounds.height - clipBounds.height)
+        guard maxY > 1 else { return false }
+        let currentY = clipBounds.minY
+        switch direction {
+        case .older:
+            return currentY <= tolerance
+        case .newer:
+            return maxY - currentY <= tolerance
+        }
     }
 
     func setStagingPrepend(_ active: Bool) {
@@ -1578,7 +1747,7 @@ private struct TranscriptPosition: NSViewRepresentable {
     }
 
     final class ObserverView: NSView {
-        private static let autoLoadThreshold: CGFloat = 420
+        private static let autoLoadThreshold: CGFloat = 72
         var onChange: ((Bool) -> Void)?
         var onUserScroll: (() -> Void)?
         var onNearTop: (() -> Void)?

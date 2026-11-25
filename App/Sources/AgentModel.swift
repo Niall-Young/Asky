@@ -121,7 +121,7 @@ final class AgentModel {
     }
 
     static let firstPage = 40
-    static let scrollPage = 16
+    static let scrollPage = 24
     static let window = 120
 
     private(set) var conversations: [ConversationSummary] = []

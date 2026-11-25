@@ -37,6 +37,27 @@
 | `AgentReplyRegression --copy-toast-preview` | 通过（浅色/深色悬停、更多菜单与复制提示条均正常） |
 | `AgentReplyRegression --scroll-perf`（120 条富 Markdown 含列表/代码块/表格） | 通过；`totalNSViews=757`（原 `3053`）、`trackingAreas=81`（原 `367`）、`p50=16.67ms`、`p95=16.80ms`（原 `30.26ms` / 前版 `51.93ms`）、`max=62.06ms`（原 `96.00ms` / 前版 `268.20ms`）、`>33.3ms=7`（原 `13` / 前版 `27`） |
 
+## 补充优化（滚动到边界加载节奏与加载态）
+
+首轮自动加载实机体验反馈：距顶 `420 pt` 就中途静默前插，会让连续触控板惯性滚动在半路突然卡一下，且 `16` 条小页导致翻阅时频繁触发。随后做以下收口：
+
+- [AgentModel.swift](../../App/Sources/AgentModel.swift)
+  - 将 `AgentModel.scrollPage` 从 `16` 调整为 `24`，减少翻阅长历史时的加载次数。
+- [AgentView.swift](../../App/Sources/AgentView.swift)
+  - 将自动加载触发边界收紧到真正到达顶/底边缘（`autoLoadThreshold = 72 pt`），普通滚动全程零打断。
+  - 新增 `TranscriptHistoryLoader` 与定高（`36 pt`）的 `TranscriptHistoryLoadingRow`：到达边界后立即在顶/底部展示轻量 `ProgressView` + 提示文案，强制保持至少 `400 ms` 的明确加载节奏并等待触控板惯性减速稳定（上限 `700 ms`）后再提交历史消息；若用户在加载前滑离边界则自动取消；加载行使用独立 `@Observable` 状态，切换旋转态不触发消息列表重绘。
+- [AgentReplyRegression.swift](../../App/Tests/AgentReplyRegression.swift)
+  - 补充验证中段滚动（`y = 260 pt`）不提前触发、触达顶部边缘后存在加载等待期不中途改写列表、以及 `scrollPage = 24` 下的跨页多气泡零漂移与回到底部。
+
+### 补充验证结果
+
+| 检查 | 结果 |
+| --- | --- |
+| `AgentReplyRegression --scroll-stability` | 通过；恒定高度 `7636.0 pt`，中段不提前触发、边缘延迟加载与回到底部通过；跨页多气泡自动前插 `expected=104.0 after=104.0`，`maxInFlightDrift=0.0`，`maxFrameGap=186.6ms` |
+| `AgentReplyRegression --scroll-stability --preview-macos14` | 通过；跨页多气泡自动前插 `expected=104.0 after=104.0`，`maxInFlightDrift=0.0`，`maxFrameGap=323.8ms` |
+| `AgentReplyRegression --scroll-perf` | 通过；`totalNSViews=757`、`trackingAreas=81`、`p50=16.67ms`、`p95=22.36ms`、`max=56.47ms`、`>33.3ms=5` |
+| `AgentReplyRegression --paging` / `--reply-navigation` / `--reading-scroll` / `--send-stability` | 全部通过 |
+
 ## 边界说明
 
 - 同步构建并启动隔离预览包 `LoadOlderPreview.app`（162 条含跨页多气泡与表格/代码块的测试数据）供人工实机触控板体验；自动化回归未替代真实 macOS 14/15 实机验收。

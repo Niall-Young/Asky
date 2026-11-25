@@ -2564,11 +2564,11 @@ enum AgentReplyRegression {
             precondition(scroll.contentView.bounds.contains(position), "History control must be inside the viewport")
             click(scroll.contentView.convert(position, to: nil))
         }
-        // Scroll near the top repeatedly; each reach should automatically load older messages without clicking.
+        // Scroll to the top edge repeatedly until >1 scrollPage of newer history lies beyond the 120-record window.
         var pagesLoaded = 0
-        while !model.hasNewer && pagesLoaded < 8 {
-            // Park just outside the top threshold first so we can read the anchor cleanly before triggering.
-            let preY = min(560, max(0, scroll.documentView!.bounds.height - scroll.contentView.bounds.height))
+        while (!model.hasNewer || pagesLoaded < 5) && pagesLoaded < 8 {
+            // Park outside the top edge threshold first so we can read the anchor cleanly before triggering.
+            let preY = min(360, max(0, scroll.documentView!.bounds.height - scroll.contentView.bounds.height))
             NotificationCenter.default.post(name: NSScrollView.willStartLiveScrollNotification, object: scroll)
             scroll.contentView.scroll(to: NSPoint(x: 0, y: preY))
             scroll.reflectScrolledClipView(scroll.contentView)
@@ -2579,16 +2579,16 @@ enum AgentReplyRegression {
             let visible = scroll.contentView.bounds.insetBy(dx: 0, dy: 80)
             let anchorText = texts(scroll).first { !$0.string.isEmpty && scroll.contentView.convert($0.bounds, from: $0).intersects(visible) }!
             let anchorDocY = scroll.contentView.convert(anchorText.bounds, from: anchorText).minY
-            let targetY: CGFloat = 120
+            let targetY: CGFloat = 20
             let expectedScreenOffset = anchorDocY - targetY
 
             NotificationCenter.default.post(name: NSScrollView.willStartLiveScrollNotification, object: scroll)
             scroll.contentView.scroll(to: NSPoint(x: 0, y: targetY))
             scroll.reflectScrolledClipView(scroll.contentView)
             NotificationCenter.default.post(name: NSScrollView.didEndLiveScrollNotification, object: scroll)
-            try await Task.sleep(for: .milliseconds(550))
+            try await Task.sleep(for: .milliseconds(900))
 
-            precondition(model.items.first?.id != previousFirst, "Scrolling near the top must automatically load older messages")
+            precondition(model.items.first?.id != previousFirst, "Scrolling to the top edge must automatically load older messages")
             pagesLoaded += 1
             let afterOffset = scroll.contentView.convert(anchorText.bounds, from: anchorText).minY - scroll.contentView.bounds.minY
             precondition(abs(afterOffset - expectedScreenOffset) <= 1.5,
@@ -2596,15 +2596,15 @@ enum AgentReplyRegression {
         }
         precondition(model.hasNewer, "Scrolling past the 120-record window must expose newer history")
 
-        // Scroll to the bottom to automatically recover newer messages without clicking.
+        // Scroll to the bottom edge to automatically recover newer messages without clicking.
         let lastIDBefore = model.items.last!.id
         let bottomOffset = max(0, scroll.documentView!.bounds.height - scroll.contentView.bounds.height)
         NotificationCenter.default.post(name: NSScrollView.willStartLiveScrollNotification, object: scroll)
         scroll.contentView.scroll(to: NSPoint(x: 0, y: bottomOffset))
         scroll.reflectScrolledClipView(scroll.contentView)
         NotificationCenter.default.post(name: NSScrollView.didEndLiveScrollNotification, object: scroll)
-        try await Task.sleep(for: .milliseconds(550))
-        precondition(model.items.last?.id != lastIDBefore, "Scrolling near the bottom must automatically load newer messages")
+        try await Task.sleep(for: .milliseconds(900))
+        precondition(model.items.last?.id != lastIDBefore, "Scrolling to the bottom edge must automatically load newer messages")
 
         // The floating return-to-bottom button must still jump directly back to the latest messages.
         clickAboveComposer(34)
@@ -2667,18 +2667,20 @@ enum AgentReplyRegression {
         let scroll = findScroll(window.contentView!)!
         precondition(model.items.first?.responseID != nil, "First item must begin inside a split multi-bubble response")
 
-        // Move just outside the top auto-load zone so the top split bubble is mounted and measurable.
+        // Move outside the top auto-load zone so the top split bubble is mounted and mid-scroll stays uninterrupted.
         NotificationCenter.default.post(name: NSScrollView.willStartLiveScrollNotification, object: scroll)
-        scroll.contentView.scroll(to: NSPoint(x: 0, y: 520))
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: 260))
         scroll.reflectScrolledClipView(scroll.contentView)
         NotificationCenter.default.post(name: NSScrollView.didEndLiveScrollNotification, object: scroll)
         try await Task.sleep(for: .milliseconds(350))
+        precondition(model.items.count == AgentModel.firstPage,
+                     "Mid-scroll well below the top edge must not prematurely trigger history loading")
 
         let firstItem = model.items.first!
         let firstPrefix = firstItem.text.components(separatedBy: "\n\n")[0]
         let anchorText = texts(scroll).first { $0.string.hasPrefix(firstPrefix) }!
         let anchorDocY = scroll.contentView.convert(anchorText.bounds, from: anchorText).minY
-        let triggerY: CGFloat = 100
+        let triggerY: CGFloat = 20
         let expectedOffset = anchorDocY - triggerY
 
         var maxInFlightDrift: CGFloat = 0
@@ -2705,6 +2707,10 @@ enum AgentReplyRegression {
         scroll.contentView.scroll(to: NSPoint(x: 0, y: triggerY))
         scroll.reflectScrolledClipView(scroll.contentView)
         NotificationCenter.default.post(name: NSScrollView.didEndLiveScrollNotification, object: scroll)
+        // Verify deliberate loading beat: immediately after reaching the edge, items are not yet mutated mid-scroll.
+        try await Task.sleep(for: .milliseconds(150))
+        precondition(model.items.first?.id == firstItem.id,
+                     "Top-edge auto-load must observe a deliberate loading phase before mutating items")
         try await Task.sleep(for: .milliseconds(900))
         link.invalidate()
 
