@@ -14,7 +14,8 @@ extension ToolService {
     @MainActor public static func openReminders(in ek: EKEventStore) async -> [TaskSnapshot] {
         let pred = ek.predicateForIncompleteReminders(withDueDateStarting: nil, ending: nil, calendars: nil)
         return await withCheckedContinuation { cont in
-            ek.fetchReminders(matching: pred) { rs in
+            // EventKit calls back on its own queue; @Sendable keeps the closure nonisolated.
+            ek.fetchReminders(matching: pred) { @Sendable rs in
                 let items = (rs ?? []).prefix(60).map {
                     TaskSnapshot(id: $0.calendarItemIdentifier, title: $0.title ?? "", due: $0.dueDateComponents?.date,
                                  list: $0.calendar?.title ?? "")
