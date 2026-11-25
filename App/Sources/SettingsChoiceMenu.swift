@@ -18,7 +18,19 @@ enum SettingsChoiceLayout {
     static let maxMenuWidth: CGFloat = 340
     static let maxMenuHeight: CGFloat = 320
     static let edgeMargin: CGFloat = 12
-    static let animationDuration: TimeInterval = 0.18
+    static let openAnimationDuration: TimeInterval = 0.28
+    static let closeAnimationDuration: TimeInterval = 0.22
+    static let animationDuration: TimeInterval = openAnimationDuration
+    static let openFrameDelay: TimeInterval = 0.016
+    static let closeTeardownDelay: TimeInterval = closeAnimationDuration + 0.06
+
+    static var openAnimation: Animation {
+        .spring(response: openAnimationDuration, dampingFraction: 0.72)
+    }
+
+    static var closeAnimation: Animation {
+        .spring(response: closeAnimationDuration, dampingFraction: 0.86)
+    }
 }
 
 struct SettingsChoiceOption: Identifiable {
@@ -361,61 +373,77 @@ final class SettingsChoiceOverlayModel {
 
 private struct SettingsChoiceOverlayView: View {
     let model: SettingsChoiceOverlayModel
-    @Namespace private var glassNamespace
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    private var useNativeLiquidGlass: Bool {
+        if #available(macOS 26, *) {
+            return !SurfaceCompatibility.useLegacyMaterial && !reduceTransparency && contrast != .increased
+        }
+        return false
+    }
+
+    private var morphAnimation: Animation? {
+        guard !reduceMotion else { return nil }
+        return model.isExpanded ? SettingsChoiceLayout.openAnimation : SettingsChoiceLayout.closeAnimation
+    }
 
     var body: some View {
         let placement = model.placement
+        let targetWidth = model.isExpanded ? placement.menuRect.width : placement.collapsedTriggerWidth
+        let targetHeight = model.isExpanded ? placement.menuRect.height : model.triggerRect.height
+        let shape = RoundedRectangle(cornerRadius: SettingsChoiceLayout.menuCornerRadius)
+
         ZStack(alignment: .topLeading) {
             Color.clear
             Group {
-                if #available(macOS 26, *), !SurfaceCompatibility.useLegacyMaterial {
+                if #available(macOS 26, *), useNativeLiquidGlass {
                     GlassEffectContainer {
-                        ZStack(alignment: placement.alignment) {
-                            if model.isExpanded {
-                                menuContainer(placement: placement)
-                                    .nativeGlassBackground(in: RoundedRectangle(cornerRadius: SettingsChoiceLayout.menuCornerRadius))
-                                    .glassEffectID("settings-choice", in: glassNamespace)
-                                    .glassEffectTransition(.matchedGeometry)
-                            } else {
-                                collapsedTrigger(width: placement.collapsedTriggerWidth)
-                                    .nativeGlassBackground(in: Capsule())
-                                    .glassEffectID("settings-choice", in: glassNamespace)
-                                    .glassEffectTransition(.matchedGeometry)
+                        // Keep a single live Liquid Glass surface whose bounds morph smoothly
+                        // between the 28 pt pill (radius 14 = capsule) and the 14 pt rounded menu.
+                        shape
+                            .fill(.clear)
+                            .frame(width: targetWidth, height: targetHeight)
+                            .glassEffect(.regular, in: shape)
+                            .overlay(alignment: placement.alignment) {
+                                ZStack(alignment: placement.alignment) {
+                                    if model.isExpanded {
+                                        menuContainer(placement: placement)
+                                            .transition(.opacity)
+                                    } else {
+                                        collapsedTrigger(width: placement.collapsedTriggerWidth)
+                                            .transition(.opacity)
+                                    }
+                                }
+                                .frame(width: targetWidth, height: targetHeight, alignment: placement.alignment)
+                                .clipShape(shape)
                             }
-                        }
+                            .glassEffect(.identity)
                     }
+                    .frame(width: placement.menuRect.width, height: placement.menuRect.height, alignment: placement.alignment)
                 } else {
                     ZStack(alignment: placement.alignment) {
                         if model.isExpanded {
                             menuContainer(placement: placement)
-                                .nativeGlassBackground(in: RoundedRectangle(cornerRadius: SettingsChoiceLayout.menuCornerRadius))
+                                .transition(.opacity)
                         } else {
                             collapsedTrigger(width: placement.collapsedTriggerWidth)
-                                .nativeGlassBackground(in: Capsule())
+                                .transition(.opacity)
                         }
                     }
+                    .frame(width: targetWidth, height: targetHeight, alignment: placement.alignment)
+                    .clipShape(shape)
+                    .nativeGlassBackground(in: shape)
+                    .frame(width: placement.menuRect.width, height: placement.menuRect.height, alignment: placement.alignment)
                 }
             }
-            .frame(width: placement.menuRect.width, height: placement.menuRect.height, alignment: placement.alignment)
             .position(x: placement.menuRect.midX, y: placement.menuRect.midY)
-            .animation(reduceMotion ? nil : .smooth(duration: SettingsChoiceLayout.animationDuration), value: model.isExpanded)
+            .animation(morphAnimation, value: model.isExpanded)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .ignoresSafeArea()
         .allowsHitTesting(!model.isClosing)
-        .onAppear {
-            guard !model.isClosing, !model.isExpanded else { return }
-            if reduceMotion {
-                model.isExpanded = true
-            } else {
-                let targetID = model.id
-                DispatchQueue.main.async {
-                    guard SettingsChoicePresenter.shared.isActive(sessionID: targetID), !model.isClosing else { return }
-                    model.isExpanded = true
-                }
-            }
-        }
     }
 
     private func collapsedTrigger(width: CGFloat) -> some View {
@@ -627,6 +655,8 @@ final class SettingsChoicePresenter {
         overlay.autoresizingMask = [.width, .height]
         contentView.addSubview(overlay, positioned: .above, relativeTo: nil)
         contentView.layoutSubtreeIfNeeded()
+        overlay.displayIfNeeded()
+        CATransaction.flush()
 
         let session = Session(
             model: model,
@@ -637,6 +667,19 @@ final class SettingsChoicePresenter {
         activeSession = session
         onOpenChanged(true)
         installMonitors(for: session, onSelect: onSelect)
+
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            model.isExpanded = true
+        } else {
+            // Wait one display frame so Core Animation commits the collapsed glass
+            // capsule before GlassEffectContainer morphs it into the menu.
+            DispatchQueue.main.asyncAfter(deadline: .now() + SettingsChoiceLayout.openFrameDelay) { [weak self] in
+                guard let self, self.activeSession?.id == sessionID, !model.isClosing else { return }
+                withAnimation(SettingsChoiceLayout.openAnimation) {
+                    model.isExpanded = true
+                }
+            }
+        }
         return session.id
     }
 
@@ -656,9 +699,11 @@ final class SettingsChoicePresenter {
         }
 
         session.model.isClosing = true
-        session.model.isExpanded = false
+        withAnimation(SettingsChoiceLayout.closeAnimation) {
+            session.model.isExpanded = false
+        }
         let closingID = session.id
-        DispatchQueue.main.asyncAfter(deadline: .now() + SettingsChoiceLayout.animationDuration + 0.02) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + SettingsChoiceLayout.closeTeardownDelay) { [weak self] in
             guard let self, self.activeSession?.id == closingID else { return }
             self.teardownImmediately()
         }

@@ -129,7 +129,7 @@ enum SettingsRegression {
                         try captureWindow("settings-choice-data-closed-\(appearance)")
 
                         styleChoice.openMenu()
-                        try await Task.sleep(for: .milliseconds(350))
+                        try await Task.sleep(for: .milliseconds(380))
                         guard let overlay = SettingsChoicePresenter.shared.activeOverlay else {
                             fatalError("Opening SettingsChoice must mount SettingsChoiceOverlay")
                         }
@@ -139,17 +139,17 @@ enum SettingsRegression {
                         try captureWindow("settings-choice-data-open-\(appearance)")
 
                         overlay.model.onSelect(1)
-                        try await Task.sleep(for: .milliseconds(350))
+                        try await Task.sleep(for: .milliseconds(380))
                         precondition(model.settings.agentPromptStyle == .rigorous)
                         precondition(SettingsChoicePresenter.shared.activeOverlay == nil, "Selecting an option must tear down overlay after closing morph")
                         precondition(!styleChoice.isMenuOpen, "In-place trigger must restore after closing morph")
 
                         // Reset back to friendly via open + dismiss verification
                         styleChoice.openMenu()
-                        try await Task.sleep(for: .milliseconds(300))
+                        try await Task.sleep(for: .milliseconds(350))
                         precondition(SettingsChoicePresenter.shared.activeOverlay != nil)
                         styleChoice.closeMenu()
-                        try await Task.sleep(for: .milliseconds(320))
+                        try await Task.sleep(for: .milliseconds(360))
                         precondition(SettingsChoicePresenter.shared.activeOverlay == nil, "Closing menu must remove overlay")
                         model.settings.agentPromptStyle = .friendly
 
