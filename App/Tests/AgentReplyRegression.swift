@@ -5341,7 +5341,7 @@ enum AgentReplyRegression {
         precondition(uShort560.width < 120, "Short user bubble stretched in 560pt window: \(uShort560)")
         precondition(aShort560.width < 120, "Short assistant bubble stretched in 560pt window: \(aShort560)")
 
-        // 2. Wider 960pt window (> 700pt content cap)
+        // 2. Wider 960pt window (> 600pt content cap)
         window.maxSize = NSSize(width: 1400, height: 1000)
         window.setContentSize(NSSize(width: 960, height: 680))
         try await Task.sleep(for: .milliseconds(500))
@@ -5354,12 +5354,12 @@ enum AgentReplyRegression {
         let composer960 = frameInSurface(composerScroll)
         try capture("960")
 
-        // Content column is capped at 700pt and centered inside 960pt -> column is [130, 830].
-        // Composer scroll has 4pt horizontal padding inside Composer (width ~= 700 - 8 = 692).
+        // Content column is capped at 600pt and centered inside 960pt -> column is [180, 780].
+        // Composer scroll has 4pt horizontal padding inside Composer (width ~= 600 - 8 = 592).
         precondition(abs(composer960.midX - 480) < 2,
                      "Composer should be centered in 960pt window, got midX=\(composer960.midX)")
-        precondition(composer960.width > 680 && composer960.width <= 700,
-                     "Composer width should cap at ~700pt in 960pt window, got \(composer960.width) (was \(composer560.width))")
+        precondition(composer960.width > AgentLayout.contentMaxWidth - 20 && composer960.width <= AgentLayout.contentMaxWidth,
+                     "Composer width should cap at ~\(Int(AgentLayout.contentMaxWidth))pt in 960pt window, got \(composer960.width) (was \(composer560.width))")
 
         // Long user & assistant bubbles must preserve their default-window widths.
         precondition(abs(aForm960.width - aForm560.width) < 1.5,
@@ -5371,19 +5371,20 @@ enum AgentReplyRegression {
         precondition(uShort960.width < 120 && aShort960.width < 120,
                      "Short bubbles stretched on wide window: user=\(uShort960.width), assistant=\(aShort960.width)")
 
-        // Assistant aligns to left edge of centered 700pt column (130 + 16 = 146);
-        // User aligns to right edge of centered 700pt column (830 - 16 = 814).
+        // Assistant aligns to left edge of centered 600pt column (180 + 16 = 196);
+        // User aligns to right edge of centered 600pt column (780 - 16 = 764).
         let expectedAssistantMinX = (960 - AgentLayout.contentMaxWidth) / 2 + AgentLayout.messageHorizontalInset
         let expectedUserMaxX = (960 + AgentLayout.contentMaxWidth) / 2 - AgentLayout.messageHorizontalInset
         precondition(abs(aForm960.minX - expectedAssistantMinX) < 2,
-                     "Assistant bubble should align to centered 700pt column leading edge (\(expectedAssistantMinX)), got \(aForm960.minX)")
+                     "Assistant bubble should align to centered \(Int(AgentLayout.contentMaxWidth))pt column leading edge (\(expectedAssistantMinX)), got \(aForm960.minX)")
         precondition(abs(uLong960.maxX - expectedUserMaxX) < 2,
-                     "User bubble should align to centered 700pt column trailing edge (\(expectedUserMaxX)), got \(uLong960.maxX)")
+                     "User bubble should align to centered \(Int(AgentLayout.contentMaxWidth))pt column trailing edge (\(expectedUserMaxX)), got \(uLong960.maxX)")
 
         // Bubbles stagger further apart horizontally on wide window compared to 560pt window.
         let stagger560 = uLong560.minX - aForm560.minX
         let stagger960 = uLong960.minX - aForm960.minX
-        precondition(stagger960 > stagger560 + 140,
+        let expectedStaggerDelta = AgentLayout.contentMaxWidth - AgentLayout.defaultContentWidth
+        precondition(stagger960 > stagger560 + expectedStaggerDelta - 10,
                      "Expected bubbles to stagger wider in 960pt window: 560=\(stagger560), 960=\(stagger960)")
 
         print("Wide window layout regression passed: composer=\(composer560.width)->\(composer960.width)@midX=\(composer960.midX), assistantForm=\(aForm560.width)->\(aForm960.width)@minX=\(aForm960.minX), userLong=\(uLong560.width)->\(uLong960.width)@maxX=\(uLong960.maxX), stagger=\(stagger560)->\(stagger960)")

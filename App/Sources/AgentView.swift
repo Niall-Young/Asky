@@ -103,7 +103,7 @@ enum AgentLayout {
     static let headerHeight: CGFloat = 64
     static let toastTopInset: CGFloat = 48
     static let contentHorizontalPadding: CGFloat = 12
-    static let contentMaxWidth: CGFloat = 700
+    static let contentMaxWidth: CGFloat = 600
     static let defaultContentWidth: CGFloat = WindowMetrics.agentWidth - contentHorizontalPadding * 2
     static let sideActionSpacing: CGFloat = 8
     static let assistantBubbleMaxWidth: CGFloat = defaultContentWidth - AssistantSideActionBar.width - sideActionSpacing
