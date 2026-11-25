@@ -764,6 +764,99 @@ server.serve_forever()
         #expect(initialMessages.contains { $0["role"] == "system" && $0["content"] == .string(NativeAgentPrompt.midRunFollowUpGuidance) })
         #expect(!continuationMessages.contains { $0["role"] == "system" && $0["content"] == .string(NativeAgentPrompt.midRunFollowUpGuidance) })
     }
+
+    @Test func suppressesPreToolNarrationForFastLocalReads() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let premature = "我在通讯录里没找到「爸」「爸爸」「父亲」这几个称呼。你直接告诉我他在通讯录里存的什么名字，我去查一下。"
+        let finalReply = "通讯录里没找到对应的联系人，你把号码或者存的名字发我，我马上准备草稿。"
+        let script = ModelScript([
+            NativeCompletion(text: premature, calls: [call("contacts_search")]),
+            NativeCompletion(text: finalReply)
+        ])
+        let contactsTool = ToolDefinition(name: "contacts_search", summary: "search contacts", source: .contacts, effect: .read, confirmation: .never, externallyExposable: true)
+        let agent = host(root: root, script: script, tools: [contactsTool]) {
+            ExecutionResult(requestID: $0.requestID, status: .completed, output: [])
+        }
+        let events = await collect(agent, AgentRequest(sessionID: "s", taskID: "t", text: "没有老爸？"))
+        await agent.shutdown()
+
+        let deltas = events.compactMap { event -> String? in if case .textDelta(_, let text) = event { return text }; return nil }
+        let messages = events.compactMap { event -> String? in if case .message(_, let text) = event { return text }; return nil }
+        #expect(!deltas.contains(premature), "Fast local read must not publish premature pre-tool text as a visible bubble")
+        #expect(deltas == [finalReply])
+        #expect(messages == [finalReply])
+    }
+
+    @Test func emitsAtMostOneBriefPreToolNarrationForSlowOrWriteTools() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let first = "我先查一下最新情况。"
+        let second = "找到了，再打开页面细看。"
+        let finalReply = "已经查清楚了。"
+        let script = ModelScript([
+            NativeCompletion(text: first, calls: [call("web_search", id: "c1")]),
+            NativeCompletion(text: second, calls: [call("web_read_page", id: "c2")]),
+            NativeCompletion(text: finalReply)
+        ])
+        let webSearch = ToolDefinition(name: "web_search", summary: "search", source: .web, effect: .read, confirmation: .never, externallyExposable: false)
+        let webRead = ToolDefinition(name: "web_read_page", summary: "read", source: .web, effect: .read, confirmation: .never, externallyExposable: false)
+        let agent = host(root: root, script: script, tools: [webSearch, webRead]) {
+            ExecutionResult(requestID: $0.requestID, status: .completed, output: ["ok": true])
+        }
+        let events = await collect(agent, AgentRequest(sessionID: "s", taskID: "t", text: "帮我查一下"))
+        await agent.shutdown()
+
+        let deltas = events.compactMap { event -> String? in if case .textDelta(_, let text) = event { return text }; return nil }
+        #expect(deltas == [first, finalReply])
+
+        let writeTool = ToolDefinition(name: "messages_prepare_draft", summary: "draft", source: .messages, effect: .write, confirmation: .explicitDirectOtherwiseConfirm, externallyExposable: true)
+        #expect(NativeRuntime.shouldEmitPreToolNarration(
+            narration: "好，我来帮你准备草稿。",
+            calls: [call("messages_prepare_draft")],
+            catalogue: [writeTool],
+            isMidRunFollowUp: false,
+            isInitialRound: true,
+            alreadyEmitted: false
+        ))
+        #expect(!NativeRuntime.shouldEmitPreToolNarration(
+            narration: "第一段结论。\n\n第二段重复追问。",
+            calls: [call("web_search")],
+            catalogue: [webSearch],
+            isMidRunFollowUp: false,
+            isInitialRound: true,
+            alreadyEmitted: false
+        ))
+        #expect(!NativeRuntime.shouldEmitPreToolNarration(
+            narration: "先帮你填个表：\n```asky-form\n{\"title\":\"确认\"}\n```",
+            calls: [call("web_search")],
+            catalogue: [webSearch],
+            isMidRunFollowUp: false,
+            isInitialRound: true,
+            alreadyEmitted: false
+        ))
+    }
+
+    @Test func preservesInitialMidRunFollowUpNarrationEvenForLocalRead() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let handoff = "接着帮你查一下通讯录里的老爸。"
+        let finalReply = "找到了老爸的号码。"
+        let script = ModelScript([
+            NativeCompletion(text: handoff, calls: [call("contacts_search")]),
+            NativeCompletion(text: finalReply)
+        ])
+        let contactsTool = ToolDefinition(name: "contacts_search", summary: "search contacts", source: .contacts, effect: .read, confirmation: .never, externallyExposable: true)
+        let agent = host(root: root, script: script, tools: [contactsTool]) {
+            ExecutionResult(requestID: $0.requestID, status: .completed, output: [])
+        }
+        let followUp = ContextSnippet(sourceID: "mid-run-followup", text: "顺延处理新消息")
+        let events = await collect(agent, AgentRequest(sessionID: "s", taskID: "t", text: "查下老爸", context: [followUp]))
+        await agent.shutdown()
+
+        let deltas = events.compactMap { event -> String? in if case .textDelta(_, let text) = event { return text }; return nil }
+        #expect(deltas == [handoff, finalReply])
+    }
 }
 
 private actor PromptBox {

@@ -126,7 +126,7 @@
 "把用户明确要求记住的信息追加到记忆索引或主题文件" = "Append information the user explicitly asked to remember to the memory index or a topic file";
 "抖音搜索" = "Douyin Search";
 "按关键词查询本机近期短信与 iMessage（范围由设置决定：最近 3、7 或 30 天；需开启 AI 短信读取及完全磁盘访问；不发送消息）" = "Search recent local SMS and iMessage by keyword (3, 7 or 30 days as configured; requires AI message reading and Full Disk Access; does not send messages)";
-"按姓名查找联系人（同名时返回全部候选）" = "Find contacts by name (return all candidates with the same name)";
+"按姓名、昵称或关键词模糊查找联系人（返回全部匹配候选）" = "Find contacts by name, nickname, or keyword (supports partial matches and returns all candidates)";
 "按用户的纠正修改记忆文件中的一段文字" = "Correct a passage in a memory file as instructed by the user";
 "按目标应用授权，首次使用时请求" = "Authorized per target app; requested on first use";
 "授权" = "Allow";

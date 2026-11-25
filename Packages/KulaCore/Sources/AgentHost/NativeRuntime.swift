@@ -28,6 +28,47 @@ public final class NativeRuntime: RuntimeProcess, Sendable {
     public func closeInput() { commands.finish() }
     public func terminate(force: Bool) { commands.finish(); Task { await engine.stop() } }
     public func waitForExit() async -> Int32 { await engine.waitForExit() }
+
+    static let maxPreToolNarrationCharacters = 140
+
+    /// Pre-tool text becomes a permanent visible bubble in the transcript before the final reply.
+    /// Restrict it to a single brief transition before slow/external/write tools (or an initial
+    /// mid-run follow-up handoff) so fast local lookups and premature drafts never produce
+    /// duplicate or contradictory assistant bubbles in one turn.
+    static func shouldEmitPreToolNarration(
+        narration: String,
+        calls: [JSONValue],
+        catalogue: [ToolDefinition],
+        isMidRunFollowUp: Bool,
+        isInitialRound: Bool,
+        alreadyEmitted: Bool
+    ) -> Bool {
+        let trimmed = narration.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              !alreadyEmitted,
+              !trimmed.contains("\n\n"),
+              !trimmed.contains("```"),
+              trimmed.count <= maxPreToolNarrationCharacters else {
+            return false
+        }
+        let executableNames = calls
+            .compactMap { $0["function"]?["name"]?.stringValue }
+            .filter { $0 != "ask_user" }
+        guard !executableNames.isEmpty else { return false }
+        if isMidRunFollowUp && isInitialRound {
+            return true
+        }
+        return executableNames.contains { name in
+            guard let definition = catalogue.first(where: { $0.name == name }) else { return false }
+            if definition.effect == .write { return true }
+            switch definition.source {
+            case .web, .maps, .plugins, .terminal:
+                return true
+            case .calendar, .reminders, .notes, .contacts, .chrome, .shortcuts, .messages, .memory, .clipboard:
+                return false
+            }
+        }
+    }
 }
 
 private actor NativeAgentEngine {
@@ -176,6 +217,7 @@ private actor NativeAgentEngine {
             var count = 0
             var webCoolingDown = false
             var illustrationsFinished = false
+            var emittedPreToolNarration = false
             var imageCorrection: String?
             while true {
                 try Task.checkCancellation()
@@ -192,8 +234,9 @@ private actor NativeAgentEngine {
                     file = try await storage.save(sessionID: request.sessionID, messages: messages)
                     state(id, .running, file: file)
                 }
+                let isInitialRound = (phase == .initial)
                 var completionMessages = [system] + (try await storage.materialize(NativeWebContext.messages(messages)))
-                if isMidRunFollowUp && phase == .initial {
+                if isMidRunFollowUp && isInitialRound {
                     completionMessages.append(["role": "system", "content": .string(NativeAgentPrompt.midRunFollowUpGuidance)])
                 }
                 if webCoolingDown {
@@ -248,7 +291,17 @@ private actor NativeAgentEngine {
                 let narration = AgentMessageSplit.strippingMarkers(
                     NativeReplyImages.removing(Set(NativeReplyImages.images(in: response.text).map(\.url)), from: response.text)
                 )
-                if !narration.isEmpty { events.yield(try checkedFrame(["type": "textDelta", "taskID": .string(id), "text": .string(narration)])) }
+                if NativeRuntime.shouldEmitPreToolNarration(
+                    narration: narration,
+                    calls: response.calls,
+                    catalogue: catalogue,
+                    isMidRunFollowUp: isMidRunFollowUp,
+                    isInitialRound: isInitialRound,
+                    alreadyEmitted: emittedPreToolNarration
+                ) {
+                    emittedPreToolNarration = true
+                    events.yield(try checkedFrame(["type": "textDelta", "taskID": .string(id), "text": .string(narration)]))
+                }
                 // imagesOnly explicitly means factual research is complete. One terminal image
                 // batch prevents optional illustrations from restarting the research loop.
                 let finalImageBatch = response.calls.allSatisfy { call in

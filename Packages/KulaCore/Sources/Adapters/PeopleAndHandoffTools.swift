@@ -19,29 +19,187 @@ public final class ContactsBridge: @unchecked Sendable {
 
     static let keys: [CNKeyDescriptor] = [
         CNContactFormatter.descriptorForRequiredKeys(for: .fullName),
-        CNContactPhoneNumbersKey as CNKeyDescriptor, CNContactEmailAddressesKey as CNKeyDescriptor,
-        CNContactOrganizationNameKey as CNKeyDescriptor, CNContactBirthdayKey as CNKeyDescriptor,
+        CNContactGivenNameKey as CNKeyDescriptor,
+        CNContactFamilyNameKey as CNKeyDescriptor,
+        CNContactMiddleNameKey as CNKeyDescriptor,
+        CNContactNicknameKey as CNKeyDescriptor,
+        CNContactPhoneticGivenNameKey as CNKeyDescriptor,
+        CNContactPhoneticFamilyNameKey as CNKeyDescriptor,
+        CNContactPhoneticMiddleNameKey as CNKeyDescriptor,
+        CNContactPhoneNumbersKey as CNKeyDescriptor,
+        CNContactEmailAddressesKey as CNKeyDescriptor,
+        CNContactOrganizationNameKey as CNKeyDescriptor,
+        CNContactBirthdayKey as CNKeyDescriptor,
     ]
 
     public struct Person: Sendable, Hashable {
         public var id: String
         public var name: String
+        public var nickname: String
         public var phones: [String]
         public var emails: [String]
         public var organization: String
         public var handles: [String] { phones + emails }
+
+        public init(id: String, name: String, nickname: String = "", phones: [String], emails: [String], organization: String) {
+            self.id = id
+            self.name = name
+            self.nickname = nickname
+            self.phones = phones
+            self.emails = emails
+            self.organization = organization
+        }
+    }
+
+    struct SearchRecord: Sendable {
+        var person: Person
+        var primaryNames: [String]
+        var secondaryNames: [String]
     }
 
     func person(_ c: CNContact) -> Person {
-        Person(id: c.identifier, name: CNContactFormatter.string(from: c, style: .fullName) ?? "",
-               phones: c.phoneNumbers.map { $0.value.stringValue }, emails: c.emailAddresses.map { $0.value as String },
-               organization: c.organizationName)
+        let formatted = CNContactFormatter.string(from: c, style: .fullName)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let nickname = c.nickname.trimmingCharacters(in: .whitespacesAndNewlines)
+        let organization = c.organizationName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let displayName: String
+        if !formatted.isEmpty {
+            displayName = formatted
+        } else if !nickname.isEmpty {
+            displayName = nickname
+        } else {
+            displayName = organization
+        }
+        return Person(
+            id: c.identifier,
+            name: displayName,
+            nickname: nickname,
+            phones: c.phoneNumbers.map { $0.value.stringValue },
+            emails: c.emailAddresses.map { $0.value as String },
+            organization: organization
+        )
+    }
+
+    func searchRecord(_ c: CNContact) -> SearchRecord {
+        let p = person(c)
+        let family = c.familyName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let middle = c.middleName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let given = c.givenName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let familyGiven = [family, middle, given].filter { !$0.isEmpty }.joined()
+        let givenFamily = [given, middle, family].filter { !$0.isEmpty }.joined()
+        let primary = [p.name, familyGiven, givenFamily, family, middle, given, p.nickname]
+            .filter { !$0.isEmpty }
+        let phoneticFamily = c.phoneticFamilyName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let phoneticMiddle = c.phoneticMiddleName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let phoneticGiven = c.phoneticGivenName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let phoneticCombined = [phoneticFamily, phoneticMiddle, phoneticGiven].filter { !$0.isEmpty }.joined(separator: " ")
+        let secondary = [p.organization, phoneticCombined, phoneticFamily, phoneticMiddle, phoneticGiven]
+            .filter { !$0.isEmpty }
+        return SearchRecord(person: p, primaryNames: primary, secondaryNames: secondary)
+    }
+
+    private static func normalize(_ value: String) -> String {
+        value.folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: .current)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func compact(_ value: String) -> String {
+        String(value.unicodeScalars.filter { !CharacterSet.whitespacesAndNewlines.contains($0) })
+    }
+
+    static func match(
+        query rawQuery: String,
+        in records: [SearchRecord],
+        predicateMatchedIDs: Set<String> = [],
+        limit: Int
+    ) -> [Person] {
+        let trimmed = rawQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, limit > 0 else { return [] }
+        let normalizedQuery = normalize(trimmed)
+        let compactQuery = compact(normalizedQuery)
+        let tokens = normalizedQuery.split(whereSeparator: \.isWhitespace).map(String.init)
+        let queryDigits = String(trimmed.filter(\.isNumber))
+
+        var ranked: [(rank: Int, person: Person)] = []
+        for record in records {
+            let primaryNorms = record.primaryNames.map(normalize).filter { !$0.isEmpty }
+            let primaryCompacts = primaryNorms.map(compact).filter { !$0.isEmpty }
+            let secondaryNorms = record.secondaryNames.map(normalize).filter { !$0.isEmpty }
+            let secondaryCompacts = secondaryNorms.map(compact).filter { !$0.isEmpty }
+
+            let rank: Int?
+            if primaryNorms.contains(normalizedQuery)
+                || (!compactQuery.isEmpty && primaryCompacts.contains(compactQuery)) {
+                rank = 0
+            } else if primaryNorms.contains(where: { name in
+                name.hasPrefix(normalizedQuery)
+                    || name.split(whereSeparator: \.isWhitespace).contains(where: { $0.hasPrefix(normalizedQuery) })
+            }) || (!compactQuery.isEmpty && primaryCompacts.contains(where: { $0.hasPrefix(compactQuery) }))
+                || predicateMatchedIDs.contains(record.person.id) {
+                rank = 1
+            } else if primaryNorms.contains(where: { $0.contains(normalizedQuery) })
+                || (!compactQuery.isEmpty && primaryCompacts.contains(where: { $0.contains(compactQuery) })) {
+                rank = 2
+            } else if tokens.count > 1 {
+                let combined = (primaryNorms + secondaryNorms).joined(separator: " ")
+                let combinedCompact = compact(combined)
+                if tokens.allSatisfy({ token in
+                    combined.contains(token) || (!compact(token).isEmpty && combinedCompact.contains(compact(token)))
+                }) {
+                    rank = 3
+                } else {
+                    rank = nil
+                }
+            } else if secondaryNorms.contains(where: { $0.contains(normalizedQuery) })
+                || (!compactQuery.isEmpty && secondaryCompacts.contains(where: { $0.contains(compactQuery) })) {
+                rank = 4
+            } else if queryDigits.count >= 3,
+                      record.person.phones.contains(where: { String($0.filter(\.isNumber)).contains(queryDigits) }) {
+                rank = 5
+            } else if (normalizedQuery.contains("@") || compactQuery.count >= 3),
+                      record.person.emails.contains(where: { normalize($0).contains(normalizedQuery) }) {
+                rank = 5
+            } else {
+                rank = nil
+            }
+
+            if let rank {
+                ranked.append((rank, record.person))
+            }
+        }
+
+        ranked.sort { lhs, rhs in
+            if lhs.rank != rhs.rank { return lhs.rank < rhs.rank }
+            if lhs.person.name.count != rhs.person.name.count { return lhs.person.name.count < rhs.person.name.count }
+            let order = lhs.person.name.localizedStandardCompare(rhs.person.name)
+            if order != .orderedSame { return order == .orderedAscending }
+            return lhs.person.id < rhs.person.id
+        }
+        return Array(ranked.prefix(limit).map(\.person))
     }
 
     public func search(_ name: String, limit: Int) throws -> [Person] {
         guard authorized else { throw ToolError(.permissionDenied, CoreLocalization.text("未获得通讯录访问权限")) }
-        let found = try store.unifiedContacts(matching: CNContact.predicateForContacts(matchingName: name), keysToFetch: Self.keys)
-        return found.prefix(limit).map(person)
+        let query = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty, limit > 0 else { return [] }
+        // Apple's predicateForContacts(matchingName:) only matches word prefixes, so searching "爸"
+        // misses "老爸" or "张爸爸". Combine it with a full unified scan for substring and nickname matches.
+        let predicateMatched = (try? store.unifiedContacts(
+            matching: CNContact.predicateForContacts(matchingName: query),
+            keysToFetch: Self.keys
+        )) ?? []
+        let predicateIDs = Set(predicateMatched.map(\.identifier))
+        var records: [SearchRecord] = []
+        var seenIDs: Set<String> = []
+        let request = CNContactFetchRequest(keysToFetch: Self.keys)
+        try store.enumerateContacts(with: request) { contact, _ in
+            guard seenIDs.insert(contact.identifier).inserted else { return }
+            records.append(self.searchRecord(contact))
+        }
+        for contact in predicateMatched where seenIDs.insert(contact.identifier).inserted {
+            records.append(self.searchRecord(contact))
+        }
+        return Self.match(query: query, in: records, predicateMatchedIDs: predicateIDs, limit: limit)
     }
 
     public func get(_ id: String) throws -> Person {
@@ -69,15 +227,22 @@ public struct ContactsSearchTool: ToolAdapter {
     let contacts: ContactsBridge
     public init(_ c: ContactsBridge) { contacts = c }
     public var definition: ToolDefinition {
-        ToolDefinition(name: "contacts_search", summary: CoreLocalization.text("按姓名查找联系人（同名时返回全部候选）"),
+        ToolDefinition(name: "contacts_search", summary: CoreLocalization.text("按姓名、昵称或关键词模糊查找联系人（返回全部匹配候选）"),
                        inputSchema: Args.schema(["name": Args.stringProp, "limit": Args.intProp], required: ["name"]),
                        source: .contacts, effect: .read, confirmation: .never, externallyExposable: true)
     }
     public func execute(_ a: JSONValue) async throws -> AdapterOutput {
         let r = try contacts.search(try Args.requiredString(a, "name"), limit: Args.int(a["limit"], default: 10, max: 50))
         return AdapterOutput(output: .array(r.map {
-            ["id": .string($0.id), "name": .string($0.name), "organization": .string($0.organization),
-             "phones": .array($0.phones.map { .string($0) }), "emails": .array($0.emails.map { .string($0) })]
+            var entry: [String: JSONValue] = [
+                "id": .string($0.id),
+                "name": .string($0.name),
+                "organization": .string($0.organization),
+                "phones": .array($0.phones.map { .string($0) }),
+                "emails": .array($0.emails.map { .string($0) })
+            ]
+            if !$0.nickname.isEmpty { entry["nickname"] = .string($0.nickname) }
+            return .object(entry)
         }), targets: r.map { TargetRef(kind: "contact", identifier: $0.id) })
     }
 }
