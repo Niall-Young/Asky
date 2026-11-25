@@ -691,6 +691,13 @@ private final class TranscriptHistoryLoader {
 /// Fixed-height edge slot that displays a subtle loading indicator while waiting to append/prepend history.
 /// Keeping the slot height constant prevents any layout shift when the spinner starts or stops.
 private struct TranscriptHistoryLoadingRow: View {
+    private static let contentHeight: CGFloat = 24
+    private static let messageGap: CGFloat = 20
+    private static let topOuterGap: CGFloat = 2
+    /// Bottom edge always shows the 32 pt return-to-bottom button at `bottomInset + 8` while `hasNewer` is true;
+    /// reserve clearance above `Color.clear(bottomInset + 13)` so the indicator sits cleanly above the button.
+    private static let bottomOuterGap: CGFloat = 39
+
     let loader: TranscriptHistoryLoader
     let direction: TranscriptViewport.AutoLoadDirection
     let label: String
@@ -716,7 +723,9 @@ private struct TranscriptHistoryLoadingRow: View {
                 .opacity(isActive ? 0.9 : 0.42)
         }
         .frame(maxWidth: .infinity)
-        .frame(height: 36)
+        .frame(height: Self.contentHeight)
+        .padding(.top, direction == .newer ? Self.messageGap : Self.topOuterGap)
+        .padding(.bottom, direction == .older ? Self.messageGap : Self.bottomOuterGap)
         .accessibilityElement(children: .combine)
     }
 }

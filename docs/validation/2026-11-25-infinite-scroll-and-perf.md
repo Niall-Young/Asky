@@ -62,3 +62,22 @@
 
 - 同步构建并启动隔离预览包 `LoadOlderPreview.app`（162 条含跨页多气泡与表格/代码块的测试数据）供人工实机触控板体验；自动化回归未替代真实 macOS 14/15 实机验收。
 - `AGENTS.md`: unchanged；`README`: unchanged。本次不改变模块边界、开发命令或对外文档说明。
+
+## 补充调整（边缘加载提示与消息气泡间距）
+
+实机反馈顶部「加载更早的消息」与首条消息气泡间距偏紧（原 `36 pt` 居中槽仅留约 `10.5 pt`）。同步检查底部「加载更新的消息」实窗截图时，也发现原布局会让底部文案与悬浮「回到底部」按钮重叠。调整如下：
+
+- [AgentView.swift](../../App/Sources/AgentView.swift)
+  - `TranscriptHistoryLoadingRow` 保持内容区固定高 `24 pt`，向相邻消息气泡侧统一留出 `20 pt` 外距（文案至消息气泡边缘约 `24.5 pt`，保持旋转态切换零抖动）。
+  - 顶部外侧保留 `2 pt`（叠加上方 `12 pt` 与顶栏安全区后视觉居中），底部外侧预留 `39 pt` 以完整避开悬浮 `32 pt`「回到底部」按钮（距按钮顶部约 `16.5 pt`）。
+
+### 验证结果
+
+| 检查 | 结果 |
+| --- | --- |
+| `xcodegen generate` + Debug `xcodebuild` | 通过 |
+| `Packages/KulaCore` `swift test` | 通过（86 tests in 15 suites） |
+| `python3 App/Tests/run-agent-reply-regression.py --scroll-stability` | 通过；恒定高度 `7636.0 pt`，跨页多气泡自动前插 `expected=114.0 after=114.0`，`maxInFlightDrift=0.0`，`maxFrameGap=191.1ms` |
+| 新构建实窗截图检查（深色模式顶部 `.older` / 底部 `.newer` 活跃加载态） | 通过；顶部加载提示与首条消息间距舒展居中，底部加载提示与末条消息及悬浮「回到底部」按钮均无重叠 |
+
+- `AGENTS.md`: unchanged；`README`: unchanged。
