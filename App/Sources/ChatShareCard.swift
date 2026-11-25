@@ -1127,6 +1127,20 @@ struct ChatShareCardView: View {
         }
     }
 
+    private var cardShadowColor: Color {
+        isDark
+            ? Color.black.opacity(0.24)
+            : Color(red: 0.08, green: 0.14, blue: 0.24).opacity(0.08)
+    }
+
+    private var cardShadowRadius: CGFloat {
+        isDark ? 18 : 16
+    }
+
+    private var cardShadowOffsetY: CGFloat {
+        isDark ? 8 : 6
+    }
+
     var body: some View {
         let outerH = Self.outerHorizontalPadding
         let outerV = Self.outerVerticalPadding
@@ -1163,7 +1177,8 @@ struct ChatShareCardView: View {
                     .overlay {
                         shape.strokeBorder(glassBorder, lineWidth: 1)
                     }
-                    .shadow(color: .black.opacity(isDark ? 0.42 : 0.18), radius: 26, x: 0, y: 12)
+                    .compositingGroup()
+                    .shadow(color: cardShadowColor, radius: cardShadowRadius, x: 0, y: cardShadowOffsetY)
                 }
                 .padding(.horizontal, outerH)
                 .padding(.vertical, outerV)
