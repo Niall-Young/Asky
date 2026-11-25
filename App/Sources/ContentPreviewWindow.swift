@@ -181,8 +181,8 @@ private struct PreviewFileView: View {
                 PreviewImage(image: NSImage(cgImage: image, size: .zero), label: label)
             case .success(.markdown(let text, let directory)):
                 PreviewMarkdown(text: text, directory: directory)
-            case .success(.plainText(let text)):
-                PreviewPlainText(text: text)
+            case .success(.plainText(let text, let highlights)):
+                PreviewPlainText(text: text, highlights: highlights)
                     .padding(.top, 34)
             case .failure:
                 Text(NSLocalizedString("无法预览此文件", comment: ""))
@@ -229,6 +229,10 @@ private struct PreviewImage: View {
 
 private struct PreviewPlainText: NSViewRepresentable {
     let text: String
+    let highlights: [SyntaxHighlight]
+
+    private static let font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+    private static let boldFont = NSFont.monospacedSystemFont(ofSize: 13, weight: .semibold)
 
     func makeNSView(context: Context) -> NSScrollView {
         let scroll = NSTextView.scrollableTextView()
@@ -240,7 +244,7 @@ private struct PreviewPlainText: NSViewRepresentable {
         view.isEditable = false
         view.isSelectable = true
         view.isRichText = false
-        view.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
+        view.font = Self.font
         view.textColor = .labelColor
         view.textContainerInset = NSSize(width: 19, height: 12)
         view.isHorizontallyResizable = true
@@ -251,8 +255,51 @@ private struct PreviewPlainText: NSViewRepresentable {
     }
 
     func updateNSView(_ scroll: NSScrollView, context: Context) {
-        guard let view = scroll.documentView as? NSTextView, view.string != text else { return }
-        view.string = text
+        guard let view = scroll.documentView as? NSTextView,
+              view.string != text || context.coordinator.highlights != highlights else { return }
+        context.coordinator.highlights = highlights
+        let styled = NSMutableAttributedString(string: text, attributes: [.font: Self.font, .foregroundColor: NSColor.labelColor])
+        let length = styled.length
+        styled.beginEditing()
+        for highlight in highlights where highlight.location + highlight.length <= length {
+            styled.addAttribute(.foregroundColor, value: Self.color(for: highlight.kind), range: highlight.range)
+            if highlight.kind == .keyword { styled.addAttribute(.font, value: Self.boldFont, range: highlight.range) }
+        }
+        styled.endEditing()
+        view.textStorage?.setAttributedString(styled)
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    final class Coordinator {
+        var highlights: [SyntaxHighlight] = []
+    }
+
+    /// Xcode-inspired source colors, resolved per appearance so the preview follows light and dark mode live.
+    private static let palette: [SyntaxHighlight.Kind: NSColor] = [
+        .comment: dynamic(0x5D6C79, 0x7F8C98),
+        .string: dynamic(0xC41A16, 0xFC6A5D),
+        .number: dynamic(0x1C00CF, 0xD0BF69),
+        .keyword: dynamic(0x9B2393, 0xFC5FA3),
+        .literal: dynamic(0x9B2393, 0xFC5FA3),
+        .type: dynamic(0x0B4F79, 0x5DD8FF),
+        .function: dynamic(0x326D74, 0x67B7A4),
+        .attribute: dynamic(0x815F03, 0xFD8F3F),
+        .property: dynamic(0x0F68A0, 0x41A1C0),
+        .tag: dynamic(0x9B2393, 0xFC5FA3),
+        .inserted: dynamic(0x1F7A35, 0x67D17E),
+        .deleted: dynamic(0xB3261E, 0xFF7B72),
+        .meta: dynamic(0x6C36A9, 0xB281EB)
+    ]
+
+    private static func color(for kind: SyntaxHighlight.Kind) -> NSColor { palette[kind] ?? .labelColor }
+
+    private static func dynamic(_ light: UInt32, _ dark: UInt32) -> NSColor {
+        NSColor(name: nil) { appearance in
+            let hex = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? dark : light
+            return NSColor(srgbRed: CGFloat((hex >> 16) & 0xFF) / 255, green: CGFloat((hex >> 8) & 0xFF) / 255,
+                           blue: CGFloat(hex & 0xFF) / 255, alpha: 1)
+        }
     }
 }
 

@@ -222,7 +222,7 @@ enum LauncherWindowRegression {
             return preview
         }
 
-        func checkText(_ expected: String, in window: NSWindow) async throws {
+        func checkText(_ expected: String, in window: NSWindow, highlighted: Bool) async throws {
             func textView(in view: NSView) -> NSTextView? {
                 if let text = view as? NSTextView { return text }
                 return view.subviews.lazy.compactMap { textView(in: $0) }.first
@@ -230,6 +230,9 @@ enum LauncherWindowRegression {
             for _ in 0..<30 {
                 if let content = window.contentView, let view = textView(in: content), view.string == expected {
                     try require(view.isSelectable && !view.isEditable, "preview text is selectable and read-only")
+                    let color = view.textStorage?.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor
+                    try require((color != nil && color != .labelColor) == highlighted,
+                                "source files use syntax colors while plain text keeps the label color")
                     return
                 }
                 try await Task.sleep(for: .milliseconds(50))
@@ -271,7 +274,7 @@ enum LauncherWindowRegression {
                             "supported files show Quick Preview first with its shortcut")
                 let preview = try await open(url.lastPathComponent, from: launcherPanel)
                 if let expected = [csv: csvText, json: jsonText, source: sourceText][url] {
-                    try await checkText(expected, in: preview)
+                    try await checkText(expected, in: preview, highlighted: url == source)
                 }
                 key(53, [], in: preview)
                 try await Task.sleep(for: .milliseconds(100))
@@ -337,7 +340,7 @@ enum LauncherWindowRegression {
             try require(clipboard.actionKinds == [.preview, .copy, .delete, .clearAll],
                         "supported clipboard entries show Quick Preview first")
             let preview = try await open(title, from: clipboardPanel)
-            if item.filePaths == [csv.path] { try await checkText(csvText, in: preview) }
+            if item.filePaths == [csv.path] { try await checkText(csvText, in: preview, highlighted: false) }
             try await previewShortcut(49, .control, in: preview)
             try await Task.sleep(for: .milliseconds(100))
             try require(!preview.isVisible && clipboardPanel.isKeyWindow && clipboard.selectedItem?.id == item.id,

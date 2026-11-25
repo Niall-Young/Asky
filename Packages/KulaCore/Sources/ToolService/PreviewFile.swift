@@ -12,7 +12,8 @@ public enum PreviewFile: Sendable {
     public enum Content: Sendable {
         case image(CGImage)
         case markdown(String, directory: URL)
-        case plainText(String)
+        /// Highlights are empty for prose, data files, unknown languages, and files above `SyntaxHighlighter.maxLength`.
+        case plainText(String, highlights: [SyntaxHighlight])
     }
 
     public var url: URL {
@@ -95,7 +96,8 @@ public enum PreviewFile: Sendable {
                 if case .markdown = self {
                     return .markdown(text, directory: url.deletingLastPathComponent())
                 }
-                return .plainText(text)
+                let language = SyntaxLanguage(url: self.url, text: text) ?? SyntaxLanguage(url: url, text: text)
+                return .plainText(text, highlights: language.map { SyntaxHighlighter.highlight(text, as: $0) } ?? [])
             }
         }
     }
