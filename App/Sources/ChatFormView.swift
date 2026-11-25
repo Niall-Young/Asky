@@ -65,9 +65,12 @@ struct ChatFormView: View {
                     .font(.system(size: 12))
                     .foregroundStyle(ThemeColor.kTextSubtle)
             } else {
-                ChatFormSubmitButton(NSLocalizedString("提交回复", comment: ""), action: submit)
-                    .disabled(!active || !form.accepts(values))
-                    .padding(.top, 2)
+                HStack(spacing: 0) {
+                    Spacer(minLength: 0)
+                    ChatFormSubmitButton(NSLocalizedString("提交回复", comment: ""), action: submit)
+                        .disabled(!active || !form.accepts(values))
+                }
+                .padding(.top, 2)
             }
         }
         .font(.system(size: 14))
