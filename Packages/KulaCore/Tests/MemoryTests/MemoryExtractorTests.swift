@@ -111,4 +111,9 @@ private func conversation(_ s: LocalStore, _ texts: [(String, String)]) throws -
         #expect(index.contains("- [family.md](family.md) — 家人与亲友"))
         #expect(!m.read("projects.md").contains("Orion") && m.read("family.md").contains("- 用户的女儿今年上小学"))
     }
+
+    @Test func promptExcludesVolatileSystemState() {
+        #expect(MemoryExtractor.systemPrompt.contains("当前日历名称列表"))
+        #expect(MemoryExtractor.systemPrompt.contains("系统默认日历"))
+    }
 }

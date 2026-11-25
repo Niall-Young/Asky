@@ -701,6 +701,14 @@ server.serve_forever()
         #expect(reminder.contains("私密群聊"))
         #expect(!reminder.contains("确实查不到时再坦白说明"))
     }
+
+    @Test func calendarFormRequiresLiveCalendarListWithoutMemoryFallback() {
+        let prompt = NativeAgentPrompt.runtimeProtocolPrompt
+        #expect(prompt.contains("asky-form 表单中列出、预选、询问目标日历前"))
+        #expect(prompt.contains("严禁从记忆或历史对话读取日历名称、列表或默认日历"))
+        #expect(prompt.contains("历史对话与记忆既不能替代本轮实时查询"))
+        #expect(!prompt.contains("大麦"))
+    }
 }
 
 private actor PromptBox {

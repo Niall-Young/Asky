@@ -73,4 +73,9 @@ import LocalStore
         }
         #expect(m.read() == before && m.topicFiles().count == 2 && s.setting(MemoryConsolidator.dirtyKey) == "1")
     }
+
+    @Test func promptPrunesVolatileSystemState() {
+        #expect(MemoryConsolidator.systemPrompt.contains("当前日历名称列表"))
+        #expect(MemoryConsolidator.systemPrompt.contains("系统默认日历"))
+    }
 }
