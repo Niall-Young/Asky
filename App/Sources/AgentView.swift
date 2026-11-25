@@ -298,6 +298,7 @@ struct AgentView: View {
     @State private var emptyComposerHeight: CGFloat = 94
     @State private var showingApprovalMenu = false
     @State private var bubblePopover = ChatBubblePopoverController()
+    @State private var formPickerOverlay = FormPickerOverlayController()
     @State private var pinned = false
     @State private var toolbarPressed: Int?
     @State private var toolbarHovered: Int?
@@ -364,6 +365,21 @@ struct AgentView: View {
             showingApprovalMenu: $showingApprovalMenu,
             headerHeight: AgentLayout.headerHeight
         ))
+        .modifier(FormPickerOverlayPresentation(
+            controller: formPickerOverlay,
+            topInset: AgentLayout.headerHeight + 4,
+            onWillOpen: {
+                if showingApprovalMenu { showingApprovalMenu = false }
+                if bubblePopover.target != nil { bubblePopover.dismiss() }
+            }
+        ))
+        .environment(\.formPickerOverlay, formPickerOverlay)
+        .onChange(of: showingApprovalMenu) { _, shown in
+            if shown { formPickerOverlay.dismiss() }
+        }
+        .onChange(of: bubblePopover.target) { _, target in
+            if target != nil { formPickerOverlay.dismiss() }
+        }
         .modifier(ChatDeleteConfirmPresentation(
             isPresented: model.pendingDeleteMessage != nil,
             confirmDisabled: model.isRunning || model.isCleaningHistory,

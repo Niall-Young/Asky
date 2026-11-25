@@ -1762,8 +1762,9 @@ enum AgentReplyRegression {
         if testingTime && !testingComponents {
             rest = """
             {"id":"duration","type":"radio","label":"会议时长","options":["30 分钟","60 分钟"],"required":true}
-            {"id":"topics","type":"multi","label":"讨论议题","options":["设计方案","开发计划"]}
+            {"id":"slot","type":"datetime_range","label":"会议时段","required":true}
             {"id":"when_dt","type":"datetime","label":"会议时间","required":true}
+            {"id":"day","type":"date","label":"会议日期","required":true}
             {"id":"time","type":"time","label":"具体时间","required":true}
             ```
             """
@@ -1973,6 +1974,53 @@ enum AgentReplyRegression {
                 precondition(model.formValues[messageID]?["when"] == ["稍后"])
             }
         }
+        func clickOutsideOverlay(in targetWindow: NSWindow) {
+            let root = targetWindow.contentView!
+            let overlay = allViews(root).first { $0.identifier?.rawValue == "form-picker-overlay" }
+            let overlayRect = overlay.map { $0.convert($0.bounds, to: nil) } ?? .zero
+            let size = targetWindow.frame.size
+            let insidePoint = NSPoint(x: overlayRect.midX, y: overlayRect.midY)
+            let insideEvent = NSEvent.mouseEvent(with: .leftMouseDown, location: insidePoint, modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: targetWindow.windowNumber,
+                context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+            precondition(FormPickerOverlayController.active?.handleLocalEvent(insideEvent) == false,
+                         "Clicking inside the floating picker overlay must not dismiss it")
+
+            let candidates: [NSPoint] = [
+                NSPoint(x: size.width - 18, y: max(160, size.height * 0.55)),
+                NSPoint(x: 10, y: max(160, size.height * 0.55)),
+                NSPoint(x: size.width * 0.5, y: min(size.height - 90, overlayRect.maxY + 24)),
+                NSPoint(x: size.width * 0.5, y: max(130, overlayRect.minY - 24)),
+            ]
+            let point = candidates.first { !overlayRect.insetBy(dx: -8, dy: -8).contains($0) } ?? NSPoint(x: 10, y: size.height * 0.5)
+            let outsideEvent = NSEvent.mouseEvent(with: .leftMouseDown, location: point, modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: targetWindow.windowNumber,
+                context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+            precondition(FormPickerOverlayController.active?.handleLocalEvent(outsideEvent) == true,
+                         "Clicking outside in the same window must dismiss the floating picker overlay and consume the click")
+        }
+        func hasOverlay(in root: NSView) -> Bool {
+            allViews(root).contains { $0.identifier?.rawValue == "form-picker-overlay" }
+        }
+        func hasPopoverWindow() -> Bool {
+            NSApplication.shared.windows.contains {
+                $0 !== window && $0.isVisible && String(describing: type(of: $0)).contains("Popover")
+            }
+        }
+        func captureWindowGlass(_ path: String) async throws {
+            window.center()
+            NSApp.activate(ignoringOtherApps: true)
+            window.orderFrontRegardless()
+            window.makeKeyAndOrderFront(nil)
+            window.contentView?.layoutSubtreeIfNeeded()
+            window.displayIfNeeded()
+            try await Task.sleep(for: .milliseconds(150))
+            let shot = Process()
+            shot.executableURL = URL(filePath: "/usr/sbin/screencapture")
+            shot.arguments = ["-x", "-l", String(window.windowNumber), path]
+            try shot.run(); shot.waitUntilExit()
+            precondition(shot.terminationStatus == 0)
+        }
         if testingTime {
             func typeValue(_ text: String, into field: NSTextField) async throws {
                 precondition(window.makeFirstResponder(field))
@@ -1994,74 +2042,122 @@ enum AgentReplyRegression {
             precondition(model.formValues[messageID]?["time"] == [testingComponents ? "14:30:45" : "14:30"], "only requested time components must be submitted")
 
             if !testingComponents {
+                let slotField = fieldNearMarker("chat-form-field-slot", in: window.contentView!)
+                try await typeValue("2026/11/26 14:00 - 15:00", into: slotField)
+                precondition(model.formValues[messageID]?["slot"] == ["2026-11-26 14:00 – 15:00"],
+                             "datetime_range input must normalize flexible same-day range input")
                 let dtField = fieldNearMarker("chat-form-field-when_dt", in: window.contentView!)
                 try await typeValue("2026/11/25 14:30", into: dtField)
                 precondition(model.formValues[messageID]?["when_dt"] == ["2026-11-25 14:30"],
                              "datetime input must normalize flexible user input")
+                let dayField = fieldNearMarker("chat-form-field-day", in: window.contentView!)
+                try await typeValue("2026/11/26", into: dayField)
+                precondition(model.formValues[messageID]?["day"] == ["2026-11-26"],
+                             "date input must normalize flexible user input")
+
                 for (schemeName, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {
                     window.appearance = NSAppearance(named: appearance)
-                    NSApplication.shared.activate()
+                    NSApp.activate(ignoringOtherApps: true)
                     window.makeKeyAndOrderFront(nil)
-                    try await Task.sleep(for: .milliseconds(200))
+                    try await Task.sleep(for: .milliseconds(250))
+
+                    // 1. Combined datetime floating glass overlay
                     let dtTrigger = findMarker("chat-form-picker-when_dt", in: window.contentView!)
                     clickView(dtTrigger, in: window)
-                    try await Task.sleep(for: .milliseconds(350))
-                    let popoverWindow = NSApplication.shared.windows.first { $0 !== window && $0.isVisible && String(describing: type(of: $0)).contains("Popover") }
-                    precondition(popoverWindow != nil, "Clicking the datetime clock button must open the combined popover")
-                    if schemeName == "dark", let popoverWindow, let content = popoverWindow.contentView {
+                    try await Task.sleep(for: .milliseconds(320))
+                    precondition(!hasPopoverWindow(), "Datetime picker must use in-window glass overlay, not NSPopover")
+                    precondition(hasOverlay(in: window.contentView!), "Clicking inline datetime icon must open floating glass overlay")
+                    if schemeName == "dark" {
+                        let content = window.contentView!
                         let day26 = findMarker("chat-form-day-2026-11-26", in: content)
-                        clickView(day26, in: popoverWindow)
+                        clickView(day26, in: window)
                         try await Task.sleep(for: .milliseconds(100))
                         let minuteCell = findMarker("chat-form-unit-minute-31", in: content)
-                        clickView(minuteCell, in: popoverWindow)
+                        clickView(minuteCell, in: window)
                         try await Task.sleep(for: .milliseconds(120))
                         precondition(model.formValues[messageID]?["when_dt"] == ["2026-11-26 14:31"],
-                                     "Combined popover must update both date and time together")
+                                     "Combined overlay must update both date and time live")
                         let day25 = findMarker("chat-form-day-2026-11-25", in: content)
-                        clickView(day25, in: popoverWindow)
+                        clickView(day25, in: window)
                         let restoreMinute = findMarker("chat-form-unit-minute-30", in: content)
-                        clickView(restoreMinute, in: popoverWindow)
+                        clickView(restoreMinute, in: window)
                         try await Task.sleep(for: .milliseconds(120))
                     }
-                    if let popoverWindow {
-                        let shot = Process()
-                        shot.executableURL = URL(filePath: "/usr/sbin/screencapture")
-                        shot.arguments = ["-x", "-o", "-l", String(popoverWindow.windowNumber), "build/form-datetime-popover-\(schemeName).png"]
-                        try shot.run(); shot.waitUntilExit()
-                        popoverWindow.close()
+                    try await captureWindowGlass("build/form-datetime-popover-\(schemeName).png")
+                    try capture("datetime-bitmap-\(schemeName)")
+                    clickOutsideOverlay(in: window)
+                    try await Task.sleep(for: .milliseconds(250))
+                    precondition(!hasOverlay(in: window.contentView!), "Clicking outside must dismiss datetime overlay")
+
+                    // 2. Merged datetime_range floating glass overlay (start/end selection + cross-day highlight)
+                    let slotTrigger = findMarker("chat-form-picker-slot", in: window.contentView!)
+                    clickView(slotTrigger, in: window)
+                    try await Task.sleep(for: .milliseconds(320))
+                    precondition(!hasPopoverWindow(), "Datetime range picker must use in-window glass overlay, not NSPopover")
+                    precondition(hasOverlay(in: window.contentView!), "Clicking inline range icon must open floating glass overlay")
+                    if schemeName == "dark" {
+                        let content = window.contentView!
+                        let endTab = findMarker("chat-form-range-end", in: content)
+                        clickView(endTab, in: window)
+                        try await Task.sleep(for: .milliseconds(100))
+                        let day28 = findMarker("chat-form-day-2026-11-28", in: content)
+                        clickView(day28, in: window)
+                        try await Task.sleep(for: .milliseconds(100))
+                        let hour16 = findMarker("chat-form-unit-hour-16", in: content)
+                        clickView(hour16, in: window)
+                        try await Task.sleep(for: .milliseconds(100))
+                        let minute05 = findMarker("chat-form-unit-minute-5", in: content)
+                        clickView(minute05, in: window)
+                        try await Task.sleep(for: .milliseconds(120))
+                        precondition(model.formValues[messageID]?["slot"] == ["2026-11-26 14:00 – 2026-11-28 16:05"],
+                                     "Range overlay must update end date and time live across days")
                     }
-                    try await Task.sleep(for: .milliseconds(120))
+                    try await captureWindowGlass("build/form-range-popover-\(schemeName).png")
+                    try capture("range-bitmap-\(schemeName)")
+                    if schemeName == "dark" {
+                        // Verify Escape dismisses cleanly and preserves selection
+                        let escEvent = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
+                            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                            context: nil, characters: "\u{1b}", charactersIgnoringModifiers: "\u{1b}",
+                            isARepeat: false, keyCode: 53)!
+                        precondition(FormPickerOverlayController.active?.handleLocalEvent(escEvent) == true,
+                                     "Escape must dismiss open range overlay")
+                    } else {
+                        clickOutsideOverlay(in: window)
+                    }
+                    try await Task.sleep(for: .milliseconds(250))
+                    precondition(!hasOverlay(in: window.contentView!), "Dismissing range overlay must remove it")
+                    precondition(model.formValues[messageID]?["slot"] == ["2026-11-26 14:00 – 2026-11-28 16:05"],
+                                 "Dismissing range overlay must keep selected range")
                 }
             } else {
-                // Open the standalone time picker popover via its trigger button.
+                // Open the standalone time floating glass overlay via its inline icon.
                 for (schemeName, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {
                     window.appearance = NSAppearance(named: appearance)
-                    NSApplication.shared.activate()
+                    NSApp.activate(ignoringOtherApps: true)
                     window.makeKeyAndOrderFront(nil)
-                    try await Task.sleep(for: .milliseconds(200))
+                    try await Task.sleep(for: .milliseconds(250))
                     let timeTrigger = findMarker("chat-form-picker-time", in: window.contentView!)
                     clickView(timeTrigger, in: window)
-                    try await Task.sleep(for: .milliseconds(350))
-                    let popoverWindow = NSApplication.shared.windows.first { $0 !== window && $0.isVisible && String(describing: type(of: $0)).contains("Popover") }
-                    precondition(popoverWindow != nil, "Clicking the time button must open a picker popover")
-                    if schemeName == "dark", let popoverWindow, let content = popoverWindow.contentView {
+                    try await Task.sleep(for: .milliseconds(320))
+                    precondition(!hasPopoverWindow(), "Time picker must use in-window glass overlay, not NSPopover")
+                    precondition(hasOverlay(in: window.contentView!), "Clicking inline time icon must open floating glass overlay")
+                    if schemeName == "dark" {
+                        let content = window.contentView!
                         let minuteCell = findMarker("chat-form-unit-minute-31", in: content)
-                        clickView(minuteCell, in: popoverWindow)
+                        clickView(minuteCell, in: window)
                         try await Task.sleep(for: .milliseconds(120))
                         precondition(model.formValues[messageID]?["time"] == ["14:31:45"],
-                                     "Clicking a minute cell in the popover must update the time value")
+                                     "Clicking a minute cell in the overlay must update the time value")
                         let restoreCell = findMarker("chat-form-unit-minute-30", in: content)
-                        clickView(restoreCell, in: popoverWindow)
+                        clickView(restoreCell, in: window)
                         try await Task.sleep(for: .milliseconds(120))
                     }
-                    if let popoverWindow {
-                        let shot = Process()
-                        shot.executableURL = URL(filePath: "/usr/sbin/screencapture")
-                        shot.arguments = ["-x", "-o", "-l", String(popoverWindow.windowNumber), "build/form-time-popover-\(schemeName).png"]
-                        try shot.run(); shot.waitUntilExit()
-                        popoverWindow.close()
-                    }
-                    try await Task.sleep(for: .milliseconds(120))
+                    try await captureWindowGlass("build/form-time-popover-\(schemeName).png")
+                    try capture("time-bitmap-\(schemeName)")
+                    clickOutsideOverlay(in: window)
+                    try await Task.sleep(for: .milliseconds(250))
+                    precondition(!hasOverlay(in: window.contentView!), "Clicking outside must dismiss time overlay")
                 }
             }
         }
@@ -2079,11 +2175,7 @@ enum AgentReplyRegression {
             try await Task.sleep(for: .milliseconds(150))
             try capture(name)
             if CommandLine.arguments.contains("--forms-inspect") {
-                let capture = Process()
-                capture.executableURL = URL(filePath: "/usr/sbin/screencapture")
-                capture.arguments = ["-x", "-o", "-l", String(window.windowNumber), "build/form-glass-" + name + ".png"]
-                try capture.run(); capture.waitUntilExit()
-                precondition(capture.terminationStatus == 0)
+                try await captureWindowGlass("build/form-glass-" + name + ".png")
             }
             try capture("field-" + name + "-focused")
             window.makeFirstResponder(nil)
@@ -2101,29 +2193,17 @@ enum AgentReplyRegression {
             window.makeFirstResponder(nil)
             window.makeKeyAndOrderFront(nil)
             try await Task.sleep(for: .milliseconds(400))
-            let brightCapture = Process()
-            brightCapture.executableURL = URL(filePath: "/usr/sbin/screencapture")
-            brightCapture.arguments = ["-x", "-o", "-l", String(window.windowNumber), "build/form-glass-bright.png"]
-            try brightCapture.run(); brightCapture.waitUntilExit()
-            precondition(brightCapture.terminationStatus == 0)
-            // Click the date row in the fixed 560x800 fixture using native window events.
-            func click(_ point: NSPoint) {
-                for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
-                    let event = NSEvent.mouseEvent(with: type, location: point, modifierFlags: [],
-                        timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
-                        context: nil, eventNumber: 0, clickCount: 1, pressure: type == .leftMouseDown ? 1 : 0)!
-                    NSApplication.shared.sendEvent(event)
-                }
-            }
-            click(NSPoint(x: 200, y: 278))
-            try await Task.sleep(for: .milliseconds(300))
-            let calendarWindow = NSApplication.shared.windows.first { $0 !== window && $0.isVisible && String(describing: type(of: $0)).contains("Popover") }!
-            let screenshot = Process()
-            screenshot.executableURL = URL(filePath: "/usr/sbin/screencapture")
-            screenshot.arguments = ["-x", "-o", "-l", String(calendarWindow.windowNumber), "build/form-calendar-popover.png"]
-            try screenshot.run(); screenshot.waitUntilExit()
-            precondition(screenshot.terminationStatus == 0)
-            click(NSPoint(x: 20, y: 20))
+            try await captureWindowGlass("build/form-glass-bright.png")
+            // Click the inline datetime icon to open the floating glass overlay and verify click-outside dismissal.
+            let dtTrigger = findMarker("chat-form-picker-when_dt", in: window.contentView!)
+            clickView(dtTrigger, in: window)
+            try await Task.sleep(for: .milliseconds(320))
+            precondition(!hasPopoverWindow(), "Datetime picker must use in-window glass overlay, not NSPopover")
+            precondition(hasOverlay(in: window.contentView!), "Overlay must open in --forms-inspect")
+            try await captureWindowGlass("build/form-calendar-popover.png")
+            clickOutsideOverlay(in: window)
+            try await Task.sleep(for: .milliseconds(250))
+            precondition(!hasOverlay(in: window.contentView!), "Clicking outside must dismiss overlay in --forms-inspect")
             window.makeKeyAndOrderFront(nil)
         }
         // Exercise the actual submit path with an intentionally absent test credential. No model
@@ -2158,7 +2238,8 @@ enum AgentReplyRegression {
         precondition(model.state == .failed, "The test credential must fail without a real model call")
         precondition(model.items.filter { $0.kind == .user && $0.text == reply }.count == 1,
                      "The form reply must survive history exactly once, including when the request fails")
-        precondition(ChatFormParser.form(in: model.items.first { $0.id == messageID }!.text)?.fields.count == (testingTime || testingRadio ? 5 : 4))
+        let expectedFieldCount = (testingTime && !testingComponents) ? 6 : (testingComponents || testingRadio ? 5 : 4)
+        precondition(ChatFormParser.form(in: model.items.first { $0.id == messageID }!.text)?.fields.count == expectedFieldCount)
         let restored = AgentModel(app: app)
         restored.open(cid)
         precondition(!restored.formIsActive(messageID) && !restored.submitForm(messageID), "source-only history must never unlock a submitted form")
@@ -4071,6 +4152,27 @@ enum AgentReplyRegression {
             precondition(completed, "Share card and user reply regression must run to completion")
             return
         }
+        if CommandLine.arguments.contains("--forms-only") {
+            var completed = false
+            Task { @MainActor in
+                let root = FileManager.default.temporaryDirectory.appending(path: "Asky-reply-\(UUID())")
+                defer { try? FileManager.default.removeItem(at: root) }
+                do {
+                    let app = try AppModel(root: root)
+                    try await formLifecycleRegression(app: app)
+                    let model = AgentModel(app: app)
+                    try await formPreview(app: app, model: model)
+                } catch { preconditionFailure("Form regression failed: \(error)") }
+                completed = true
+                application.stop(nil)
+                application.postEvent(NSEvent.otherEvent(with: .applicationDefined, location: .zero,
+                    modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil,
+                    subtype: 0, data1: 0, data2: 0)!, atStart: true)
+            }
+            application.run()
+            precondition(completed, "Form regression must run to completion")
+            return
+        }
         if CommandLine.arguments.contains("--sources-preview") {
             try await sourcesPreview()
             return
@@ -4194,12 +4296,6 @@ enum AgentReplyRegression {
         }
         if CommandLine.arguments.contains("--prefill-preview") {
             try await formPrefillRegression(app: app)
-            return
-        }
-        if CommandLine.arguments.contains("--forms-only") {
-            try await formLifecycleRegression(app: app)
-            let model = AgentModel(app: app)
-            try await formPreview(app: app, model: model)
             return
         }
         try await formLifecycleRegression(app: app)

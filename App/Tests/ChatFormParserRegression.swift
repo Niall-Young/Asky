@@ -104,6 +104,36 @@ enum ChatFormParserRegression {
         let fullDateTime = ChatFormParser.form(in: "```asky-form\n{\"title\":\"精确时间\"}\n{\"id\":\"ts\",\"type\":\"datetime\",\"label\":\"时刻\",\"components\":[\"hour\",\"minute\",\"second\"]}\n```")!
         precondition(fullDateTime.accepts(["ts": ["2026-11-25 23:59:59"]]))
         precondition(!fullDateTime.accepts(["ts": ["2026-11-25 23:59"]]))
+        let rangeForm = ChatFormParser.form(in: """
+            ```asky-form
+            {"title":"会议与出差"}
+            {"id":"slot","type":"datetime_range","label":"会议时间","required":true,"defaultValue":"2026-11-26 19:00 - 2026-11-26 20:00"}
+            {"id":"trip","type":"date_range","label":"出差日期","defaultValue":"2026-11-26 - 2026-11-28"}
+            {"id":"dnd","type":"time_range","label":"勿扰时段","defaultValue":"09:00-18:00"}
+            ```
+            """)!
+        precondition(rangeForm.fields.map(\.type) == [.datetimeRange, .dateRange, .timeRange])
+        precondition(rangeForm.prefilling([:]) == [
+            "slot": ["2026-11-26 19:00 – 20:00"],
+            "trip": ["2026-11-26 – 2026-11-28"],
+            "dnd": ["09:00 – 18:00"]
+        ])
+        precondition(rangeForm.accepts(["slot": ["2026-11-26 19:00 – 20:00"]]))
+        precondition(rangeForm.accepts(["slot": ["2026-11-26 19:00 – 2026-11-27 10:00"]]))
+        precondition(!rangeForm.accepts(["slot": ["2026-11-26 20:00 – 19:00"]]))
+        precondition(!rangeForm.accepts(["slot": ["2026-11-26 19:00 – 19:00"]]))
+        let slotField = rangeForm.fields[0]
+        let parsedRange1 = slotField.parseDateTimeRangeInput("2026/11/26 9:5 ~ 10:30")!
+        precondition(slotField.dateTimeRangeString(startDate: parsedRange1.startDate, startTime: parsedRange1.startTime,
+                                                   endDate: parsedRange1.endDate, endTime: parsedRange1.endTime) == "2026-11-26 09:05 – 10:30")
+        let parsedRange2 = slotField.parseDateTimeRangeInput("20261126 1900 - 20261127 0930")!
+        precondition(slotField.dateTimeRangeString(startDate: parsedRange2.startDate, startTime: parsedRange2.startTime,
+                                                   endDate: parsedRange2.endDate, endTime: parsedRange2.endTime) == "2026-11-26 19:00 – 2026-11-27 09:30")
+        precondition(rangeForm.accepts(["slot": ["2026-11-26 19:00 – 20:00"], "trip": ["2026-11-26 – 2026-11-26"]]))
+        precondition(!rangeForm.accepts(["slot": ["2026-11-26 19:00 – 20:00"], "trip": ["2026-11-28 – 2026-11-26"]]))
+        precondition(!rangeForm.accepts(["slot": ["2026-11-26 19:00 – 20:00"], "dnd": ["18:00 – 09:00"]]))
+        let aliasForm = ChatFormParser.form(in: "```asky-form\n{\"title\":\"别名\"}\n{\"id\":\"a\",\"type\":\"datetime-range\",\"label\":\"A\"}\n{\"id\":\"b\",\"type\":\"date-range\",\"label\":\"B\"}\n{\"id\":\"c\",\"type\":\"timerange\",\"label\":\"C\"}\n```")!
+        precondition(aliasForm.fields.map(\.type) == [.datetimeRange, .dateRange, .timeRange])
         func temporalForm(_ type: String, _ components: String) -> ChatForm? {
             ChatFormParser.form(in: "```asky-form\n{\"title\":\"测试\"}\n{\"id\":\"value\",\"type\":\"\(type)\",\"label\":\"值\",\"components\":\(components)}\n```")
         }

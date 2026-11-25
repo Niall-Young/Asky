@@ -229,13 +229,30 @@ enum CalendarEditorRegression {
             panel.close()
         }
 
-        // 4. Interactive Date & Time popovers in dark mode (verify real click opens popovers)
-        do {
+        func clickPoint(_ point: NSPoint, in window: NSWindow) {
+            let down = NSEvent.mouseEvent(
+                with: .leftMouseDown,
+                location: point,
+                modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime,
+                windowNumber: window.windowNumber,
+                context: nil,
+                eventNumber: 1,
+                clickCount: 1,
+                pressure: 1
+            )!
+            precondition(
+                FormPickerOverlayController.active?.handleLocalEvent(down) == true,
+                "Clicking outside the picker overlay must dismiss it and consume the click"
+            )
+        }
+
+        // 4. Interactive Date & Time floating glass overlays (verify in-window overlay, no NSPopover, and click-outside dismissal)
+        for (schemeName, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {
             let model = MessageCalendarEditorModel(draft, calendars: choices, source: "带上新版原型")
-            let panel = makeWindow(model: model, appearance: .darkAqua)
+            let panel = makeWindow(model: model, appearance: appearance)
             try await Task.sleep(for: .milliseconds(300))
 
-            // Verify header drag area & trigger markers exist
             let content = panel.contentView!
             guard let datePickerMarker = findMarker("calendar-editor-start-date-picker", in: content),
                   let timePickerMarker = findMarker("calendar-editor-start-time-picker", in: content) else {
@@ -243,22 +260,27 @@ enum CalendarEditorRegression {
             }
 
             clickCenter(of: datePickerMarker, in: panel)
-            try await Task.sleep(for: .milliseconds(350))
-            let datePopoverWindow = NSApp.windows.first { $0 !== panel && $0.isVisible && $0.frame.width > 200 }
-            precondition(datePopoverWindow != nil, "Date popover did not open")
-            if let popover = datePopoverWindow {
-                try writeWindowPNG(popover, to: directory.appendingPathComponent("calendar-date-popover-dark.png"))
+            try await Task.sleep(for: .milliseconds(320))
+            let hasPopoverWindow = NSApp.windows.contains {
+                $0 !== panel && $0.isVisible && String(describing: type(of: $0)).contains("Popover")
             }
-            clickCenter(of: datePickerMarker, in: panel)
+            precondition(!hasPopoverWindow, "Date picker must render as an in-window glass overlay, not NSPopover")
+            precondition(findMarker("form-picker-overlay", in: content) != nil, "Date overlay did not open")
+            try writeWindowPNG(panel, to: directory.appendingPathComponent("calendar-date-popover-\(schemeName).png"))
+
+            // Click outside the floating overlay (empty bottom-left footer area) to confirm and dismiss.
+            clickPoint(NSPoint(x: 40, y: 36), in: panel)
             try await Task.sleep(for: .milliseconds(250))
+            precondition(findMarker("form-picker-overlay", in: content) == nil, "Clicking outside must dismiss date overlay")
 
             clickCenter(of: timePickerMarker, in: panel)
-            try await Task.sleep(for: .milliseconds(350))
-            let timePopoverWindow = NSApp.windows.first { $0 !== panel && $0.isVisible && $0.frame.width > 120 }
-            precondition(timePopoverWindow != nil, "Time popover did not open")
-            if let popover = timePopoverWindow {
-                try writeWindowPNG(popover, to: directory.appendingPathComponent("calendar-time-popover-dark.png"))
-            }
+            try await Task.sleep(for: .milliseconds(320))
+            precondition(findMarker("form-picker-overlay", in: content) != nil, "Time overlay did not open")
+            try writeWindowPNG(panel, to: directory.appendingPathComponent("calendar-time-popover-\(schemeName).png"))
+
+            clickPoint(NSPoint(x: 40, y: 36), in: panel)
+            try await Task.sleep(for: .milliseconds(250))
+            precondition(findMarker("form-picker-overlay", in: content) == nil, "Clicking outside must dismiss time overlay")
 
             panel.orderOut(nil)
             panel.close()

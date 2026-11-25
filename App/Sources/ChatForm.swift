@@ -16,6 +16,9 @@ struct ChatForm: Equatable {
     struct Field: Decodable, Equatable, Identifiable {
         enum Kind: String, Decodable {
             case text, radio, multi, date, time, datetime, duration
+            case datetimeRange = "datetime_range"
+            case dateRange = "date_range"
+            case timeRange = "time_range"
 
             init(from decoder: Decoder) throws {
                 let container = try decoder.singleValueContainer()
@@ -24,6 +27,19 @@ struct ChatForm: Equatable {
                 if raw == "select" {
                     self = .radio
                     return
+                }
+                switch raw {
+                case "datetime-range", "datetimerange":
+                    self = .datetimeRange
+                    return
+                case "date-range", "daterange":
+                    self = .dateRange
+                    return
+                case "time-range", "timerange":
+                    self = .timeRange
+                    return
+                default:
+                    break
                 }
                 guard let kind = Kind(rawValue: raw) else {
                     throw DecodingError.dataCorruptedError(in: container, debugDescription: "Unsupported field type: \(raw)")
@@ -82,6 +98,15 @@ struct ChatForm: Equatable {
         var dateTimePlaceholder: String {
             "YYYY-MM-DD \(temporalPlaceholder)"
         }
+        var dateTimeRangePlaceholder: String {
+            "YYYY-MM-DD \(temporalPlaceholder)\(ChatForm.rangeSeparator)\(temporalPlaceholder)"
+        }
+        var dateRangePlaceholder: String {
+            "YYYY-MM-DD\(ChatForm.rangeSeparator)YYYY-MM-DD"
+        }
+        var timeRangePlaceholder: String {
+            "\(temporalPlaceholder)\(ChatForm.rangeSeparator)\(temporalPlaceholder)"
+        }
         /// Strict `yyyy-MM-dd HH:mm` (or requested time components) validation for `datetime` fields.
         func dateTimeComponents(_ value: String) -> (date: Date, time: [Int])? {
             let parts = value.split(separator: " ", omittingEmptySubsequences: false)
@@ -108,6 +133,147 @@ struct ChatForm: Equatable {
         }
         func initialDateTime(now: Date = Date()) -> String {
             dateTimeString(date: now, time: initialTemporalValues(now: now))
+        }
+        func combinedInstant(date: Date, time: [Int], calendar: Calendar = .current) -> Date? {
+            var comps = calendar.dateComponents([.year, .month, .day], from: date)
+            comps.hour = 0
+            comps.minute = 0
+            comps.second = 0
+            for (unit, number) in zip(timeUnits, time) {
+                switch unit {
+                case .hour: comps.hour = number
+                case .minute: comps.minute = number
+                case .second: comps.second = number
+                }
+            }
+            return calendar.date(from: comps)
+        }
+        func temporalRank(_ values: [Int]) -> Int {
+            var total = 0
+            for (unit, number) in zip(timeUnits, values) {
+                switch unit {
+                case .hour: total += number * 3600
+                case .minute: total += number * 60
+                case .second: total += number
+                }
+            }
+            return total
+        }
+        func dateTimeRangeString(startDate: Date, startTime: [Int], endDate: Date, endTime: [Int]) -> String {
+            let startDay = ChatForm.dateString(startDate)
+            let endDay = ChatForm.dateString(endDate)
+            if startDay == endDay {
+                return "\(startDay) \(temporalString(startTime))\(ChatForm.rangeSeparator)\(temporalString(endTime))"
+            }
+            return "\(startDay) \(temporalString(startTime))\(ChatForm.rangeSeparator)\(endDay) \(temporalString(endTime))"
+        }
+        /// Strict validation for `datetime_range` (canonical `yyyy-MM-dd HH:mm – HH:mm` or `yyyy-MM-dd HH:mm – yyyy-MM-dd HH:mm`).
+        func dateTimeRangeComponents(_ value: String) -> (startDate: Date, startTime: [Int], endDate: Date, endTime: [Int])? {
+            guard let (left, right) = ChatForm.splitRangeParts(value, allowUnspacedHyphen: false),
+                  let start = dateTimeComponents(left) else { return nil }
+            let endDate: Date
+            let endTime: [Int]
+            if let fullEnd = dateTimeComponents(right) {
+                endDate = fullEnd.date
+                endTime = fullEnd.time
+            } else if let sameDayTime = temporalValues(right) {
+                endDate = start.date
+                endTime = sameDayTime
+            } else {
+                return nil
+            }
+            guard let startInstant = combinedInstant(date: start.date, time: start.time),
+                  let endInstant = combinedInstant(date: endDate, time: endTime),
+                  endInstant > startInstant else { return nil }
+            return (start.date, start.time, endDate, endTime)
+        }
+        /// Accepts flexible user-typed ranges such as `2026/11/26 19:00 - 20:00` or `2026-11-26 19:00 ~ 2026-11-27 10:00`.
+        func parseDateTimeRangeInput(_ raw: String) -> (startDate: Date, startTime: [Int], endDate: Date, endTime: [Int])? {
+            guard let (left, right) = ChatForm.splitRangeParts(raw, allowUnspacedHyphen: false),
+                  let start = parseDateTimeInput(left) else { return nil }
+            let endDate: Date
+            let endTime: [Int]
+            if let fullEnd = parseDateTimeInput(right) {
+                endDate = fullEnd.date
+                endTime = fullEnd.time
+            } else if let sameDayTime = parseTemporalInput(right) {
+                endDate = start.date
+                endTime = sameDayTime
+            } else {
+                return nil
+            }
+            guard let startInstant = combinedInstant(date: start.date, time: start.time),
+                  let endInstant = combinedInstant(date: endDate, time: endTime),
+                  endInstant > startInstant else { return nil }
+            return (start.date, start.time, endDate, endTime)
+        }
+        func initialDateTimeRange(now: Date = Date()) -> String {
+            let calendar = Calendar.current
+            let start = now
+            let end = calendar.date(byAdding: .hour, value: 1, to: start) ?? start.addingTimeInterval(3600)
+            return dateTimeRangeString(
+                startDate: start,
+                startTime: initialTemporalValues(now: start),
+                endDate: end,
+                endTime: initialTemporalValues(now: end)
+            )
+        }
+        func dateRangeString(start: Date, end: Date) -> String {
+            "\(ChatForm.dateString(start))\(ChatForm.rangeSeparator)\(ChatForm.dateString(end))"
+        }
+        func dateRangeComponents(_ value: String) -> (start: Date, end: Date)? {
+            guard let (left, right) = ChatForm.splitRangeParts(value, allowUnspacedHyphen: false),
+                  let start = ChatForm.date(left),
+                  let end = ChatForm.date(right),
+                  end >= start else { return nil }
+            return (start, end)
+        }
+        func parseDateRangeInput(_ raw: String) -> (start: Date, end: Date)? {
+            guard let (left, right) = ChatForm.splitRangeParts(raw, allowUnspacedHyphen: false),
+                  let start = ChatForm.parseDateInput(left),
+                  let end = ChatForm.parseDateInput(right),
+                  end >= start else { return nil }
+            return (start, end)
+        }
+        func initialDateRange(now: Date = Date()) -> String {
+            let end = Calendar.current.date(byAdding: .day, value: 1, to: now) ?? now
+            return dateRangeString(start: now, end: end)
+        }
+        func timeRangeString(start: [Int], end: [Int]) -> String {
+            "\(temporalString(start))\(ChatForm.rangeSeparator)\(temporalString(end))"
+        }
+        func timeRangeComponents(_ value: String) -> (start: [Int], end: [Int])? {
+            guard let (left, right) = ChatForm.splitRangeParts(value, allowUnspacedHyphen: true),
+                  let start = temporalValues(left),
+                  let end = temporalValues(right),
+                  temporalRank(end) > temporalRank(start) else { return nil }
+            return (start, end)
+        }
+        func parseTimeRangeInput(_ raw: String) -> (start: [Int], end: [Int])? {
+            guard let (left, right) = ChatForm.splitRangeParts(raw, allowUnspacedHyphen: true),
+                  let start = parseTemporalInput(left),
+                  let end = parseTemporalInput(right),
+                  temporalRank(end) > temporalRank(start) else { return nil }
+            return (start, end)
+        }
+        func initialTimeRange(now: Date = Date()) -> String {
+            let startValues = initialTemporalValues(now: now)
+            let startInstant = combinedInstant(date: now, time: startValues) ?? now
+            let calendar = Calendar.current
+            if let endInstant = calendar.date(byAdding: .hour, value: 1, to: startInstant),
+               calendar.isDate(endInstant, inSameDayAs: startInstant) {
+                let endValues = initialTemporalValues(now: endInstant)
+                if temporalRank(endValues) > temporalRank(startValues) {
+                    return timeRangeString(start: startValues, end: endValues)
+                }
+            }
+            let maxEnd = timeUnits.enumerated().map { maximum(at: $0.offset) }
+            if temporalRank(maxEnd) > temporalRank(startValues) {
+                return timeRangeString(start: startValues, end: maxEnd)
+            }
+            let fallbackStart = timeUnits.map { $0 == .hour ? 9 : 0 }
+            let fallbackEnd = timeUnits.map { $0 == .hour ? 10 : ($0 == .minute ? 30 : 30) }
+            return timeRangeString(start: fallbackStart, end: fallbackEnd)
         }
         /// Accepts user-typed time/duration variants such as `9:5`, `14:30`, `14：30`, or `1430`.
         func parseTemporalInput(_ raw: String) -> [Int]? {
@@ -167,6 +333,9 @@ struct ChatForm: Equatable {
             case .date: return answer.count <= 1 && answer.allSatisfy { ChatForm.date($0) != nil }
             case .time, .duration: return answer.count <= 1 && answer.allSatisfy { temporalValues($0) != nil }
             case .datetime: return answer.count <= 1 && answer.allSatisfy { dateTimeComponents($0) != nil }
+            case .datetimeRange: return answer.count <= 1 && answer.allSatisfy { dateTimeRangeComponents($0) != nil }
+            case .dateRange: return answer.count <= 1 && answer.allSatisfy { dateRangeComponents($0) != nil }
+            case .timeRange: return answer.count <= 1 && answer.allSatisfy { timeRangeComponents($0) != nil }
             }
         }
 
@@ -174,7 +343,21 @@ struct ChatForm: Equatable {
         var initialAnswer: [String]? {
             let answer: [String]
             switch defaultValue {
-            case .scalar(let text) where type != .multi: answer = [text]
+            case .scalar(let text) where type != .multi:
+                switch type {
+                case .datetimeRange:
+                    guard let parsed = parseDateTimeRangeInput(text) else { return nil }
+                    answer = [dateTimeRangeString(startDate: parsed.startDate, startTime: parsed.startTime,
+                                                  endDate: parsed.endDate, endTime: parsed.endTime)]
+                case .dateRange:
+                    guard let parsed = parseDateRangeInput(text) else { return nil }
+                    answer = [dateRangeString(start: parsed.start, end: parsed.end)]
+                case .timeRange:
+                    guard let parsed = parseTimeRangeInput(text) else { return nil }
+                    answer = [timeRangeString(start: parsed.start, end: parsed.end)]
+                default:
+                    answer = [text]
+                }
             case .multiple(let choices) where type == .multi: answer = choices
             default: return nil
             }
@@ -188,12 +371,14 @@ struct ChatForm: Equatable {
                 guard let options, (1...20).contains(options.count), Set(options).count == options.count,
                       options.allSatisfy({ !$0.isEmpty && $0.count <= 200 }) else { return false }
             }
-            if type == .time || type == .datetime || type == .duration {
+            if type == .time || type == .datetime || type == .duration || type == .datetimeRange || type == .timeRange {
                 guard !timeUnits.isEmpty, timeUnits == TimeUnit.allCases.filter({ timeUnits.contains($0) }) else { return false }
             } else if components != nil { return false }
             return true
         }
     }
+    static let rangeSeparator = " – "
+
     let title: String
     var fields: [Field]
     var isComplete: Bool
@@ -218,6 +403,22 @@ struct ChatForm: Equatable {
         ([title] + fields.map { field in
             "\(field.label)：\(field.describedAnswer(values[field.id] ?? []))"
         }).joined(separator: "\n")
+    }
+
+    static func splitRangeParts(_ raw: String, allowUnspacedHyphen: Bool) -> (String, String)? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        var separators = [" – ", " — ", " ~ ", " 至 ", " to ", " - ", "–", "—", "~", "至"]
+        if allowUnspacedHyphen { separators.append("-") }
+        for separator in separators {
+            if let range = trimmed.range(of: separator) {
+                let left = String(trimmed[..<range.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+                let right = String(trimmed[range.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !left.isEmpty, !right.isEmpty else { return nil }
+                return (left, right)
+            }
+        }
+        return nil
     }
 
     static func date(_ value: String) -> Date? {

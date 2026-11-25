@@ -375,6 +375,7 @@ struct MessageCalendarEditorView: View {
     var cancel: () -> Void
     var create: () -> Void
 
+    @State private var formPickerOverlay = FormPickerOverlayController()
     @FocusState private var notesFocused: Bool
     @Environment(\.colorScheme) private var scheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -600,6 +601,8 @@ struct MessageCalendarEditorView: View {
         .frame(width: MessageCalendarEditor.windowSize.width, height: MessageCalendarEditor.windowSize.height)
         .environment(\.settingsInputHeight, ChatFormMetrics.controlHeight)
         .environment(\.settingsInputCornerRadius, ChatFormMetrics.controlCornerRadius)
+        .environment(\.formPickerOverlay, formPickerOverlay)
+        .modifier(FormPickerOverlayPresentation(controller: formPickerOverlay, topInset: 12))
         .windowSurfaceBackground(in: RoundedRectangle(cornerRadius: MessageCalendarEditor.cornerRadius, style: .circular))
     }
 
@@ -681,9 +684,10 @@ private struct CalendarEditorDateField: View {
     let active: Bool
 
     @State private var draftText: String
-    @State private var showingPopover = false
+    @State private var anchorBox = ChatBubbleAnchorBox()
     @FocusState private var inputFocused: Bool
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.formPickerOverlay) private var pickerOverlay
 
     init(accessibilityLabel: String, fieldID: String, pickerID: String, date: Binding<Date>, active: Bool) {
         self.accessibilityLabel = accessibilityLabel
@@ -695,14 +699,16 @@ private struct CalendarEditorDateField: View {
     }
 
     private var formattedDate: String { ChatForm.dateString(date) }
+    private var isPickerOpen: Bool { pickerOverlay?.isOpen(pickerID) == true }
 
-    private var popoverBinding: Binding<Date> {
+    private func popoverBinding(overlay: FormPickerOverlayController?) -> Binding<Date> {
         Binding(
             get: { date },
             set: { picked in
                 if let preserved = CalendarMonthPicker.selecting(picked, preservingTimeFrom: date, calendar: .current) {
                     date = preserved
                     draftText = ChatForm.dateString(preserved)
+                    overlay?.notifyChanged()
                 }
             }
         )
@@ -726,6 +732,7 @@ private struct CalendarEditorDateField: View {
                     let formatted = ChatForm.dateString(parsed)
                     if formatted != formattedDate {
                         date = parsed
+                        pickerOverlay?.notifyChanged()
                     }
                 }
                 .onChange(of: formattedDate) { _, newFormatted in
@@ -734,28 +741,38 @@ private struct CalendarEditorDateField: View {
                     }
                 }
                 .onChange(of: active) { _, isActive in
-                    if !isActive { showingPopover = false }
+                    if !isActive, isPickerOpen { pickerOverlay?.dismiss() }
                 }
-                .settingsInputSurface(scheme: scheme, focused: inputFocused)
-                .background(ChatFormControlMarker(id: fieldID))
                 .accessibilityLabel(accessibilityLabel)
                 .accessibilityIdentifier(fieldID)
 
-            ChatFormPickerTriggerButton(
-                isOpen: showingPopover,
+            ChatFormInlinePickerIcon(
+                isOpen: isPickerOpen,
                 enabled: active,
                 accessibilityLabel: NSLocalizedString("选择日期", comment: ""),
                 accessibilityIdentifier: pickerID
             ) {
-                commitDraft()
-                inputFocused = false
-                showingPopover.toggle()
+                togglePicker()
             } icon: {
                 Image(mingCute: "calendar", size: 15)
             }
-            .popover(isPresented: $showingPopover, arrowEdge: .bottom) {
-                ChatFormDatePopover(selection: popoverBinding, dismiss: { showingPopover = false })
-            }
+        }
+        .settingsInputSurface(scheme: scheme, focused: inputFocused || isPickerOpen)
+        .background(ChatFormControlMarker(id: fieldID))
+        .background(ChatBubbleAnchorReader(box: anchorBox).allowsHitTesting(false))
+    }
+
+    private func togglePicker() {
+        commitDraft()
+        inputFocused = false
+        guard let anchor = anchorBox.swiftUIFrameInWindow() else { return }
+        let overlay = pickerOverlay
+        overlay?.toggle(
+            id: pickerID,
+            anchor: anchor,
+            preferredSize: ChatFormDatePopover.preferredSize
+        ) {
+            AnyView(ChatFormDatePopover(selection: popoverBinding(overlay: overlay)))
         }
     }
 
@@ -788,9 +805,10 @@ private struct CalendarEditorTimeField: View {
     let active: Bool
 
     @State private var draftText: String
-    @State private var showingPopover = false
+    @State private var anchorBox = ChatBubbleAnchorBox()
     @FocusState private var inputFocused: Bool
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.formPickerOverlay) private var pickerOverlay
 
     init(accessibilityLabel: String, fieldID: String, pickerID: String, date: Binding<Date>, active: Bool) {
         self.accessibilityLabel = accessibilityLabel
@@ -811,8 +829,9 @@ private struct CalendarEditorTimeField: View {
     }
 
     private var formattedValue: String { Self.formattedTime(date) }
+    private var isPickerOpen: Bool { pickerOverlay?.isOpen(pickerID) == true }
 
-    private var temporalBinding: Binding<[Int]> {
+    private func temporalBinding(overlay: FormPickerOverlayController?) -> Binding<[Int]> {
         Binding(
             get: { Self.timeComponents(date) },
             set: { numbers in
@@ -820,6 +839,7 @@ private struct CalendarEditorTimeField: View {
                       let updated = Calendar.current.date(bySettingHour: numbers[0], minute: numbers[1], second: 0, of: date) else { return }
                 date = updated
                 draftText = Self.timeField.temporalString(numbers)
+                overlay?.notifyChanged()
             }
         )
     }
@@ -843,6 +863,7 @@ private struct CalendarEditorTimeField: View {
                     if formatted != formattedValue,
                        let updated = Calendar.current.date(bySettingHour: parsed[0], minute: parsed[1], second: 0, of: date) {
                         date = updated
+                        pickerOverlay?.notifyChanged()
                     }
                 }
                 .onChange(of: formattedValue) { _, newFormatted in
@@ -851,28 +872,38 @@ private struct CalendarEditorTimeField: View {
                     }
                 }
                 .onChange(of: active) { _, isActive in
-                    if !isActive { showingPopover = false }
+                    if !isActive, isPickerOpen { pickerOverlay?.dismiss() }
                 }
-                .settingsInputSurface(scheme: scheme, focused: inputFocused)
-                .background(ChatFormControlMarker(id: fieldID))
                 .accessibilityLabel(accessibilityLabel)
                 .accessibilityIdentifier(fieldID)
 
-            ChatFormPickerTriggerButton(
-                isOpen: showingPopover,
+            ChatFormInlinePickerIcon(
+                isOpen: isPickerOpen,
                 enabled: active,
                 accessibilityLabel: NSLocalizedString("选择时间", comment: ""),
                 accessibilityIdentifier: pickerID
             ) {
-                commitDraft()
-                inputFocused = false
-                showingPopover.toggle()
+                togglePicker()
             } icon: {
                 ChatFormClockGlyph(size: 15)
             }
-            .popover(isPresented: $showingPopover, arrowEdge: .bottom) {
-                ChatFormTemporalPopover(field: Self.timeField, values: temporalBinding, dismiss: { showingPopover = false })
-            }
+        }
+        .settingsInputSurface(scheme: scheme, focused: inputFocused || isPickerOpen)
+        .background(ChatFormControlMarker(id: fieldID))
+        .background(ChatBubbleAnchorReader(box: anchorBox).allowsHitTesting(false))
+    }
+
+    private func togglePicker() {
+        commitDraft()
+        inputFocused = false
+        guard let anchor = anchorBox.swiftUIFrameInWindow() else { return }
+        let overlay = pickerOverlay
+        overlay?.toggle(
+            id: pickerID,
+            anchor: anchor,
+            preferredSize: ChatFormTemporalPopover.preferredSize(for: Self.timeField)
+        ) {
+            AnyView(ChatFormTemporalPopover(field: Self.timeField, values: temporalBinding(overlay: overlay)))
         }
     }
 

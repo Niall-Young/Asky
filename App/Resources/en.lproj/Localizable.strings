@@ -1071,6 +1071,8 @@
 "选择时长" = "Choose duration";
 "选择日期" = "Choose date";
 "选择日期与时间" = "Choose date and time";
+"选择时间段" = "Choose time range";
+"选择日期范围" = "Choose date range";
 "归零" = "Reset";
 "今天" = "Today";
 "完成" = "Done";

@@ -5,14 +5,18 @@ import Theme
 struct CalendarMonthPicker: View {
     @Binding var selection: Date
     var monochrome = false
+    var rangeStart: Date? = nil
+    var rangeEnd: Date? = nil
     @State private var displayedMonth: Date
     @Environment(\.colorScheme) private var scheme
     private let calendar = Calendar.current
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 4), count: 7)
 
-    init(selection: Binding<Date>, monochrome: Bool = false) {
+    init(selection: Binding<Date>, monochrome: Bool = false, rangeStart: Date? = nil, rangeEnd: Date? = nil) {
         _selection = selection
         self.monochrome = monochrome
+        self.rangeStart = rangeStart
+        self.rangeEnd = rangeEnd
         _displayedMonth = State(initialValue: selection.wrappedValue)
     }
 
@@ -22,7 +26,15 @@ struct CalendarMonthPicker: View {
         return (0..<42).compactMap { calendar.date(byAdding: .day, value: $0 - offset, to: start) }
     }
 
+    private var normalizedRangeDays: (start: Date, end: Date)? {
+        guard let rangeStart, let rangeEnd else { return nil }
+        let s = calendar.startOfDay(for: rangeStart)
+        let e = calendar.startOfDay(for: rangeEnd)
+        return s <= e ? (s, e) : (e, s)
+    }
+
     var body: some View {
+        let rangeDays = normalizedRangeDays
         VStack(spacing: 12) {
             HStack(spacing: 4) {
                 Text(displayedMonth, format: .dateTime.year().month(.wide))
@@ -40,12 +52,23 @@ struct CalendarMonthPicker: View {
                         .frame(height: 24).accessibilityHidden(true)
                 }
                 ForEach(days, id: \.self) { day in
+                    let dayStart = calendar.startOfDay(for: day)
                     let selected = calendar.isDate(day, inSameDayAs: selection)
+                    let isRangeEndpoint: Bool = {
+                        guard let rangeDays, rangeDays.start != rangeDays.end else { return false }
+                        return !selected && (dayStart == rangeDays.start || dayStart == rangeDays.end)
+                    }()
+                    let isInRange: Bool = {
+                        guard let rangeDays, rangeDays.start != rangeDays.end else { return false }
+                        return dayStart > rangeDays.start && dayStart < rangeDays.end
+                    }()
                     let isToday = calendar.isDateInToday(day)
                     let currentMonth = calendar.isDate(day, equalTo: displayedMonth, toGranularity: .month)
                     CalendarDayCell(
                         dayNumber: calendar.component(.day, from: day),
                         selected: selected,
+                        isRangeEndpoint: isRangeEndpoint,
+                        isInRange: isInRange,
                         isToday: isToday,
                         currentMonth: currentMonth,
                         monochrome: monochrome
@@ -87,6 +110,8 @@ struct CalendarMonthPicker: View {
 private struct CalendarDayCell: View {
     let dayNumber: Int
     let selected: Bool
+    let isRangeEndpoint: Bool
+    let isInRange: Bool
     let isToday: Bool
     let currentMonth: Bool
     let monochrome: Bool
@@ -98,6 +123,9 @@ private struct CalendarDayCell: View {
         if selected {
             return monochrome ? ThemeColor("textInverted").color(for: scheme) : .white
         }
+        if isRangeEndpoint {
+            return monochrome ? ThemeColor.kText.color(for: scheme) : Color.primary
+        }
         if isToday {
             return monochrome ? ThemeColor.kText.color(for: scheme) : Color.accentColor
         }
@@ -107,9 +135,12 @@ private struct CalendarDayCell: View {
         return monochrome ? ThemeColor.kTextSubtlest.color(for: scheme).opacity(0.6) : Color.secondary.opacity(0.55)
     }
 
-    private var fill: Color {
+    private var circleFill: Color {
         if selected {
             return monochrome ? ThemeColor.kBackgroundPrimary.color(for: scheme) : Color.accentColor
+        }
+        if isRangeEndpoint {
+            return scheme == .dark ? Color.white.opacity(0.22) : Color.black.opacity(0.14)
         }
         if hovered {
             return ThemeColor.kInteractionHover.color(for: scheme)
@@ -117,17 +148,28 @@ private struct CalendarDayCell: View {
         return .clear
     }
 
+    private var rangeFill: Color {
+        guard isInRange else { return .clear }
+        return scheme == .dark ? Color.white.opacity(0.09) : Color.black.opacity(0.065)
+    }
+
     var body: some View {
         Button(action: action) {
             Text("\(dayNumber)")
-                .font(.system(size: 13.5, weight: selected || (monochrome && isToday) ? .semibold : .regular))
+                .font(.system(size: 13.5, weight: selected || isRangeEndpoint || (monochrome && isToday) ? .semibold : .regular))
                 .monospacedDigit()
                 .foregroundStyle(foreground)
                 .frame(maxWidth: .infinity)
                 .frame(height: 32)
-                .background(fill, in: Circle())
+                .background {
+                    if isInRange && !hovered {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(rangeFill)
+                    }
+                    Circle().fill(circleFill)
+                }
                 .overlay {
-                    if monochrome && isToday && !selected {
+                    if monochrome && isToday && !selected && !isRangeEndpoint {
                         Circle()
                             .strokeBorder(ThemeColor("borderPrimary").color(for: scheme), lineWidth: 1)
                     }
