@@ -8,7 +8,9 @@ enum ChatFormMetrics {
     static let optionMinHeight: CGFloat = 38
     static let optionCornerRadius: CGFloat = 10
     static let optionSpacing: CGFloat = 8
-    static let fieldSpacing: CGFloat = 16
+    static let labelControlSpacing: CGFloat = 10
+    static let fieldSpacing: CGFloat = 22
+    static let replyPartSpacing: CGFloat = 20
 }
 
 struct ChatReplyView: View {
@@ -19,7 +21,7 @@ struct ChatReplyView: View {
     var submit: () -> Void = {}
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: ChatFormMetrics.replyPartSpacing) {
             ForEach(ChatFormParser.parse(text, streaming: isStreaming)) { part in
                 switch part.content {
                 case .markdown(let text): ChatMarkdownView(text: text).equatable()
@@ -43,14 +45,14 @@ struct ChatFormView: View {
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(ThemeColor.kText)
             ForEach(form.fields) { field in
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: ChatFormMetrics.labelControlSpacing) {
                     HStack(spacing: 4) {
                         Text(field.label)
-                            .font(.system(size: 13, weight: .medium))
+                            .font(.system(size: 14, weight: .medium))
                             .foregroundStyle(ThemeColor.kTextSubtle)
                         if field.required == true {
                             Text(verbatim: "*")
-                                .font(.system(size: 13, weight: .medium))
+                                .font(.system(size: 14, weight: .medium))
                                 .foregroundStyle(ThemeColor.kTextSubtlest)
                                 .accessibilityLabel(NSLocalizedString("必填", comment: ""))
                         }
