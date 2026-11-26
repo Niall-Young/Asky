@@ -693,7 +693,7 @@ private struct ChatFormDateTimeRangeField: View {
 
     private var pickerID: String { "chat-form-picker-" + field.id }
     private var isPickerOpen: Bool { pickerOverlay?.isOpen(pickerID) == true }
-    private var displayValue: String { value.isEmpty ? field.initialDateTimeRange() : value }
+    private var displayValue: String { field.displayRangeValue(value) }
 
     var body: some View {
         ChatFormPickerTrigger(
@@ -722,7 +722,7 @@ private struct ChatFormDateTimeRangeField: View {
             preferredSize: ChatFormDateTimeRangePopover.preferredSize(for: field),
             trigger: {
                 AnyView(ChatFormPickerTriggerContent(
-                    text: value.isEmpty ? field.initialDateTimeRange() : value,
+                    text: field.displayRangeValue(value),
                     active: active,
                     highlighted: true
                 ) {
@@ -756,9 +756,12 @@ struct ChatFormDateTimeRangePopover: View {
         CGSize(width: 248 + 12 + 1 + 12 + timeColumnsWidth(for: field) + 28, height: 342)
     }
 
-    private var currentRange: (startDate: Date, startTime: [Int], endDate: Date, endTime: [Int]) {
+    private var currentRange: (startDate: Date, startTime: [Int], endDate: Date?, endTime: [Int]?) {
         if let parsed = field.dateTimeRangeComponents(value) {
-            return parsed
+            return (parsed.startDate, parsed.startTime, parsed.endDate, parsed.endTime)
+        }
+        if let partial = field.partialDateTimeRangeStart(value) {
+            return (partial.startDate, partial.startTime, nil, nil)
         }
         let now = Date()
         let end = Calendar.current.date(byAdding: .hour, value: 1, to: now) ?? now.addingTimeInterval(3600)
@@ -775,19 +778,26 @@ struct ChatFormDateTimeRangePopover: View {
         pickerOverlay?.notifyChanged()
     }
 
+    private func clearEnd(startDate: Date, startTime: [Int]) {
+        value = field.partialDateTimeRangeString(startDate: startDate, startTime: startTime)
+        pickerOverlay?.notifyChanged()
+    }
+
     private func updateStart(date newDate: Date? = nil, time newTime: [Int]? = nil) {
         let current = currentRange
         let calendar = Calendar.current
-        let oldStart = field.combinedInstant(date: current.startDate, time: current.startTime, calendar: calendar) ?? current.startDate
-        let oldEnd = field.combinedInstant(date: current.endDate, time: current.endTime, calendar: calendar) ?? oldStart.addingTimeInterval(3600)
-        let duration = max(oldEnd.timeIntervalSince(oldStart), 3600)
-
         let startDate = newDate ?? current.startDate
         let startTime = newTime ?? current.startTime
         let newStart = field.combinedInstant(date: startDate, time: startTime, calendar: calendar) ?? startDate
-        let shiftedEnd = newStart.addingTimeInterval(duration)
-        let endTime = field.initialTemporalValues(now: shiftedEnd)
-        applyRange(startDate: startDate, startTime: startTime, endDate: shiftedEnd, endTime: endTime)
+
+        if let endDate = current.endDate,
+           let endTime = current.endTime,
+           let existingEnd = field.combinedInstant(date: endDate, time: endTime, calendar: calendar),
+           existingEnd > newStart {
+            applyRange(startDate: startDate, startTime: startTime, endDate: endDate, endTime: endTime)
+        } else {
+            clearEnd(startDate: startDate, startTime: startTime)
+        }
     }
 
     private func updateEndDate(_ pickedDate: Date) {
@@ -795,48 +805,55 @@ struct ChatFormDateTimeRangePopover: View {
         let calendar = Calendar.current
         let startDay = calendar.startOfDay(for: current.startDate)
         let pickedDay = calendar.startOfDay(for: pickedDate)
-
-        if pickedDay < startDay {
-            let newStart = pickedDate
-            let newEnd = current.startDate
-            let startInstant = field.combinedInstant(date: newStart, time: current.startTime, calendar: calendar) ?? newStart
-            let endInstant = field.combinedInstant(date: newEnd, time: current.endTime, calendar: calendar) ?? newEnd
-            if endInstant > startInstant {
-                applyRange(startDate: newStart, startTime: current.startTime, endDate: newEnd, endTime: current.endTime)
-            } else {
-                let bumped = startInstant.addingTimeInterval(3600)
-                applyRange(startDate: newStart, startTime: current.startTime, endDate: bumped, endTime: field.initialTemporalValues(now: bumped))
-            }
-            return
-        }
+        guard pickedDay >= startDay else { return }
 
         let startInstant = field.combinedInstant(date: current.startDate, time: current.startTime, calendar: calendar) ?? current.startDate
-        let candidateEnd = field.combinedInstant(date: pickedDate, time: current.endTime, calendar: calendar) ?? pickedDate
+        let baseEndTime = current.endTime ?? current.startTime
+        let candidateEnd = field.combinedInstant(date: pickedDate, time: baseEndTime, calendar: calendar) ?? pickedDate
         if candidateEnd > startInstant {
-            applyRange(startDate: current.startDate, startTime: current.startTime, endDate: pickedDate, endTime: current.endTime)
+            applyRange(startDate: current.startDate, startTime: current.startTime, endDate: pickedDate, endTime: baseEndTime)
         } else {
             let bumped = startInstant.addingTimeInterval(3600)
-            applyRange(startDate: current.startDate, startTime: current.startTime, endDate: bumped, endTime: field.initialTemporalValues(now: bumped))
+            if calendar.isDate(bumped, inSameDayAs: pickedDate) {
+                applyRange(startDate: current.startDate, startTime: current.startTime, endDate: bumped, endTime: field.initialTemporalValues(now: bumped))
+            } else {
+                let maxSameDay = field.timeUnits.enumerated().map { field.maximum(at: $0.offset) }
+                if let maxInstant = field.combinedInstant(date: pickedDate, time: maxSameDay, calendar: calendar),
+                   maxInstant > startInstant {
+                    applyRange(startDate: current.startDate, startTime: current.startTime, endDate: pickedDate, endTime: maxSameDay)
+                }
+            }
         }
     }
 
     private func updateEndTime(unitIndex: Int, picked: Int) {
         let current = currentRange
         let calendar = Calendar.current
-        var candidateTime = current.endTime
-        guard candidateTime.indices.contains(unitIndex) else { return }
-        candidateTime[unitIndex] = picked
+        let baseEndDate = current.endDate ?? current.startDate
+        var candidateTime: [Int]
+        if let existingEnd = current.endTime, existingEnd.indices.contains(unitIndex) {
+            candidateTime = existingEnd
+            candidateTime[unitIndex] = picked
+        } else {
+            candidateTime = current.startTime
+            guard candidateTime.indices.contains(unitIndex) else { return }
+            candidateTime[unitIndex] = picked
+            if unitIndex + 1 < candidateTime.count {
+                for lower in (unitIndex + 1)..<candidateTime.count {
+                    candidateTime[lower] = 0
+                }
+            }
+        }
 
         let startInstant = field.combinedInstant(date: current.startDate, time: current.startTime, calendar: calendar) ?? current.startDate
-        let oldEndInstant = field.combinedInstant(date: current.endDate, time: current.endTime, calendar: calendar) ?? startInstant.addingTimeInterval(3600)
-        let candidateInstant = field.combinedInstant(date: current.endDate, time: candidateTime, calendar: calendar) ?? oldEndInstant
+        let candidateInstant = field.combinedInstant(date: baseEndDate, time: candidateTime, calendar: calendar) ?? startInstant
 
         if candidateInstant > startInstant {
-            applyRange(startDate: current.startDate, startTime: current.startTime, endDate: current.endDate, endTime: candidateTime)
+            applyRange(startDate: current.startDate, startTime: current.startTime, endDate: baseEndDate, endTime: candidateTime)
             return
         }
 
-        if calendar.isDate(current.startDate, inSameDayAs: current.endDate),
+        if calendar.isDate(current.startDate, inSameDayAs: baseEndDate),
            field.timeUnits[unitIndex] == .hour,
            let hourIdx = field.timeUnits.firstIndex(of: .hour),
            picked == current.startTime[hourIdx],
@@ -844,23 +861,14 @@ struct ChatFormDateTimeRangePopover: View {
            current.startTime[minIdx] < 59 {
             var adjusted = candidateTime
             adjusted[minIdx] = min(59, current.startTime[minIdx] + 15)
-            applyRange(startDate: current.startDate, startTime: current.startTime, endDate: current.endDate, endTime: adjusted)
+            applyRange(startDate: current.startDate, startTime: current.startTime, endDate: baseEndDate, endTime: adjusted)
             return
         }
-
-        let duration = max(oldEndInstant.timeIntervalSince(startInstant), 3600)
-        let shiftedStart = candidateInstant.addingTimeInterval(-duration)
-        applyRange(
-            startDate: shiftedStart,
-            startTime: field.initialTemporalValues(now: shiftedStart),
-            endDate: current.endDate,
-            endTime: candidateTime
-        )
     }
 
     private var activeDateBinding: Binding<Date> {
         Binding(
-            get: { editingEnd ? currentRange.endDate : currentRange.startDate },
+            get: { editingEnd ? (currentRange.endDate ?? currentRange.startDate) : currentRange.startDate },
             set: { picked in
                 if editingEnd {
                     updateEndDate(picked)
@@ -874,13 +882,18 @@ struct ChatFormDateTimeRangePopover: View {
     var body: some View {
         let _ = pickerOverlay?.revision
         let range = currentRange
-        let rawActiveTime = editingEnd ? range.endTime : range.startTime
-        let activeTime = rawActiveTime.count == field.timeUnits.count ? rawActiveTime : field.initialTemporalValues()
+        let startTime = range.startTime.count == field.timeUnits.count ? range.startTime : field.initialTemporalValues()
+        let endTime = range.endTime.flatMap { $0.count == field.timeUnits.count ? $0 : nil }
+        let activeTime: [Int]? = editingEnd ? endTime : startTime
+        let sameDayEnd = Calendar.current.isDate(range.startDate, inSameDayAs: range.endDate ?? range.startDate)
 
         VStack(spacing: 12) {
             ChatFormRangeTabs(
-                startSummary: field.dateTimeString(date: range.startDate, time: range.startTime),
-                endSummary: field.dateTimeString(date: range.endDate, time: range.endTime),
+                startSummary: field.dateTimeString(date: range.startDate, time: startTime),
+                endSummary: range.endDate.flatMap { endDate in
+                    endTime.map { field.dateTimeString(date: endDate, time: $0) }
+                },
+                endPlaceholder: NSLocalizedString("选择结束时间", comment: ""),
                 editingEnd: $editingEnd
             )
 
@@ -893,7 +906,9 @@ struct ChatFormDateTimeRangePopover: View {
                     selection: activeDateBinding,
                     monochrome: true,
                     rangeStart: range.startDate,
-                    rangeEnd: range.endDate
+                    rangeEnd: range.endDate,
+                    hasSelection: !editingEnd || range.endDate != nil,
+                    minDate: editingEnd ? range.startDate : nil
                 )
                 .frame(width: 248)
 
@@ -906,13 +921,23 @@ struct ChatFormDateTimeRangePopover: View {
                         ChatFormTimeColumn(
                             unit: unit,
                             range: 0...field.maximum(at: index),
-                            selected: activeTime[index],
-                            columnHeight: 240
+                            selected: activeTime?[index],
+                            initialScrollTarget: startTime[index],
+                            columnHeight: 240,
+                            isDisabled: { number in
+                                editingEnd && sameDayEnd && isEndTimeUnitDisabled(
+                                    field: field,
+                                    startTime: startTime,
+                                    endTime: endTime,
+                                    unitIndex: index,
+                                    candidate: number
+                                )
+                            }
                         ) { picked in
                             if editingEnd {
                                 updateEndTime(unitIndex: index, picked: picked)
                             } else {
-                                var updated = range.startTime
+                                var updated = startTime
                                 if updated.indices.contains(index) {
                                     updated[index] = picked
                                     updateStart(time: updated)
@@ -1022,7 +1047,7 @@ private struct ChatFormDateRangeField: View {
 
     private var pickerID: String { "chat-form-picker-" + field.id }
     private var isPickerOpen: Bool { pickerOverlay?.isOpen(pickerID) == true }
-    private var displayValue: String { value.isEmpty ? field.initialDateRange() : value }
+    private var displayValue: String { field.displayRangeValue(value) }
 
     var body: some View {
         ChatFormPickerTrigger(
@@ -1051,7 +1076,7 @@ private struct ChatFormDateRangeField: View {
             preferredSize: ChatFormDateRangePopover.preferredSize,
             trigger: {
                 AnyView(ChatFormPickerTriggerContent(
-                    text: value.isEmpty ? field.initialDateRange() : value,
+                    text: field.displayRangeValue(value),
                     active: active,
                     highlighted: true
                 ) {
@@ -1075,9 +1100,12 @@ struct ChatFormDateRangePopover: View {
 
     static let preferredSize = CGSize(width: 276, height: 342)
 
-    private var currentRange: (start: Date, end: Date) {
+    private var currentRange: (start: Date, end: Date?) {
         if let parsed = field.dateRangeComponents(value) {
-            return parsed
+            return (parsed.start, parsed.end)
+        }
+        if let partialStart = field.partialDateRangeStart(value) {
+            return (partialStart, nil)
         }
         let today = Date()
         let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: today) ?? today
@@ -1089,27 +1117,33 @@ struct ChatFormDateRangePopover: View {
         pickerOverlay?.notifyChanged()
     }
 
+    private func clearEnd(start: Date) {
+        value = field.partialDateRangeString(start: start)
+        pickerOverlay?.notifyChanged()
+    }
+
     private func updateStart(_ picked: Date) {
         let current = currentRange
         let calendar = Calendar.current
-        let dayDiff = max(0, calendar.dateComponents([.day], from: calendar.startOfDay(for: current.start), to: calendar.startOfDay(for: current.end)).day ?? 0)
-        let shiftedEnd = calendar.date(byAdding: .day, value: dayDiff, to: picked) ?? picked
-        applyRange(start: picked, end: shiftedEnd)
+        if let existingEnd = current.end,
+           calendar.startOfDay(for: picked) <= calendar.startOfDay(for: existingEnd) {
+            applyRange(start: picked, end: existingEnd)
+        } else {
+            clearEnd(start: picked)
+            editingEnd = true
+        }
     }
 
     private func updateEnd(_ picked: Date) {
         let current = currentRange
         let calendar = Calendar.current
-        if calendar.startOfDay(for: picked) < calendar.startOfDay(for: current.start) {
-            applyRange(start: picked, end: current.start)
-        } else {
-            applyRange(start: current.start, end: picked)
-        }
+        guard calendar.startOfDay(for: picked) >= calendar.startOfDay(for: current.start) else { return }
+        applyRange(start: current.start, end: picked)
     }
 
     private var activeDateBinding: Binding<Date> {
         Binding(
-            get: { editingEnd ? currentRange.end : currentRange.start },
+            get: { editingEnd ? (currentRange.end ?? currentRange.start) : currentRange.start },
             set: { picked in
                 if editingEnd { updateEnd(picked) } else { updateStart(picked) }
             }
@@ -1122,7 +1156,8 @@ struct ChatFormDateRangePopover: View {
         VStack(spacing: 12) {
             ChatFormRangeTabs(
                 startSummary: ChatForm.dateString(range.start),
-                endSummary: ChatForm.dateString(range.end),
+                endSummary: range.end.map { ChatForm.dateString($0) },
+                endPlaceholder: NSLocalizedString("选择结束日期", comment: ""),
                 editingEnd: $editingEnd
             )
 
@@ -1134,7 +1169,9 @@ struct ChatFormDateRangePopover: View {
                 selection: activeDateBinding,
                 monochrome: true,
                 rangeStart: range.start,
-                rangeEnd: range.end
+                rangeEnd: range.end,
+                hasSelection: !editingEnd || range.end != nil,
+                minDate: editingEnd ? range.start : nil
             )
         }
         .padding(14)
@@ -1272,7 +1309,7 @@ private struct ChatFormTimeRangeField: View {
 
     private var pickerID: String { "chat-form-picker-" + field.id }
     private var isPickerOpen: Bool { pickerOverlay?.isOpen(pickerID) == true }
-    private var displayValue: String { value.isEmpty ? field.initialTimeRange() : value }
+    private var displayValue: String { field.displayRangeValue(value) }
 
     var body: some View {
         ChatFormPickerTrigger(
@@ -1301,7 +1338,7 @@ private struct ChatFormTimeRangeField: View {
             preferredSize: ChatFormTimeRangePopover.preferredSize(for: field),
             trigger: {
                 AnyView(ChatFormPickerTriggerContent(
-                    text: value.isEmpty ? field.initialTimeRange() : value,
+                    text: field.displayRangeValue(value),
                     active: active,
                     highlighted: true
                 ) {
@@ -1332,12 +1369,18 @@ struct ChatFormTimeRangePopover: View {
         return CGSize(width: width, height: 286)
     }
 
-    private var currentRange: (start: [Int], end: [Int]) {
+    private var currentRange: (start: [Int], end: [Int]?) {
         if let parsed = field.timeRangeComponents(value) {
-            return parsed
+            return (parsed.start, parsed.end)
+        }
+        if let partialStart = field.partialTimeRangeStart(value) {
+            return (partialStart, nil)
         }
         let fallback = field.initialTimeRange()
-        return field.timeRangeComponents(fallback) ?? (field.initialTemporalValues(), field.initialTemporalValues())
+        if let parsed = field.timeRangeComponents(fallback) {
+            return (parsed.start, parsed.end)
+        }
+        return (field.initialTemporalValues(), nil)
     }
 
     private func applyRange(start: [Int], end: [Int]) {
@@ -1345,43 +1388,40 @@ struct ChatFormTimeRangePopover: View {
         pickerOverlay?.notifyChanged()
     }
 
-    private func clampToTimeComponents(totalSeconds: Int) -> [Int] {
-        let maxSec = 23 * 3600 + 59 * 60 + 59
-        let clamped = min(max(0, totalSeconds), maxSec)
-        let h = clamped / 3600
-        let m = (clamped % 3600) / 60
-        let s = clamped % 60
-        return field.timeUnits.map { unit in
-            switch unit {
-            case .hour: h
-            case .minute: m
-            case .second: s
-            }
-        }
+    private func clearEnd(start: [Int]) {
+        value = field.partialTimeRangeString(start: start)
+        pickerOverlay?.notifyChanged()
     }
 
     private func updateStart(unitIndex: Int, picked: Int) {
         let current = currentRange
         var start = current.start
         guard start.indices.contains(unitIndex) else { return }
-        let oldDuration = max(field.temporalRank(current.end) - field.temporalRank(current.start), 3600)
         start[unitIndex] = picked
-        let newStartRank = field.temporalRank(start)
-        var end = clampToTimeComponents(totalSeconds: newStartRank + oldDuration)
-        if field.temporalRank(end) <= newStartRank {
-            end = field.timeUnits.enumerated().map { field.maximum(at: $0.offset) }
-        }
-        if field.temporalRank(end) > newStartRank {
-            applyRange(start: start, end: end)
+        if let existingEnd = current.end,
+           field.temporalRank(existingEnd) > field.temporalRank(start) {
+            applyRange(start: start, end: existingEnd)
+        } else {
+            clearEnd(start: start)
         }
     }
 
     private func updateEnd(unitIndex: Int, picked: Int) {
         let current = currentRange
-        var end = current.end
-        guard end.indices.contains(unitIndex) else { return }
-        let oldDuration = max(field.temporalRank(current.end) - field.temporalRank(current.start), 3600)
-        end[unitIndex] = picked
+        var end: [Int]
+        if let existingEnd = current.end, existingEnd.indices.contains(unitIndex) {
+            end = existingEnd
+            end[unitIndex] = picked
+        } else {
+            end = current.start
+            guard end.indices.contains(unitIndex) else { return }
+            end[unitIndex] = picked
+            if unitIndex + 1 < end.count {
+                for lower in (unitIndex + 1)..<end.count {
+                    end[lower] = 0
+                }
+            }
+        }
 
         let startRank = field.temporalRank(current.start)
         let endRank = field.temporalRank(end)
@@ -1400,23 +1440,20 @@ struct ChatFormTimeRangePopover: View {
             applyRange(start: current.start, end: adjusted)
             return
         }
-
-        let shiftedStart = clampToTimeComponents(totalSeconds: endRank - oldDuration)
-        if field.temporalRank(end) > field.temporalRank(shiftedStart) {
-            applyRange(start: shiftedStart, end: end)
-        }
     }
 
     var body: some View {
         let _ = pickerOverlay?.revision
         let range = currentRange
-        let rawActive = editingEnd ? range.end : range.start
-        let activeValues = rawActive.count == field.timeUnits.count ? rawActive : field.initialTemporalValues()
+        let startValues = range.start.count == field.timeUnits.count ? range.start : field.initialTemporalValues()
+        let endValues = range.end.flatMap { $0.count == field.timeUnits.count ? $0 : nil }
+        let activeValues: [Int]? = editingEnd ? endValues : startValues
 
         VStack(spacing: 12) {
             ChatFormRangeTabs(
-                startSummary: field.temporalString(range.start),
-                endSummary: field.temporalString(range.end),
+                startSummary: field.temporalString(startValues),
+                endSummary: endValues.map { field.temporalString($0) },
+                endPlaceholder: NSLocalizedString("选择结束时间", comment: ""),
                 editingEnd: $editingEnd
             )
 
@@ -1429,8 +1466,18 @@ struct ChatFormTimeRangePopover: View {
                     ChatFormTimeColumn(
                         unit: unit,
                         range: 0...field.maximum(at: index),
-                        selected: activeValues[index],
-                        columnHeight: 192
+                        selected: activeValues?[index],
+                        initialScrollTarget: startValues[index],
+                        columnHeight: 192,
+                        isDisabled: { number in
+                            editingEnd && isEndTimeUnitDisabled(
+                                field: field,
+                                startTime: startValues,
+                                endTime: endValues,
+                                unitIndex: index,
+                                candidate: number
+                            )
+                        }
                     ) { picked in
                         if editingEnd {
                             updateEnd(unitIndex: index, picked: picked)
@@ -1447,11 +1494,33 @@ struct ChatFormTimeRangePopover: View {
     }
 }
 
+private func isEndTimeUnitDisabled(
+    field: ChatForm.Field,
+    startTime: [Int],
+    endTime: [Int]?,
+    unitIndex: Int,
+    candidate: Int
+) -> Bool {
+    let currentEnd = endTime ?? startTime
+    guard startTime.count == field.timeUnits.count,
+          currentEnd.count == field.timeUnits.count,
+          startTime.indices.contains(unitIndex) else { return false }
+    var bestPossible = currentEnd
+    bestPossible[unitIndex] = candidate
+    if unitIndex + 1 < bestPossible.count {
+        for lower in (unitIndex + 1)..<bestPossible.count {
+            bestPossible[lower] = field.maximum(at: lower)
+        }
+    }
+    return field.temporalRank(bestPossible) <= field.temporalRank(startTime)
+}
+
 // MARK: - Range Start / End Switcher Header
 
 private struct ChatFormRangeTabs: View {
     let startSummary: String
-    let endSummary: String
+    let endSummary: String?
+    var endPlaceholder: String = NSLocalizedString("选择结束时间", comment: "")
     @Binding var editingEnd: Bool
     @Environment(\.colorScheme) private var scheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -1461,6 +1530,7 @@ private struct ChatFormRangeTabs: View {
             ChatFormRangeTabPill(
                 accessibilityRole: NSLocalizedString("开始", comment: ""),
                 value: startSummary,
+                isPlaceholder: false,
                 active: !editingEnd,
                 identifier: "chat-form-range-start"
             ) {
@@ -1478,7 +1548,8 @@ private struct ChatFormRangeTabs: View {
 
             ChatFormRangeTabPill(
                 accessibilityRole: NSLocalizedString("结束", comment: ""),
-                value: endSummary,
+                value: endSummary ?? endPlaceholder,
+                isPlaceholder: endSummary == nil,
                 active: editingEnd,
                 identifier: "chat-form-range-end"
             ) {
@@ -1495,6 +1566,7 @@ private struct ChatFormRangeTabs: View {
 private struct ChatFormRangeTabPill: View {
     let accessibilityRole: String
     let value: String
+    var isPlaceholder: Bool = false
     let active: Bool
     let identifier: String
     let action: () -> Void
@@ -1517,18 +1589,25 @@ private struct ChatFormRangeTabPill: View {
         return .clear
     }
 
+    private var textColor: Color {
+        if isPlaceholder {
+            return active
+                ? ThemeColor.kTextSubtle.color(for: scheme)
+                : ThemeColor.kTextSubtlest.color(for: scheme)
+        }
+        return active
+            ? ThemeColor.kText.color(for: scheme)
+            : ThemeColor.kTextSubtle.color(for: scheme)
+    }
+
     var body: some View {
         Button(action: action) {
             Text(value)
-                .font(.system(size: 13, weight: active ? .semibold : .regular))
+                .font(.system(size: 13, weight: active && !isPlaceholder ? .semibold : .regular))
                 .monospacedDigit()
                 .lineLimit(1)
                 .minimumScaleFactor(0.85)
-                .foregroundStyle(
-                    active
-                        ? ThemeColor.kText.color(for: scheme)
-                        : ThemeColor.kTextSubtle.color(for: scheme)
-                )
+                .foregroundStyle(textColor)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 7)
                 .frame(maxWidth: .infinity, alignment: .center)
@@ -1553,8 +1632,10 @@ private struct ChatFormRangeTabPill: View {
 private struct ChatFormTimeColumn: View {
     let unit: ChatForm.TimeUnit
     let range: ClosedRange<Int>
-    let selected: Int
+    let selected: Int?
+    var initialScrollTarget: Int? = nil
     var columnHeight: CGFloat = 184
+    var isDisabled: (Int) -> Bool = { _ in false }
     let onSelect: (Int) -> Void
 
     @Environment(\.colorScheme) private var scheme
@@ -1571,10 +1652,13 @@ private struct ChatFormTimeColumn: View {
                 ScrollView(.vertical) {
                     LazyVStack(spacing: 2) {
                         ForEach(Array(range), id: \.self) { number in
+                            let disabled = isDisabled(number)
                             ChatFormTimeCell(
                                 text: String(format: "%02d", number),
-                                selected: number == selected
+                                selected: number == selected,
+                                disabled: disabled
                             ) {
+                                guard !disabled else { return }
                                 onSelect(number)
                                 if reduceMotion {
                                     proxy.scrollTo(number, anchor: .center)
@@ -1608,9 +1692,12 @@ private struct ChatFormTimeColumn: View {
                 )
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 .onAppear {
-                    proxy.scrollTo(selected, anchor: .center)
+                    if let target = selected ?? initialScrollTarget {
+                        proxy.scrollTo(target, anchor: .center)
+                    }
                 }
                 .onChange(of: selected) { _, target in
+                    guard let target else { return }
                     if reduceMotion {
                         proxy.scrollTo(target, anchor: .center)
                     } else {
@@ -1628,6 +1715,7 @@ private struct ChatFormTimeColumn: View {
 private struct ChatFormTimeCell: View {
     let text: String
     let selected: Bool
+    var disabled: Bool = false
     let action: () -> Void
     @State private var hovered = false
     @Environment(\.colorScheme) private var scheme
@@ -1637,22 +1725,27 @@ private struct ChatFormTimeCell: View {
         RoundedRectangle(cornerRadius: 7, style: .continuous)
     }
 
+    private var foreground: Color {
+        if disabled {
+            return ThemeColor("textDisabled").color(for: scheme)
+        }
+        return selected || hovered
+            ? ThemeColor.kText.color(for: scheme)
+            : ThemeColor.kTextSubtle.color(for: scheme)
+    }
+
     var body: some View {
         Button(action: action) {
             Text(text)
                 .font(.system(size: 13.5, weight: selected ? .semibold : .regular))
                 .monospacedDigit()
-                .foregroundStyle(
-                    selected || hovered
-                        ? ThemeColor.kText.color(for: scheme)
-                        : ThemeColor.kTextSubtle.color(for: scheme)
-                )
+                .foregroundStyle(foreground)
                 .frame(maxWidth: .infinity)
                 .frame(height: 30)
                 .background(
                     selected
                         ? ChatFormPalette.selectedFill(scheme)
-                        : hovered ? ThemeColor.kInteractionHover.color(for: scheme) : .clear,
+                        : (!disabled && hovered) ? ThemeColor.kInteractionHover.color(for: scheme) : .clear,
                     in: shape
                 )
                 .overlay {
@@ -1664,7 +1757,8 @@ private struct ChatFormTimeCell: View {
                 .contentShape(shape)
         }
         .buttonStyle(.plain)
-        .onHover { hovered = $0 }
+        .disabled(disabled)
+        .onHover { hovered = !disabled && $0 }
         .padding(.horizontal, 3)
         .accessibilityAddTraits(selected ? [.isSelected] : [])
     }

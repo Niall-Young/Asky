@@ -1073,6 +1073,9 @@
 "选择日期与时间" = "Choose date and time";
 "选择时间段" = "Choose time range";
 "选择日期范围" = "Choose date range";
+"选择结束时间" = "Choose end time";
+"选择结束日期" = "Choose end date";
+"请选择结束时间" = "Please choose an end time";
 "归零" = "Reset";
 "今天" = "Today";
 "完成" = "Done";

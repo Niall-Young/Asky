@@ -167,6 +167,14 @@ struct ChatForm: Equatable {
             }
             return "\(startDay) \(temporalString(startTime))\(ChatForm.rangeSeparator)\(endDay) \(temporalString(endTime))"
         }
+        func partialDateTimeRangeString(startDate: Date, startTime: [Int]) -> String {
+            "\(dateTimeString(date: startDate, time: startTime))\(ChatForm.rangeSeparator)"
+        }
+        func partialDateTimeRangeStart(_ value: String) -> (startDate: Date, startTime: [Int])? {
+            guard let left = ChatForm.partialRangeStart(value),
+                  let start = dateTimeComponents(left) else { return nil }
+            return (start.date, start.time)
+        }
         /// Strict validation for `datetime_range` (canonical `yyyy-MM-dd HH:mm – HH:mm` or `yyyy-MM-dd HH:mm – yyyy-MM-dd HH:mm`).
         func dateTimeRangeComponents(_ value: String) -> (startDate: Date, startTime: [Int], endDate: Date, endTime: [Int])? {
             guard let (left, right) = ChatForm.splitRangeParts(value, allowUnspacedHyphen: false),
@@ -221,6 +229,13 @@ struct ChatForm: Equatable {
         func dateRangeString(start: Date, end: Date) -> String {
             "\(ChatForm.dateString(start))\(ChatForm.rangeSeparator)\(ChatForm.dateString(end))"
         }
+        func partialDateRangeString(start: Date) -> String {
+            "\(ChatForm.dateString(start))\(ChatForm.rangeSeparator)"
+        }
+        func partialDateRangeStart(_ value: String) -> Date? {
+            guard let left = ChatForm.partialRangeStart(value) else { return nil }
+            return ChatForm.date(left)
+        }
         func dateRangeComponents(_ value: String) -> (start: Date, end: Date)? {
             guard let (left, right) = ChatForm.splitRangeParts(value, allowUnspacedHyphen: false),
                   let start = ChatForm.date(left),
@@ -241,6 +256,37 @@ struct ChatForm: Equatable {
         }
         func timeRangeString(start: [Int], end: [Int]) -> String {
             "\(temporalString(start))\(ChatForm.rangeSeparator)\(temporalString(end))"
+        }
+        func partialTimeRangeString(start: [Int]) -> String {
+            "\(temporalString(start))\(ChatForm.rangeSeparator)"
+        }
+        func partialTimeRangeStart(_ value: String) -> [Int]? {
+            guard let left = ChatForm.partialRangeStart(value) else { return nil }
+            return temporalValues(left)
+        }
+        func displayRangeValue(_ value: String) -> String {
+            switch type {
+            case .datetimeRange:
+                if value.isEmpty { return initialDateTimeRange() }
+                if partialDateTimeRangeStart(value) != nil {
+                    return value + NSLocalizedString("选择结束时间", comment: "")
+                }
+                return value
+            case .dateRange:
+                if value.isEmpty { return initialDateRange() }
+                if partialDateRangeStart(value) != nil {
+                    return value + NSLocalizedString("选择结束日期", comment: "")
+                }
+                return value
+            case .timeRange:
+                if value.isEmpty { return initialTimeRange() }
+                if partialTimeRangeStart(value) != nil {
+                    return value + NSLocalizedString("选择结束时间", comment: "")
+                }
+                return value
+            default:
+                return value
+            }
         }
         func timeRangeComponents(_ value: String) -> (start: [Int], end: [Int])? {
             guard let (left, right) = ChatForm.splitRangeParts(value, allowUnspacedHyphen: true),
@@ -407,6 +453,13 @@ struct ChatForm: Equatable {
         return fields.map { field in
             "\(field.label)：\(field.describedAnswer(values[field.id] ?? []))"
         }.joined(separator: "\n")
+    }
+
+    static func partialRangeStart(_ raw: String) -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasSuffix("–") else { return nil }
+        let left = trimmed.dropLast().trimmingCharacters(in: .whitespacesAndNewlines)
+        return left.isEmpty ? nil : left
     }
 
     static func splitRangeParts(_ raw: String, allowUnspacedHyphen: Bool) -> (String, String)? {

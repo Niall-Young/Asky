@@ -2226,6 +2226,19 @@ enum AgentReplyRegression {
                     precondition(hasOverlay(in: window.contentView!), "Clicking range trigger must open morphing glass overlay")
                     if schemeName == "dark" {
                         let content = window.contentView!
+                        // Picking a start time >= existing end (14:00 – 15:00 -> start 16:00) must accept start and clear end.
+                        let startHour16 = findMarker("chat-form-unit-hour-16", in: content)
+                        clickView(startHour16, in: window)
+                        try await Task.sleep(for: .milliseconds(100))
+                        precondition(model.formValues[messageID]?["slot"] == ["2026-11-26 16:00 – "],
+                                     "Selecting start >= end must update start and clear end")
+                        precondition(!ChatFormParser.form(in: model.items.last!.text)!.accepts(model.formValues[messageID]!),
+                                     "Cleared end must block form submission until re-selected")
+                        let startHour14 = findMarker("chat-form-unit-hour-14", in: content)
+                        clickView(startHour14, in: window)
+                        try await Task.sleep(for: .milliseconds(100))
+                        precondition(model.formValues[messageID]?["slot"] == ["2026-11-26 14:00 – "],
+                                     "Adjusting start while end is cleared must keep end cleared")
                         let endTab = findMarker("chat-form-range-end", in: content)
                         clickView(endTab, in: window)
                         try await Task.sleep(for: .milliseconds(100))

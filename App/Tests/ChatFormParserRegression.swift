@@ -132,6 +132,22 @@ enum ChatFormParserRegression {
         precondition(rangeForm.accepts(["slot": ["2026-11-26 19:00 – 20:00"], "trip": ["2026-11-26 – 2026-11-26"]]))
         precondition(!rangeForm.accepts(["slot": ["2026-11-26 19:00 – 20:00"], "trip": ["2026-11-28 – 2026-11-26"]]))
         precondition(!rangeForm.accepts(["slot": ["2026-11-26 19:00 – 20:00"], "dnd": ["18:00 – 09:00"]]))
+        // Partial ranges (start selected, end cleared awaiting re-selection) must parse start and block submission.
+        let partialDateTime = slotField.partialDateTimeRangeString(startDate: parsedRange1.startDate, startTime: [11, 0])
+        precondition(partialDateTime == "2026-11-26 11:00 – ")
+        precondition(!rangeForm.accepts(["slot": [partialDateTime]]))
+        let parsedPartialDT = slotField.partialDateTimeRangeStart(partialDateTime)!
+        precondition(ChatForm.dateString(parsedPartialDT.startDate) == "2026-11-26" && parsedPartialDT.startTime == [11, 0])
+        let tripField = rangeForm.fields[1]
+        let partialDate = tripField.partialDateRangeString(start: parsedRange1.startDate)
+        precondition(partialDate == "2026-11-26 – ")
+        precondition(!rangeForm.accepts(["slot": ["2026-11-26 19:00 – 20:00"], "trip": [partialDate]]))
+        precondition(tripField.partialDateRangeStart(partialDate).map(ChatForm.dateString) == "2026-11-26")
+        let dndField = rangeForm.fields[2]
+        let partialTime = dndField.partialTimeRangeString(start: [11, 0])
+        precondition(partialTime == "11:00 – ")
+        precondition(!rangeForm.accepts(["slot": ["2026-11-26 19:00 – 20:00"], "dnd": [partialTime]]))
+        precondition(dndField.partialTimeRangeStart(partialTime) == [11, 0])
         let aliasForm = ChatFormParser.form(in: "```asky-form\n{\"title\":\"别名\"}\n{\"id\":\"a\",\"type\":\"datetime-range\",\"label\":\"A\"}\n{\"id\":\"b\",\"type\":\"date-range\",\"label\":\"B\"}\n{\"id\":\"c\",\"type\":\"timerange\",\"label\":\"C\"}\n```")!
         precondition(aliasForm.fields.map(\.type) == [.datetimeRange, .dateRange, .timeRange])
         // Auto-coalesce split start/end fields into unified range pickers.

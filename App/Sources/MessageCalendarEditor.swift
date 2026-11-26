@@ -411,6 +411,7 @@ struct MessageCalendarEditorView: View {
     }
     private var timeRangeError: String? {
         if model.isStartInPast { return NSLocalizedString("须晚于当前时间", comment: "") }
+        if model.end == model.start { return NSLocalizedString("请选择结束时间", comment: "") }
         if model.isEndBeforeStart { return NSLocalizedString("须晚于开始时间", comment: "") }
         return nil
     }
@@ -658,12 +659,16 @@ private struct CalendarEditorDateTimeRangeField: View {
     }
 
     private static func formattedRange(start: Date, end: Date) -> String {
-        rangeField.dateTimeRangeString(
-            startDate: start,
-            startTime: timeComponents(start),
-            endDate: end,
-            endTime: timeComponents(end)
-        )
+        if end > start {
+            return rangeField.dateTimeRangeString(
+                startDate: start,
+                startTime: timeComponents(start),
+                endDate: end,
+                endTime: timeComponents(end)
+            )
+        }
+        let partial = rangeField.partialDateTimeRangeString(startDate: start, startTime: timeComponents(start))
+        return rangeField.displayRangeValue(partial)
     }
 
     private var formattedValue: String { Self.formattedRange(start: start, end: end) }
@@ -672,16 +677,32 @@ private struct CalendarEditorDateTimeRangeField: View {
     private func popoverValueBinding(overlay: FormPickerOverlayController?) -> Binding<String> {
         Binding(
             get: {
-                let effectiveEnd = end > start ? end : start.addingTimeInterval(3600)
-                return Self.formattedRange(start: start, end: effectiveEnd)
+                if end > start {
+                    return Self.rangeField.dateTimeRangeString(
+                        startDate: start,
+                        startTime: Self.timeComponents(start),
+                        endDate: end,
+                        endTime: Self.timeComponents(end)
+                    )
+                }
+                return Self.rangeField.partialDateTimeRangeString(
+                    startDate: start,
+                    startTime: Self.timeComponents(start)
+                )
             },
             set: { newValue in
-                guard let parsed = Self.rangeField.dateTimeRangeComponents(newValue),
-                      let newStart = Self.rangeField.combinedInstant(date: parsed.startDate, time: parsed.startTime),
-                      let newEnd = Self.rangeField.combinedInstant(date: parsed.endDate, time: parsed.endTime) else { return }
-                start = newStart
-                end = newEnd
-                overlay?.notifyChanged()
+                if let parsed = Self.rangeField.dateTimeRangeComponents(newValue),
+                   let newStart = Self.rangeField.combinedInstant(date: parsed.startDate, time: parsed.startTime),
+                   let newEnd = Self.rangeField.combinedInstant(date: parsed.endDate, time: parsed.endTime) {
+                    start = newStart
+                    end = newEnd
+                    overlay?.notifyChanged()
+                } else if let partial = Self.rangeField.partialDateTimeRangeStart(newValue),
+                          let newStart = Self.rangeField.combinedInstant(date: partial.startDate, time: partial.startTime) {
+                    start = newStart
+                    end = newStart
+                    overlay?.notifyChanged()
+                }
             }
         )
     }

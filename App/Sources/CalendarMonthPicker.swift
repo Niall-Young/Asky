@@ -7,16 +7,27 @@ struct CalendarMonthPicker: View {
     var monochrome = false
     var rangeStart: Date? = nil
     var rangeEnd: Date? = nil
+    var hasSelection = true
+    var minDate: Date? = nil
     @State private var displayedMonth: Date
     @Environment(\.colorScheme) private var scheme
     private let calendar = Calendar.current
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 4), count: 7)
 
-    init(selection: Binding<Date>, monochrome: Bool = false, rangeStart: Date? = nil, rangeEnd: Date? = nil) {
+    init(
+        selection: Binding<Date>,
+        monochrome: Bool = false,
+        rangeStart: Date? = nil,
+        rangeEnd: Date? = nil,
+        hasSelection: Bool = true,
+        minDate: Date? = nil
+    ) {
         _selection = selection
         self.monochrome = monochrome
         self.rangeStart = rangeStart
         self.rangeEnd = rangeEnd
+        self.hasSelection = hasSelection
+        self.minDate = minDate
         _displayedMonth = State(initialValue: selection.wrappedValue)
     }
 
@@ -53,10 +64,17 @@ struct CalendarMonthPicker: View {
                 }
                 ForEach(days, id: \.self) { day in
                     let dayStart = calendar.startOfDay(for: day)
-                    let selected = calendar.isDate(day, inSameDayAs: selection)
+                    let minDay = minDate.map { calendar.startOfDay(for: $0) }
+                    let isDisabled = minDay.map { dayStart < $0 } ?? false
+                    let selected = hasSelection && calendar.isDate(day, inSameDayAs: selection)
                     let isRangeEndpoint: Bool = {
-                        guard let rangeDays, rangeDays.start != rangeDays.end else { return false }
-                        return !selected && (dayStart == rangeDays.start || dayStart == rangeDays.end)
+                        if let rangeDays, rangeDays.start != rangeDays.end {
+                            return !selected && (dayStart == rangeDays.start || dayStart == rangeDays.end)
+                        }
+                        if let rangeStart, rangeEnd == nil {
+                            return !selected && dayStart == calendar.startOfDay(for: rangeStart)
+                        }
+                        return false
                     }()
                     let isInRange: Bool = {
                         guard let rangeDays, rangeDays.start != rangeDays.end else { return false }
@@ -71,8 +89,10 @@ struct CalendarMonthPicker: View {
                         isInRange: isInRange,
                         isToday: isToday,
                         currentMonth: currentMonth,
+                        disabled: isDisabled,
                         monochrome: monochrome
                     ) {
+                        guard !isDisabled else { return }
                         if let date = Self.selecting(day, preservingTimeFrom: selection, calendar: calendar) {
                             selection = date
                         }
@@ -114,6 +134,7 @@ private struct CalendarDayCell: View {
     let isInRange: Bool
     let isToday: Bool
     let currentMonth: Bool
+    var disabled: Bool = false
     let monochrome: Bool
     let action: () -> Void
     @State private var hovered = false
@@ -121,6 +142,9 @@ private struct CalendarDayCell: View {
     @Environment(\.colorSchemeContrast) private var contrast
 
     private var foreground: Color {
+        if disabled {
+            return monochrome ? ThemeColor("textDisabled").color(for: scheme) : Color.secondary.opacity(0.35)
+        }
         if selected {
             return monochrome ? ThemeColor.kText.color(for: scheme) : .white
         }
@@ -137,6 +161,7 @@ private struct CalendarDayCell: View {
     }
 
     private var circleFill: Color {
+        if disabled { return .clear }
         if selected {
             return monochrome ? ChatFormPalette.selectedFill(scheme) : Color.accentColor
         }
@@ -183,7 +208,8 @@ private struct CalendarDayCell: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .onHover { hovered = $0 }
+        .disabled(disabled)
+        .onHover { hovered = !disabled && $0 }
     }
 }
 
