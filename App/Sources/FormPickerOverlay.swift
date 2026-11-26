@@ -20,6 +20,31 @@ enum FormPickerMorphMotion {
     }
 }
 
+/// Observable live value box for morphing picker overlays.
+/// Overlay content/trigger closures escape their originating View struct, so capturing a SwiftUI
+/// `@Binding` directly can read a stale transaction snapshot while open. Routing reads and writes
+/// through this box keeps both the open popover and the parent binding synchronously up to date.
+@MainActor @Observable
+final class FormPickerValueBox<Value> {
+    var value: Value
+    @ObservationIgnored private let write: (Value) -> Void
+
+    init(initial: Value, write: @escaping (Value) -> Void) {
+        self.value = initial
+        self.write = write
+    }
+
+    var binding: Binding<Value> {
+        Binding(
+            get: { self.value },
+            set: { [self] newValue in
+                self.value = newValue
+                self.write(newValue)
+            }
+        )
+    }
+}
+
 /// Coordinates in-window Liquid Glass date/time pickers that morph in-place
 /// between their input-styled trigger button and the expanded glass picker surface.
 @MainActor @Observable

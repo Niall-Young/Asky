@@ -2235,10 +2235,18 @@ enum AgentReplyRegression {
                         precondition(!ChatFormParser.form(in: model.items.last!.text)!.accepts(model.formValues[messageID]!),
                                      "Cleared end must block form submission until re-selected")
                         // Selecting an off-screen hour (20) after real scrollWheel scrolling must work reliably.
+                        try await Task.sleep(for: .milliseconds(120))
                         let startHour20 = findMarker("chat-form-unit-hour-20", in: content)
                         if let hourScroll = startHour20.enclosingScrollView {
-                            for _ in 0..<8 {
-                                if let cg = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: -24, wheel2: 0, wheel3: 0) {
+                            let initialOrigin = hourScroll.contentView.bounds.origin.y
+                            let probe = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: -24, wheel2: 0, wheel3: 0)!
+                            probe.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
+                            hourScroll.scrollWheel(with: NSEvent(cgEvent: probe)!)
+                            let delta: Int32 = hourScroll.contentView.bounds.origin.y >= initialOrigin ? -24 : 24
+                            for _ in 0..<12 {
+                                let rectInClip = hourScroll.contentView.convert(startHour20.bounds, from: startHour20)
+                                if hourScroll.contentView.bounds.insetBy(dx: 0, dy: 20).contains(rectInClip) { break }
+                                if let cg = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: delta, wheel2: 0, wheel3: 0) {
                                     cg.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
                                     if let ns = NSEvent(cgEvent: cg) {
                                         hourScroll.scrollWheel(with: ns)
@@ -2246,6 +2254,9 @@ enum AgentReplyRegression {
                                 }
                             }
                             try await Task.sleep(for: .milliseconds(80))
+                            let visibleClip = hourScroll.contentView.convert(startHour20.bounds, from: startHour20)
+                            precondition(hourScroll.contentView.bounds.intersects(visibleClip),
+                                         "scrollWheel must bring hour 20 into visible viewport")
                         }
                         let hour20Rect = startHour20.convert(startHour20.bounds, to: nil)
                         let hour20Point = NSPoint(x: hour20Rect.midX, y: hour20Rect.midY)
@@ -2258,11 +2269,15 @@ enum AgentReplyRegression {
                         try await Task.sleep(for: .milliseconds(120))
                         precondition(model.formValues[messageID]?["slot"] == ["2026-11-26 20:00 – "],
                                      "Selecting scrolled hour 20 via real scrollWheel + click must update start")
+                        precondition(startHour20.isAccessibilitySelected(),
+                                     "Open picker UI must immediately reflect selected hour 20 without closing")
                         let startHour14 = findMarker("chat-form-unit-hour-14", in: content)
                         clickView(startHour14, in: window)
                         try await Task.sleep(for: .milliseconds(120))
                         precondition(model.formValues[messageID]?["slot"] == ["2026-11-26 14:00 – "],
                                      "Adjusting start while end is cleared must keep end cleared")
+                        precondition(startHour14.isAccessibilitySelected(),
+                                     "Open picker UI must immediately reflect selected hour 14 without closing")
                         let endTab = findMarker("chat-form-range-end", in: content)
                         clickView(endTab, in: window)
                         try await Task.sleep(for: .milliseconds(100))
@@ -2277,6 +2292,8 @@ enum AgentReplyRegression {
                         try await Task.sleep(for: .milliseconds(120))
                         precondition(model.formValues[messageID]?["slot"] == ["2026-11-26 14:00 – 2026-11-28 16:05"],
                                      "Range overlay must update end date and time live across days")
+                        precondition(hour16.isAccessibilitySelected() && minute05.isAccessibilitySelected(),
+                                     "Open range overlay must immediately highlight selected end hour 16 and minute 05")
                     }
                     try await captureWindowGlass("build/form-range-popover-\(schemeName).png")
                     try capture("range-bitmap-\(schemeName)")

@@ -557,25 +557,27 @@ private struct ChatFormDateTimeField: View {
     private var isPickerOpen: Bool { pickerOverlay?.isOpen(pickerID) == true }
     private var displayValue: String { value.isEmpty ? field.initialDateTime() : value }
 
-    private var currentComponents: (date: Date, time: [Int]) {
-        field.dateTimeComponents(value) ?? (Date(), field.initialTemporalValues())
-    }
-
-    private func dateBinding(overlay: FormPickerOverlayController?) -> Binding<Date> {
+    private func dateBinding(box: FormPickerValueBox<String>, overlay: FormPickerOverlayController?) -> Binding<Date> {
         Binding(
-            get: { currentComponents.date },
+            get: {
+                (field.dateTimeComponents(box.value) ?? (Date(), field.initialTemporalValues())).date
+            },
             set: { newDate in
-                value = field.dateTimeString(date: newDate, time: currentComponents.time)
+                let time = (field.dateTimeComponents(box.value) ?? (Date(), field.initialTemporalValues())).time
+                box.binding.wrappedValue = field.dateTimeString(date: newDate, time: time)
                 overlay?.notifyChanged()
             }
         )
     }
 
-    private func timeBinding(overlay: FormPickerOverlayController?) -> Binding<[Int]> {
+    private func timeBinding(box: FormPickerValueBox<String>, overlay: FormPickerOverlayController?) -> Binding<[Int]> {
         Binding(
-            get: { currentComponents.time },
+            get: {
+                (field.dateTimeComponents(box.value) ?? (Date(), field.initialTemporalValues())).time
+            },
             set: { newTime in
-                value = field.dateTimeString(date: currentComponents.date, time: newTime)
+                let date = (field.dateTimeComponents(box.value) ?? (Date(), field.initialTemporalValues())).date
+                box.binding.wrappedValue = field.dateTimeString(date: date, time: newTime)
                 overlay?.notifyChanged()
             }
         )
@@ -602,13 +604,15 @@ private struct ChatFormDateTimeField: View {
     private func togglePicker() {
         guard let anchor = anchorBox.swiftUIFrameInWindow() else { return }
         let overlay = pickerOverlay
+        let write = $value
+        let box = FormPickerValueBox(initial: value) { write.wrappedValue = $0 }
         overlay?.toggle(
             id: pickerID,
             anchor: anchor,
             preferredSize: ChatFormDateTimePopover.preferredSize(for: field),
             trigger: {
                 AnyView(ChatFormPickerTriggerContent(
-                    text: value.isEmpty ? field.initialDateTime() : value,
+                    text: box.value.isEmpty ? field.initialDateTime() : box.value,
                     active: active,
                     highlighted: true
                 ) {
@@ -618,8 +622,8 @@ private struct ChatFormDateTimeField: View {
             content: {
                 AnyView(ChatFormDateTimePopover(
                     field: field,
-                    date: dateBinding(overlay: overlay),
-                    timeValues: timeBinding(overlay: overlay)
+                    date: dateBinding(box: box, overlay: overlay),
+                    timeValues: timeBinding(box: box, overlay: overlay)
                 ))
             }
         )
@@ -716,13 +720,15 @@ private struct ChatFormDateTimeRangeField: View {
     private func togglePicker() {
         guard let anchor = anchorBox.swiftUIFrameInWindow() else { return }
         let overlay = pickerOverlay
+        let write = $value
+        let box = FormPickerValueBox(initial: value) { write.wrappedValue = $0 }
         overlay?.toggle(
             id: pickerID,
             anchor: anchor,
             preferredSize: ChatFormDateTimeRangePopover.preferredSize(for: field),
             trigger: {
                 AnyView(ChatFormPickerTriggerContent(
-                    text: field.displayRangeValue(value),
+                    text: field.displayRangeValue(box.value),
                     active: active,
                     highlighted: true
                 ) {
@@ -730,7 +736,7 @@ private struct ChatFormDateTimeRangeField: View {
                 })
             },
             content: {
-                AnyView(ChatFormDateTimeRangePopover(field: field, value: $value))
+                AnyView(ChatFormDateTimeRangePopover(field: field, value: box.binding))
             }
         )
     }
@@ -969,11 +975,11 @@ private struct ChatFormDateField: View {
     private var isPickerOpen: Bool { pickerOverlay?.isOpen(pickerID) == true }
     private var displayValue: String { value.isEmpty ? ChatForm.dateString(Date()) : value }
 
-    private func dateBinding(overlay: FormPickerOverlayController?) -> Binding<Date> {
+    private func dateBinding(box: FormPickerValueBox<String>, overlay: FormPickerOverlayController?) -> Binding<Date> {
         Binding(
-            get: { ChatForm.date(value) ?? Date() },
+            get: { ChatForm.date(box.value) ?? Date() },
             set: { date in
-                value = ChatForm.dateString(date)
+                box.binding.wrappedValue = ChatForm.dateString(date)
                 overlay?.notifyChanged()
             }
         )
@@ -1000,13 +1006,15 @@ private struct ChatFormDateField: View {
     private func togglePicker() {
         guard let anchor = anchorBox.swiftUIFrameInWindow() else { return }
         let overlay = pickerOverlay
+        let write = $value
+        let box = FormPickerValueBox(initial: value) { write.wrappedValue = $0 }
         overlay?.toggle(
             id: pickerID,
             anchor: anchor,
             preferredSize: ChatFormDatePopover.preferredSize,
             trigger: {
                 AnyView(ChatFormPickerTriggerContent(
-                    text: value.isEmpty ? ChatForm.dateString(Date()) : value,
+                    text: box.value.isEmpty ? ChatForm.dateString(Date()) : box.value,
                     active: active,
                     highlighted: true
                 ) {
@@ -1014,7 +1022,7 @@ private struct ChatFormDateField: View {
                 })
             },
             content: {
-                AnyView(ChatFormDatePopover(selection: dateBinding(overlay: overlay)))
+                AnyView(ChatFormDatePopover(selection: dateBinding(box: box, overlay: overlay)))
             }
         )
     }
@@ -1070,13 +1078,15 @@ private struct ChatFormDateRangeField: View {
     private func togglePicker() {
         guard let anchor = anchorBox.swiftUIFrameInWindow() else { return }
         let overlay = pickerOverlay
+        let write = $value
+        let box = FormPickerValueBox(initial: value) { write.wrappedValue = $0 }
         overlay?.toggle(
             id: pickerID,
             anchor: anchor,
             preferredSize: ChatFormDateRangePopover.preferredSize,
             trigger: {
                 AnyView(ChatFormPickerTriggerContent(
-                    text: field.displayRangeValue(value),
+                    text: field.displayRangeValue(box.value),
                     active: active,
                     highlighted: true
                 ) {
@@ -1084,7 +1094,7 @@ private struct ChatFormDateRangeField: View {
                 })
             },
             content: {
-                AnyView(ChatFormDateRangePopover(field: field, value: $value))
+                AnyView(ChatFormDateRangePopover(field: field, value: box.binding))
             }
         )
     }
@@ -1203,11 +1213,11 @@ private struct ChatFormTemporalField: View {
         return nil
     }
 
-    private func temporalBinding(overlay: FormPickerOverlayController?) -> Binding<[Int]> {
+    private func temporalBinding(box: FormPickerValueBox<String>, overlay: FormPickerOverlayController?) -> Binding<[Int]> {
         Binding(
-            get: { field.temporalValues(value) ?? field.initialTemporalValues() },
+            get: { field.temporalValues(box.value) ?? field.initialTemporalValues() },
             set: { numbers in
-                value = field.temporalString(numbers)
+                box.binding.wrappedValue = field.temporalString(numbers)
                 overlay?.notifyChanged()
             }
         )
@@ -1236,13 +1246,15 @@ private struct ChatFormTemporalField: View {
         guard let anchor = anchorBox.swiftUIFrameInWindow() else { return }
         let overlay = pickerOverlay
         let suffix = unitSuffix
+        let write = $value
+        let box = FormPickerValueBox(initial: value) { write.wrappedValue = $0 }
         overlay?.toggle(
             id: pickerID,
             anchor: anchor,
             preferredSize: ChatFormTemporalPopover.preferredSize(for: field),
             trigger: {
                 AnyView(ChatFormPickerTriggerContent(
-                    text: value.isEmpty ? field.temporalString(field.initialTemporalValues()) : value,
+                    text: box.value.isEmpty ? field.temporalString(field.initialTemporalValues()) : box.value,
                     unitSuffix: suffix,
                     active: active,
                     highlighted: true
@@ -1251,7 +1263,7 @@ private struct ChatFormTemporalField: View {
                 })
             },
             content: {
-                AnyView(ChatFormTemporalPopover(field: field, values: temporalBinding(overlay: overlay)))
+                AnyView(ChatFormTemporalPopover(field: field, values: temporalBinding(box: box, overlay: overlay)))
             }
         )
     }
@@ -1332,13 +1344,15 @@ private struct ChatFormTimeRangeField: View {
     private func togglePicker() {
         guard let anchor = anchorBox.swiftUIFrameInWindow() else { return }
         let overlay = pickerOverlay
+        let write = $value
+        let box = FormPickerValueBox(initial: value) { write.wrappedValue = $0 }
         overlay?.toggle(
             id: pickerID,
             anchor: anchor,
             preferredSize: ChatFormTimeRangePopover.preferredSize(for: field),
             trigger: {
                 AnyView(ChatFormPickerTriggerContent(
-                    text: field.displayRangeValue(value),
+                    text: field.displayRangeValue(box.value),
                     active: active,
                     highlighted: true
                 ) {
@@ -1346,7 +1360,7 @@ private struct ChatFormTimeRangeField: View {
                 })
             },
             content: {
-                AnyView(ChatFormTimeRangePopover(field: field, value: $value))
+                AnyView(ChatFormTimeRangePopover(field: field, value: box.binding))
             }
         )
     }

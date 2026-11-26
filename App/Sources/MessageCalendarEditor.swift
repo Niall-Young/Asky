@@ -674,36 +674,18 @@ private struct CalendarEditorDateTimeRangeField: View {
     private var formattedValue: String { Self.formattedRange(start: start, end: end) }
     private var isPickerOpen: Bool { pickerOverlay?.isOpen(pickerID) == true }
 
-    private func popoverValueBinding(overlay: FormPickerOverlayController?) -> Binding<String> {
-        Binding(
-            get: {
-                if end > start {
-                    return Self.rangeField.dateTimeRangeString(
-                        startDate: start,
-                        startTime: Self.timeComponents(start),
-                        endDate: end,
-                        endTime: Self.timeComponents(end)
-                    )
-                }
-                return Self.rangeField.partialDateTimeRangeString(
-                    startDate: start,
-                    startTime: Self.timeComponents(start)
-                )
-            },
-            set: { newValue in
-                if let parsed = Self.rangeField.dateTimeRangeComponents(newValue),
-                   let newStart = Self.rangeField.combinedInstant(date: parsed.startDate, time: parsed.startTime),
-                   let newEnd = Self.rangeField.combinedInstant(date: parsed.endDate, time: parsed.endTime) {
-                    start = newStart
-                    end = newEnd
-                    overlay?.notifyChanged()
-                } else if let partial = Self.rangeField.partialDateTimeRangeStart(newValue),
-                          let newStart = Self.rangeField.combinedInstant(date: partial.startDate, time: partial.startTime) {
-                    start = newStart
-                    end = newStart
-                    overlay?.notifyChanged()
-                }
-            }
+    private func encodedRange(start: Date, end: Date) -> String {
+        if end > start {
+            return Self.rangeField.dateTimeRangeString(
+                startDate: start,
+                startTime: Self.timeComponents(start),
+                endDate: end,
+                endTime: Self.timeComponents(end)
+            )
+        }
+        return Self.rangeField.partialDateTimeRangeString(
+            startDate: start,
+            startTime: Self.timeComponents(start)
         )
     }
 
@@ -728,13 +710,29 @@ private struct CalendarEditorDateTimeRangeField: View {
     private func togglePicker() {
         guard let anchor = anchorBox.swiftUIFrameInWindow() else { return }
         let overlay = pickerOverlay
+        let startBinding = $start
+        let endBinding = $end
+        let box = FormPickerValueBox(initial: encodedRange(start: start, end: end)) { newValue in
+            if let parsed = Self.rangeField.dateTimeRangeComponents(newValue),
+               let newStart = Self.rangeField.combinedInstant(date: parsed.startDate, time: parsed.startTime),
+               let newEnd = Self.rangeField.combinedInstant(date: parsed.endDate, time: parsed.endTime) {
+                startBinding.wrappedValue = newStart
+                endBinding.wrappedValue = newEnd
+                overlay?.notifyChanged()
+            } else if let partial = Self.rangeField.partialDateTimeRangeStart(newValue),
+                      let newStart = Self.rangeField.combinedInstant(date: partial.startDate, time: partial.startTime) {
+                startBinding.wrappedValue = newStart
+                endBinding.wrappedValue = newStart
+                overlay?.notifyChanged()
+            }
+        }
         overlay?.toggle(
             id: pickerID,
             anchor: anchor,
             preferredSize: ChatFormDateTimeRangePopover.preferredSize(for: Self.rangeField),
             trigger: {
                 AnyView(ChatFormPickerTriggerContent(
-                    text: Self.formattedRange(start: start, end: end),
+                    text: Self.rangeField.displayRangeValue(box.value),
                     active: active,
                     highlighted: true
                 ) {
@@ -742,7 +740,7 @@ private struct CalendarEditorDateTimeRangeField: View {
                 })
             },
             content: {
-                AnyView(ChatFormDateTimeRangePopover(field: Self.rangeField, value: popoverValueBinding(overlay: overlay)))
+                AnyView(ChatFormDateTimeRangePopover(field: Self.rangeField, value: box.binding))
             }
         )
     }
