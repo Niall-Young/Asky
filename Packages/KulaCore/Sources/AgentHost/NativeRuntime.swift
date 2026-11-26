@@ -221,8 +221,7 @@ private actor NativeAgentEngine {
             var illustrationsFinished = false
             var emittedPreToolNarration = false
             var imageCorrection: String?
-            var calendarListFetched = false
-            var writableCalendars: [NativeCalendarFormGuard.WritableCalendar]?
+            var calendarListState: NativeCalendarFormGuard.CalendarListState = .notFetched
             var calendarFormCorrection: String?
             var calendarListCorrectionSent = false
             var calendarFieldCorrectionSent = false
@@ -289,15 +288,15 @@ private actor NativeAgentEngine {
                     if catalogue.contains(where: { $0.name == "calendar_list_calendars" }),
                        catalogue.contains(where: { $0.name == "calendar_create_event" }),
                        count < limit {
-                        let canCorrect = !calendarListFetched ? !calendarListCorrectionSent : !calendarFieldCorrectionSent
+                        let isUnfetched = (calendarListState == .notFetched)
+                        let canCorrect = isUnfetched ? !calendarListCorrectionSent : !calendarFieldCorrectionSent
                         if canCorrect,
                            let correction = NativeCalendarFormGuard.correction(
                                draft: text,
                                userText: request.text,
-                               calendarListFetched: calendarListFetched,
-                               writableCalendars: writableCalendars
+                               calendarListState: calendarListState
                            ) {
-                            if !calendarListFetched {
+                            if isUnfetched {
                                 calendarListCorrectionSent = true
                             } else {
                                 calendarFieldCorrectionSent = true
@@ -416,8 +415,7 @@ private actor NativeAgentEngine {
                         webCoolingDown = webCoolingDown || NativeWebContext.allSourcesCoolingDown(result)
                     }
                     if name == "calendar_list_calendars" {
-                        calendarListFetched = true
-                        writableCalendars = NativeCalendarFormGuard.writableCalendars(from: result)
+                        calendarListState = NativeCalendarFormGuard.calendarListState(from: result)
                         calendarFormCorrection = nil
                     }
                     messages.append(["role": "tool", "tool_call_id": .string(modelID), "content": .string(String(decoding: result.canonicalData(), as: UTF8.self))])

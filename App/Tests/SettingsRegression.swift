@@ -198,16 +198,40 @@ enum SettingsRegression {
                     precondition(!model.settings.hasCustomAgentInstructions)
                     precondition(model.settings.agentPromptConfiguration == .default)
 
-                    // Legacy settings with old agentSystemPrompt or unknown style ID decode safely to defaults without leaking old prompt.
+                    // Legacy v0.3.9 settings with old agentSystemPrompt preserve the text for manual copy without auto-enabling it.
+                    let legacyPromptText = "旧版虚构自定义提示词：请用简洁要点回复。"
                     var legacy = try JSONSerialization.jsonObject(with: JSONEncoder().encode(model.settings)) as! [String: Any]
-                    legacy["agentSystemPrompt"] = "旧版内置系统提示词"
+                    legacy["agentSystemPrompt"] = legacyPromptText
                     legacy["agentPromptStyleID"] = "unknown-future-style"
                     legacy["clipboardEnabled"] = false
-                    let decodedLegacy = try JSONDecoder().decode(AppSettings.self, from: JSONSerialization.data(withJSONObject: legacy))
+                    let legacyData = try JSONSerialization.data(withJSONObject: legacy)
+                    let decodedLegacy = try JSONDecoder().decode(AppSettings.self, from: legacyData)
                     precondition(decodedLegacy.agentPromptStyle == .friendly)
                     precondition(decodedLegacy.agentCustomInstructions == nil)
                     precondition(!decodedLegacy.hasCustomAgentInstructions)
+                    precondition(decodedLegacy.agentPromptConfiguration == .default)
+                    precondition(decodedLegacy.preservedLegacySystemPrompt == legacyPromptText)
                     precondition(!decodedLegacy.clipboardEnabled)
+
+                    // Simulate upgrade: save v0.3.9 JSON, reload, modify an unrelated setting, and confirm legacy text survives.
+                    let upgradeRoot = FileManager.default.temporaryDirectory.appending(path: "asky-legacy-upgrade-\(UUID().uuidString)")
+                    defer { try? FileManager.default.removeItem(at: upgradeRoot) }
+                    do {
+                        let legacyStore = try LocalStore(root: upgradeRoot)
+                        legacyStore.setSetting(AppSettings.key, String(decoding: legacyData, as: UTF8.self))
+                    }
+                    let upgraded = try AppModel(root: upgradeRoot)
+                    precondition(upgraded.settings.preservedLegacySystemPrompt == legacyPromptText)
+                    precondition(upgraded.settings.agentCustomInstructions == nil)
+                    precondition(upgraded.settings.agentPromptConfiguration == .default)
+                    upgraded.settings.clipboardEnabled = true
+                    upgraded.settings.agentPromptStyle = .rigorous
+                    let afterUnrelatedEdit = try AppModel(root: upgradeRoot)
+                    precondition(afterUnrelatedEdit.settings.clipboardEnabled)
+                    precondition(afterUnrelatedEdit.settings.agentPromptStyle == .rigorous)
+                    precondition(afterUnrelatedEdit.settings.agentCustomInstructions == nil)
+                    precondition(afterUnrelatedEdit.settings.agentPromptConfiguration == AgentPromptConfiguration(style: .rigorous, customInstructions: nil))
+                    precondition(afterUnrelatedEdit.settings.preservedLegacySystemPrompt == legacyPromptText)
 
                     model.settingsTab = SettingsPage.data.rawValue
                     let window = SettingsWindow.make(app: model)
@@ -310,7 +334,23 @@ enum SettingsRegression {
                     let reloadedCleared = try AppModel(root: root)
                     precondition(reloadedCleared.settings.agentCustomInstructions == nil)
 
-                    print("Agent personalization settings: friendly/rigorous style, empty custom prompt, legacy decoding, persistence and clear passed")
+                    // Legacy prompt UI: copy button copies preserved text to pasteboard, and remove clears it.
+                    model.settings.agentSystemPrompt = legacyPromptText
+                    try await Task.sleep(for: .milliseconds(250))
+                    try capture("settings-agent-personalization-legacy-light")
+                    let copyLegacyButton = button(titled: NSLocalizedString("复制旧文本", comment: ""), in: window.contentView!)!
+                    _ = copyLegacyButton.sendAction(copyLegacyButton.action, to: copyLegacyButton.target)
+                    try await Task.sleep(for: .milliseconds(150))
+                    precondition(NSPasteboard.general.string(forType: .string) == legacyPromptText,
+                                 "Copy legacy text button must copy exact v0.3.9 prompt")
+                    let removeLegacyButton = button(titled: NSLocalizedString("移除旧文本", comment: ""), in: window.contentView!)!
+                    _ = removeLegacyButton.sendAction(removeLegacyButton.action, to: removeLegacyButton.target)
+                    try await Task.sleep(for: .milliseconds(150))
+                    precondition(model.settings.preservedLegacySystemPrompt == nil)
+                    let reloadedRemoved = try AppModel(root: root)
+                    precondition(reloadedRemoved.settings.preservedLegacySystemPrompt == nil)
+
+                    print("Agent personalization settings: friendly/rigorous style, empty custom prompt, legacy upgrade preservation/copy/remove, persistence and clear passed")
                     window.close()
                     exit(0)
                 }

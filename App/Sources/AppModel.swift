@@ -51,6 +51,8 @@ struct AppSettings: Codable, Equatable, Sendable {
     var agentPromptStyleID: String?
     /// Optional user-written custom instructions layered on top of the selected style.
     var agentCustomInstructions: String?
+    /// Preserved v0.3.9 custom system prompt for read-only viewing/copying; never auto-applied.
+    var agentSystemPrompt: String?
 
     static let key = "app.settings"
     static let messagesLookbackChoices = [3, 7, 30]
@@ -75,6 +77,13 @@ struct AppSettings: Codable, Equatable, Sendable {
 
     var hasCustomAgentInstructions: Bool {
         agentPromptConfiguration.hasCustomInstructions
+    }
+
+    /// Non-empty legacy v0.3.9 system prompt retained across setting edits for manual copy only.
+    var preservedLegacySystemPrompt: String? {
+        guard let raw = agentSystemPrompt,
+              !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        return raw
     }
 }
 

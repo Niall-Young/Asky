@@ -9,6 +9,12 @@ import Resources
 @MainActor
 public enum ClipboardAccess {
     @discardableResult
+    public static func copyText(_ text: String, to pasteboard: NSPasteboard = .general) -> Bool {
+        pasteboard.clearContents()
+        return pasteboard.setString(text, forType: .string)
+    }
+
+    @discardableResult
     public static func copyConcealed(_ text: String, to pasteboard: NSPasteboard = .general) -> Bool {
         let item = NSPasteboardItem()
         guard item.setString(text, forType: .string),

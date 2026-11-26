@@ -1024,13 +1024,15 @@ server.serve_forever()
         let secondSystem = requests[1]["messages"]?.arrayValue?.last?["content"]?.stringValue ?? ""
         #expect(secondSystem.contains("未调用 calendar_list_calendars"))
         let fourthSystem = requests[3]["messages"]?.arrayValue?.last?["content"]?.stringValue ?? ""
-        #expect(fourthSystem.contains("个人、工作"))
+        #expect(fourthSystem.contains("个人 [ID: p]"))
+        #expect(fourthSystem.contains("工作 [ID: w]"))
+        #expect(fourthSystem.contains("[\"个人\",\"工作\"]"))
         #expect(fourthSystem.contains("「个人」"))
     }
 
     @Test func calendarCreationFormGuardAllowsSingleWritableCalendarAndReminderForms() {
         let singleWritable = [
-            NativeCalendarFormGuard.WritableCalendar(name: "个人", isDefault: true)
+            NativeCalendarFormGuard.WritableCalendar(id: "p", name: "个人", account: "iCloud", isDefault: true)
         ]
         let calendarDraft = """
         建日程需要标题和时间：
@@ -1043,8 +1045,7 @@ server.serve_forever()
         #expect(NativeCalendarFormGuard.correction(
             draft: calendarDraft,
             userText: "我要创建一个日程",
-            calendarListFetched: true,
-            writableCalendars: singleWritable
+            calendarListState: .loaded(singleWritable)
         ) == nil)
 
         let reminderDraft = """
@@ -1058,9 +1059,120 @@ server.serve_forever()
         #expect(NativeCalendarFormGuard.correction(
             draft: reminderDraft,
             userText: "我要创建一个提醒",
-            calendarListFetched: false,
-            writableCalendars: nil
+            calendarListState: .notFetched
         ) == nil)
+    }
+
+    @Test func calendarCreationFormGuardDisambiguatesDuplicateCalendarNamesByAccount() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let draftWithoutSelector = """
+        建日程需要标题和时间：
+
+        ```asky-form
+        {"id":"title","type":"text","label":"日程标题","required":true}
+        {"id":"slot","type":"datetime_range","label":"时间","required":true}
+        ```
+        """
+        let finalFormWithAccounts = """
+        建日程需要标题、时间和目标日历：
+
+        ```asky-form
+        {"id":"title","type":"text","label":"日程标题","required":true}
+        {"id":"slot","type":"datetime_range","label":"时间","required":true}
+        {"id":"calendar","type":"radio","label":"目标日历","options":["Calendar（iCloud）","Calendar（Google）"],"defaultValue":"Calendar（iCloud）","required":true}
+        ```
+        """
+        let script = ModelScript([
+            NativeCompletion(calls: [call("calendar_list_calendars", id: "cal-dup-1")]),
+            NativeCompletion(text: draftWithoutSelector),
+            NativeCompletion(text: finalFormWithAccounts)
+        ])
+        let tools = [
+            ToolDefinition(name: "calendar_list_calendars", summary: "List calendars", source: .calendar, effect: .read, confirmation: .never, externallyExposable: true),
+            ToolDefinition(name: "calendar_create_event", summary: "Create event", source: .calendar, effect: .write, writeKind: .create, confirmation: .createDirectOtherwiseConfirm, externallyExposable: true)
+        ]
+        let agent = host(root: root, script: script, tools: tools) { req in
+            ExecutionResult(requestID: req.requestID, status: .completed, output: .array([
+                ["application": "Apple Calendar", "id": "cal-icloud", "name": "Calendar", "account": "iCloud", "writable": true, "isDefault": true],
+                ["application": "Apple Calendar", "id": "cal-google", "name": "Calendar", "account": "Google", "writable": true, "isDefault": false]
+            ]))
+        }
+
+        let events = await collect(agent, AgentRequest(sessionID: "cal-dup", taskID: "t-cal-dup", text: "帮我新建一个日程"))
+        await agent.shutdown()
+
+        let published = events.compactMap { event -> String? in
+            if case .message(_, let text) = event { return text }
+            return nil
+        }
+        #expect(published == [finalFormWithAccounts])
+
+        let requests = await script.requests
+        #expect(requests.count == 3)
+        let correctionSystem = requests[2]["messages"]?.arrayValue?.last?["content"]?.stringValue ?? ""
+        #expect(correctionSystem.contains("Calendar（iCloud） [ID: cal-icloud]"))
+        #expect(correctionSystem.contains("Calendar（Google） [ID: cal-google]"))
+        #expect(correctionSystem.contains("\"Calendar（iCloud）\",\"Calendar（Google）\""))
+        #expect(correctionSystem.contains("ID"))
+    }
+
+    @Test func calendarCreationFormGuardBlocksFormWhenCalendarLookupFails() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let draftFormOnFailure = """
+        建日程需要标题和时间：
+
+        ```asky-form
+        {"id":"title","type":"text","label":"日程标题","required":true}
+        {"id":"slot","type":"datetime_range","label":"时间","required":true}
+        ```
+        """
+        let retryReply = """
+        暂时无法读取苹果日历（未获得日历权限），请授权后重试：
+
+        ```asky-form
+        {"id":"retry_calendar_list","type":"radio","label":"重新获取日历","options":["重试"]}
+        ```
+        """
+        let script = ModelScript([
+            NativeCompletion(calls: [call("calendar_list_calendars", id: "cal-fail-1")]),
+            NativeCompletion(text: draftFormOnFailure),
+            NativeCompletion(text: retryReply)
+        ])
+        let tools = [
+            ToolDefinition(name: "calendar_list_calendars", summary: "List calendars", source: .calendar, effect: .read, confirmation: .never, externallyExposable: true),
+            ToolDefinition(name: "calendar_create_event", summary: "Create event", source: .calendar, effect: .write, writeKind: .create, confirmation: .createDirectOtherwiseConfirm, externallyExposable: true)
+        ]
+        let agent = host(root: root, script: script, tools: tools) { req in
+            ExecutionResult(requestID: req.requestID, status: .failed, error: ToolError(.permissionDenied, "未获得日历权限"))
+        }
+
+        let events = await collect(agent, AgentRequest(sessionID: "cal-fail", taskID: "t-cal-fail", text: "帮我新建一个日程"))
+        await agent.shutdown()
+
+        let published = events.compactMap { event -> String? in
+            if case .message(_, let text) = event { return text }
+            return nil
+        }
+        #expect(published == [retryReply])
+
+        let requests = await script.requests
+        #expect(requests.count == 3)
+        let correctionSystem = requests[2]["messages"]?.arrayValue?.last?["content"]?.stringValue ?? ""
+        #expect(correctionSystem.contains("calendar_list_calendars 查询失败"))
+        #expect(correctionSystem.contains("重试"))
+
+        // Also block form when calendar list succeeds but has zero writable calendars.
+        let emptyCorrection = NativeCalendarFormGuard.correction(
+            draft: draftFormOnFailure,
+            userText: "帮我新建一个日程",
+            calendarListState: .loaded([])
+        )
+        #expect(emptyCorrection != nil)
+        #expect(emptyCorrection?.contains("没有可写日历") == true)
     }
 }
 

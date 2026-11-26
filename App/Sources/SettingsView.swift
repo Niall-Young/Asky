@@ -904,6 +904,7 @@ private struct AgentPromptSettings: View {
     @State private var loadedDraft = false
     @State private var editorFocused = false
     @State private var saved = false
+    @State private var copiedLegacy = false
     @Environment(\.colorScheme) private var scheme
 
     private var savedInstructions: String {
@@ -1010,6 +1011,49 @@ private struct AgentPromptSettings: View {
                 guard saved else { return }
                 do { try await Task.sleep(for: .milliseconds(1500)); saved = false }
                 catch { }
+            }
+            if let legacyPrompt = app.settings.preservedLegacySystemPrompt {
+                VStack(alignment: .leading, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(NSLocalizedString("旧版系统提示词", comment: ""))
+                        Text(NSLocalizedString("已保留升级前保存的文本，不会自动生效。可按需复制部分内容到上方自定义提示词。", comment: ""))
+                            .foregroundStyle(.secondary)
+                    }
+                    ScrollView {
+                        Text(legacyPrompt)
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(.primary)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 10)
+                            .accessibilityIdentifier("legacyAgentSystemPromptText")
+                    }
+                    .frame(minHeight: 44, maxHeight: 120)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .settingsInputChrome(scheme: scheme, focused: false, cornerRadius: 10)
+                    HStack(spacing: 12) {
+                        Text(NSLocalizedString("修改其他设置不会丢失此文本", comment: ""))
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        SettingsButton(NSLocalizedString("移除旧文本", comment: "")) {
+                            app.settings.agentSystemPrompt = nil
+                            copiedLegacy = false
+                        }
+                        SettingsButton(NSLocalizedString("复制旧文本", comment: ""), isComplete: copiedLegacy) {
+                            if ClipboardAccess.copyText(legacyPrompt) {
+                                copiedLegacy = true
+                            }
+                        }
+                        .accessibilityLabel(copiedLegacy ? NSLocalizedString("已复制", comment: "") : NSLocalizedString("复制旧文本", comment: ""))
+                    }
+                }
+                .task(id: copiedLegacy) {
+                    guard copiedLegacy else { return }
+                    do { try await Task.sleep(for: .milliseconds(1500)); copiedLegacy = false }
+                    catch { }
+                }
             }
         }
     }
