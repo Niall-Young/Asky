@@ -1742,6 +1742,108 @@ enum AgentReplyRegression {
         print("Form lifecycle passed: completion cleanup, draft preservation, timeline reopen, unrelated deletion, later input and deleted form rejection")
     }
 
+    static func singleFieldFormRegression(app: AppModel) async throws {
+        let store = ConversationStore(app.store)
+        let model = AgentModel(app: app)
+        app.preferences.automaticUpdates = false
+        await app.start()
+        app.modelConfiguration = ModelConfiguration(baseURL: URL(string: "http://127.0.0.1:1/v1")!,
+            modelName: "single-field-regression", credentialRef: "Asky-single-unset-" + UUID().uuidString)
+
+        func allViews(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(allViews) }
+        func clickView(_ view: NSView, in targetWindow: NSWindow) {
+            let rect = view.convert(view.bounds, to: nil)
+            let point = NSPoint(x: rect.minX + min(40, rect.width / 2), y: rect.midY)
+            for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                let event = NSEvent.mouseEvent(with: type, location: point, modifierFlags: [],
+                    timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: targetWindow.windowNumber,
+                    context: nil, eventNumber: 0, clickCount: 1, pressure: type == .leftMouseDown ? 1 : 0)!
+                targetWindow.sendEvent(event)
+            }
+        }
+        func capture(_ view: NSView, to path: String) throws {
+            view.layoutSubtreeIfNeeded()
+            let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds)!
+            view.cacheDisplay(in: view.bounds, to: bitmap)
+            try bitmap.representation(using: .png, properties: [:])!.write(to: URL(filePath: path))
+        }
+
+        // 1. Single-field radio with prose: no title, no field label, no submit button, instant tap-to-submit.
+        let radioSource = """
+        你遇到了什么问题？
+        ```asky-form
+        {"id":"issue","type":"radio","label":"遇到的问题","options":["无法连接网络","页面加载缓慢","账号登录失败"],"required":true}
+        ```
+        """
+        let cid1 = try store.create(title: "单项单选回归")
+        try store.append(conversationID: cid1, role: "user", text: "帮我排查一下")
+        let radioMsg = try store.append(conversationID: cid1, role: "assistant", text: radioSource)
+        model.open(cid1)
+        let window = NSWindow(contentRect: NSRect(x: 120, y: 120, width: 460, height: 340),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.title = "Asky Single-Field Form Regression"
+        defer { window.orderOut(nil) }
+        window.appearance = NSAppearance(named: .aqua)
+        let radioView = NSHostingView(rootView: ChatReplyView(
+            text: radioSource,
+            values: Binding(get: { model.formAnswers(radioMsg.id) }, set: { model.setFormAnswers($0, for: radioMsg.id) }),
+            active: model.formIsActive(radioMsg.id),
+            submit: { model.submitForm(radioMsg.id) }
+        ).padding(20)
+         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+         .background(Color(white: 0.96)).environment(\.colorScheme, .light))
+        window.contentView = radioView
+        window.makeKeyAndOrderFront(nil)
+        try await Task.sleep(for: .milliseconds(250))
+        radioView.layoutSubtreeIfNeeded()
+        precondition(!allViews(radioView).contains { $0.identifier?.rawValue == "chat-form-submit" },
+                     "Single-field radio must not render a submit button")
+        try capture(radioView, to: "build/form-single-radio-light.png")
+
+        let slowOption = allViews(radioView).first { $0.identifier?.rawValue == "chat-form-option-页面加载缓慢" }!
+        clickView(slowOption, in: window)
+        try await Task.sleep(for: .milliseconds(120))
+        precondition(!model.formIsActive(radioMsg.id), "Clicking a single-field radio option must submit immediately")
+        precondition(model.items.contains { $0.kind == .user && $0.text == "页面加载缓慢" },
+                     "Single-field radio reply must send the clean selected answer without title/label")
+        for _ in 0..<100 where model.isRunning { try await Task.sleep(for: .milliseconds(20)) }
+
+        // 2. Single-field multi with prose: no submit button initially; appears once an option is toggled.
+        let multiSource = """
+        下面哪些情况你遇到过？可以多选：
+        ```asky-form
+        {"id":"symptoms","type":"multi","label":"症状","options":["启动白屏","偶发闪退","同步延迟"]}
+        ```
+        """
+        let cid2 = try store.create(title: "单项多选回归")
+        let multiMsg = try store.append(conversationID: cid2, role: "assistant", text: multiSource)
+        model.open(cid2)
+        let multiView = NSHostingView(rootView: ChatReplyView(
+            text: multiSource,
+            values: Binding(get: { model.formAnswers(multiMsg.id) }, set: { model.setFormAnswers($0, for: multiMsg.id) }),
+            active: model.formIsActive(multiMsg.id),
+            submit: { model.submitForm(multiMsg.id) }
+        ).padding(20)
+         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+         .background(Color(white: 0.96)).environment(\.colorScheme, .light))
+        window.contentView = multiView
+        try await Task.sleep(for: .milliseconds(200))
+        multiView.layoutSubtreeIfNeeded()
+        precondition(!allViews(multiView).contains { $0.identifier?.rawValue == "chat-form-submit" },
+                     "Single-field multi must hide submit button before any selection")
+        try capture(multiView, to: "build/form-single-multi-initial-light.png")
+
+        let crashOption = allViews(multiView).first { $0.identifier?.rawValue == "chat-form-option-偶发闪退" }!
+        clickView(crashOption, in: window)
+        try await Task.sleep(for: .milliseconds(120))
+        multiView.layoutSubtreeIfNeeded()
+        precondition(model.formIsActive(multiMsg.id), "Clicking a multi option must not auto-submit")
+        precondition(allViews(multiView).contains { $0.identifier?.rawValue == "chat-form-submit" },
+                     "Single-field multi must show submit button once an option is selected")
+        try capture(multiView, to: "build/form-single-multi-selected-light.png")
+        print("Single-field inline form passed: no title, no label, instant radio submit, and on-demand multi submit")
+    }
+
     static func formPreview(app: AppModel, model: AgentModel) async throws {
         let store = ConversationStore(app.store)
         let cid = try store.create(title: "会议安排")
@@ -4143,6 +4245,7 @@ enum AgentReplyRegression {
                 do {
                     let app = try AppModel(root: root)
                     try await formLifecycleRegression(app: app)
+                    try await singleFieldFormRegression(app: app)
                     let model = AgentModel(app: app)
                     try await formPreview(app: app, model: model)
                 } catch { preconditionFailure("Form regression failed: \(error)") }

@@ -33,10 +33,10 @@ struct ComposerAttachmentCard: View {
         self.quoteNumber = quoteNumber
         self.remove = remove
         if quote.kind == .reply {
-            let content = ChatFormParser.parse(quote.text, streaming: false).map { part in
+            let content = ChatFormParser.parse(quote.text, streaming: false).compactMap { part -> String? in
                 switch part.content {
                 case .markdown(let text): text
-                case .form(let form): form.title
+                case .form(let form): form.title ?? form.fields.map(\.label).joined(separator: "、")
                 }
             }.joined(separator: "\n")
             let plain = MarkdownContent(content).renderPlainText()

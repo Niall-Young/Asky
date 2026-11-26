@@ -166,7 +166,7 @@ struct ChatShareCardContent: View {
                 return stripCitations(from: body)
             case .form(let form):
                 var lines: [String] = []
-                if !form.title.isEmpty { lines.append("**\(form.title)**") }
+                if let title = form.title, !title.isEmpty { lines.append("**\(title)**") }
                 for field in form.fields {
                     lines.append("- \(field.label)")
                 }

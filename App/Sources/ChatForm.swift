@@ -379,7 +379,7 @@ struct ChatForm: Equatable {
     }
     static let rangeSeparator = " – "
 
-    let title: String
+    let title: String?
     var fields: [Field]
     var isComplete: Bool
 
@@ -400,9 +400,13 @@ struct ChatForm: Equatable {
     }
 
     func reply(_ values: [String: [String]]) -> String {
-        ([title] + fields.map { field in
+        if fields.count == 1, let field = fields.first {
+            let answer = field.describedAnswer(values[field.id] ?? [])
+            return answer.isEmpty ? "\(field.label)：\(answer)" : answer
+        }
+        return fields.map { field in
             "\(field.label)：\(field.describedAnswer(values[field.id] ?? []))"
-        }).joined(separator: "\n")
+        }.joined(separator: "\n")
     }
 
     static func splitRangeParts(_ raw: String, allowUnspacedHyphen: Bool) -> (String, String)? {
@@ -523,14 +527,33 @@ enum ChatFormParser {
         }
         func renderBlock(_ raw: [String], closed: Bool) {
             let body = raw.dropFirst().filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-            guard raw.joined(separator: "\n").utf8.count <= 32_768,
-                  let first = body.first, let header = decode(Header.self, from: first),
-                  !header.title.isEmpty, header.title.count <= 120, body.count <= 17 else {
+            guard raw.joined(separator: "\n").utf8.count <= 32_768 else {
+                if closed || !streaming { append(.markdown(raw.joined(separator: "\n") + (closed ? "\n```" : ""))) }
+                return
+            }
+            guard let first = body.first else {
+                if closed || !streaming { append(.markdown(raw.joined(separator: "\n") + (closed ? "\n```" : ""))) }
+                return
+            }
+            let title: String?
+            let fieldLines: ArraySlice<String>
+            if let header = decode(Header.self, from: first) {
+                guard !header.title.isEmpty, header.title.count <= 120 else {
+                    if closed || !streaming { append(.markdown(raw.joined(separator: "\n") + (closed ? "\n```" : ""))) }
+                    return
+                }
+                title = header.title
+                fieldLines = body.dropFirst()
+            } else {
+                title = nil
+                fieldLines = body[...]
+            }
+            guard fieldLines.count <= 16 else {
                 if closed || !streaming { append(.markdown(raw.joined(separator: "\n") + (closed ? "\n```" : ""))) }
                 return
             }
             var fields: [ChatForm.Field] = []
-            for line in body.dropFirst() {
+            for line in fieldLines {
                 guard let field = decode(ChatForm.Field.self, from: line),
                       field.isValid, !fields.contains(where: { $0.id == field.id }) else {
                     append(.markdown(raw.joined(separator: "\n") + (closed ? "\n```" : "")))
@@ -539,7 +562,7 @@ enum ChatFormParser {
                 fields.append(field)
             }
             let normalizedFields = (closed || !streaming) ? coalesceRangeFields(fields) : fields
-            append(.form(ChatForm(title: header.title, fields: normalizedFields, isComplete: closed && !normalizedFields.isEmpty)))
+            append(.form(ChatForm(title: title, fields: normalizedFields, isComplete: closed && !normalizedFields.isEmpty)))
         }
         for (index, line) in lines.enumerated() {
             let line = String(line)

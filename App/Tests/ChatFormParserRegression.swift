@@ -92,7 +92,7 @@ enum ChatFormParserRegression {
         precondition(!dateTimeForm.accepts(["when": ["2026-11-25"]]))
         precondition(!dateTimeForm.accepts(["when": ["2026-02-30 14:30"]]))
         precondition(!dateTimeForm.accepts(["when": ["2026-11-25 24:00"]]))
-        precondition(dateTimeForm.reply(["when": ["2026-11-25 14:30"]]).contains("开始时间：2026-11-25 14:30"))
+        precondition(dateTimeForm.reply(["when": ["2026-11-25 14:30"]]) == "2026-11-25 14:30")
         let dtField = dateTimeForm.fields[0]
         let parsedDT1 = dtField.parseDateTimeInput("2026/11/5 9:5")!
         precondition(dtField.dateTimeString(date: parsedDT1.date, time: parsedDT1.time) == "2026-11-05 09:05")
@@ -219,19 +219,20 @@ enum ChatFormParserRegression {
         for invalidUnits in ["[]", "[\"second\",\"minute\"]", "[\"minute\",\"minute\"]", "[\"day\"]"] {
             precondition(temporalForm("time", invalidUnits) == nil)
         }
-        let radio = ChatFormParser.form(in: "```asky-form\n{\"title\":\"单选\"}\n{\"id\":\"drink\",\"type\":\"radio\",\"label\":\"饮品\",\"options\":[\"茶\",\"咖啡\",\"水\"],\"required\":true}\n```")!
+        let radio = ChatFormParser.form(in: "```asky-form\n{\"id\":\"drink\",\"type\":\"radio\",\"label\":\"饮品\",\"options\":[\"茶\",\"咖啡\",\"水\"],\"required\":true}\n```")!
+        precondition(radio.title == nil)
         precondition(!radio.accepts([:]))
         precondition(radio.accepts(["drink": ["茶"]]))
         precondition(!radio.accepts(["drink": ["茶", "水"]]))
         precondition(!radio.accepts(["drink": ["不存在的选项"]]))
-        precondition(radio.reply(["drink": ["咖啡"]]).contains("饮品：咖啡"))
+        precondition(radio.reply(["drink": ["咖啡"]]) == "咖啡")
         for kind in ["radio", "select"] {
             let custom = ChatFormParser.form(in: "```asky-form\n{\"title\":\"确认方案\"}\n{\"id\":\"answer\",\"type\":\"\(kind)\",\"label\":\"怎么处理\",\"options\":[\"现在修改\",\"稍后处理\"],\"required\":true,\"allowCustom\":true}\n```")!
             precondition(!custom.accepts([:]))
             precondition(custom.accepts(["answer": ["现在修改"]]))
             let own = ["answer": ["先给我看改动，再决定"]]
             precondition(custom.accepts(own))
-            precondition(custom.reply(own) == "确认方案\n怎么处理：先给我看改动，再决定")
+            precondition(custom.reply(own) == "先给我看改动，再决定")
             for invalid in [[""], [" \n "], [String(repeating: "字", count: 4001)], ["现在修改", "稍后处理"]] {
                 precondition(!custom.accepts(["answer": invalid]))
             }
@@ -285,6 +286,25 @@ enum ChatFormParserRegression {
         let values = ["title": ["评审"], "duration": ["30 分钟"], "topics": ["设计"], "day": ["2026-10-22"]]
         precondition(complete.accepts(values))
         precondition(complete.reply(values).contains("时长：30 分钟"))
+        precondition(!complete.reply(values).hasPrefix("安排会议"), "form reply must not prepend redundant title")
+        let titlelessSource = """
+        你遇到了什么问题？
+        ```asky-form
+        {"id":"issue","type":"radio","label":"遇到的问题","options":["无法登录","页面卡顿","数据未同步"],"required":true}
+        ```
+        """
+        let titlelessForm = ChatFormParser.form(in: titlelessSource)!
+        precondition(titlelessForm.title == nil && titlelessForm.isComplete && titlelessForm.fields.count == 1)
+        precondition(titlelessForm.reply(["issue": ["页面卡顿"]]) == "页面卡顿")
+        var titlelessPrefix = ""
+        for ch in titlelessSource {
+            titlelessPrefix.append(ch)
+            for part in ChatFormParser.parse(titlelessPrefix, streaming: true) {
+                if case .markdown(let text) = part.content {
+                    precondition(!text.contains("\"id\""), "title-less form JSON must not flash in Markdown")
+                }
+            }
+        }
         var invalid = values
         invalid["duration"] = ["注入的选项"]
         precondition(!complete.accepts(invalid))

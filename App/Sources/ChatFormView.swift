@@ -7,10 +7,10 @@ enum ChatFormMetrics {
     static let controlCornerRadius: CGFloat = 10
     static let optionMinHeight: CGFloat = 38
     static let optionCornerRadius: CGFloat = 10
-    static let optionSpacing: CGFloat = 8
-    static let labelControlSpacing: CGFloat = 10
-    static let fieldSpacing: CGFloat = 22
-    static let replyPartSpacing: CGFloat = 20
+    static let optionSpacing: CGFloat = 6
+    static let labelControlSpacing: CGFloat = 6
+    static let fieldSpacing: CGFloat = 14
+    static let replyPartSpacing: CGFloat = 12
 }
 
 struct ChatReplyView: View {
@@ -21,12 +21,21 @@ struct ChatReplyView: View {
     var submit: () -> Void = {}
 
     var body: some View {
+        let parts = ChatFormParser.parse(text, streaming: isStreaming)
+        let hasProse = parts.contains { part in
+            if case .markdown(let body) = part.content {
+                return !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            }
+            return false
+        }
         VStack(alignment: .leading, spacing: ChatFormMetrics.replyPartSpacing) {
-            ForEach(ChatFormParser.parse(text, streaming: isStreaming)) { part in
+            ForEach(parts) { part in
                 switch part.content {
                 case .markdown(let text): ChatMarkdownView(text: text).equatable()
                 case .form(let form):
-                    if !isStreaming { ChatFormView(form: form, values: values, active: active, submit: submit) }
+                    if !isStreaming {
+                        ChatFormView(form: form, values: values, active: active, hasProse: hasProse, submit: submit)
+                    }
                 }
             }
         }
@@ -37,24 +46,46 @@ struct ChatFormView: View {
     let form: ChatForm
     @Binding var values: [String: [String]]
     let active: Bool
+    var hasProse: Bool = true
     let submit: () -> Void
+
+    @State private var singleCustomExpanded = false
+
+    private var isSingleField: Bool { form.fields.count == 1 }
+
+    private var showsFieldLabels: Bool { !isSingleField || !hasProse }
+
+    private var showsSubmitButton: Bool {
+        guard form.isComplete else { return false }
+        guard isSingleField, let field = form.fields.first else { return true }
+        guard active else { return false }
+        switch field.type {
+        case .radio:
+            return field.allowsCustomAnswer && singleCustomExpanded
+        case .multi:
+            return !(values[field.id]?.isEmpty ?? true)
+        case .text:
+            return !(values[field.id]?.first?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+        case .date, .time, .datetime, .duration, .datetimeRange, .dateRange, .timeRange:
+            return true
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: ChatFormMetrics.fieldSpacing) {
-            Text(form.title)
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(ThemeColor.kText)
             ForEach(form.fields) { field in
                 VStack(alignment: .leading, spacing: ChatFormMetrics.labelControlSpacing) {
-                    HStack(spacing: 4) {
-                        Text(field.label)
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(ThemeColor.kTextSubtle)
-                        if field.required == true {
-                            Text(verbatim: "*")
-                                .font(.system(size: 14, weight: .medium))
-                                .foregroundStyle(ThemeColor.kTextNegative)
-                                .accessibilityLabel(NSLocalizedString("必填", comment: ""))
+                    if showsFieldLabels {
+                        HStack(spacing: 4) {
+                            Text(field.label)
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(ThemeColor.kTextSubtle)
+                            if field.required == true {
+                                Text(verbatim: "*")
+                                    .font(.system(size: 13, weight: .medium))
+                                    .foregroundStyle(ThemeColor.kTextNegative)
+                                    .accessibilityLabel(NSLocalizedString("必填", comment: ""))
+                            }
                         }
                     }
                     control(field)
@@ -64,7 +95,7 @@ struct ChatFormView: View {
                 Text(NSLocalizedString("表单未生成完整，请在输入框回复。", comment: ""))
                     .font(.system(size: 12))
                     .foregroundStyle(ThemeColor.kTextSubtle)
-            } else {
+            } else if showsSubmitButton {
                 HStack(spacing: 0) {
                     Spacer(minLength: 0)
                     ChatFormSubmitButton(NSLocalizedString("提交回复", comment: ""), action: submit)
@@ -85,11 +116,27 @@ struct ChatFormView: View {
         case .text:
             SettingsInputField(field.label, text: scalar(field.id))
                 .disabled(!active)
+                .onSubmit {
+                    if isSingleField, active, form.accepts(values) { submit() }
+                }
         case .radio:
+            let immediateSubmit: (() -> Void)? = isSingleField ? submit : nil
             if field.allowsCustomAnswer {
-                ChatCustomChoice(field: field, answer: scalar(field.id), active: active)
+                ChatCustomChoice(
+                    field: field,
+                    answer: scalar(field.id),
+                    active: active,
+                    onImmediateSelect: immediateSubmit,
+                    onCustomExpandedChange: isSingleField ? { singleCustomExpanded = $0 } : nil
+                )
             } else {
-                ChatFormRadioGroup(label: field.label, options: field.options ?? [], selection: scalar(field.id), active: active)
+                ChatFormRadioGroup(
+                    label: field.label,
+                    options: field.options ?? [],
+                    selection: scalar(field.id),
+                    active: active,
+                    onSelect: immediateSubmit
+                )
             }
         case .multi:
             ChatFormMultiGroup(label: field.label, options: field.options ?? [], selection: multiBinding(field.id), active: active)
@@ -178,6 +225,7 @@ private struct ChatFormRadioGroup: View {
     let options: [String]
     @Binding var selection: String
     let active: Bool
+    var onSelect: (() -> Void)? = nil
 
     var body: some View {
         let hasSelection = !selection.isEmpty
@@ -193,6 +241,7 @@ private struct ChatFormRadioGroup: View {
                 ) {
                     guard active else { return }
                     selection = option
+                    onSelect?()
                 }
             }
         }
@@ -408,13 +457,23 @@ private struct ChatCustomChoice: View {
     let field: ChatForm.Field
     @Binding var answer: String
     let active: Bool
+    var onImmediateSelect: (() -> Void)? = nil
+    var onCustomExpandedChange: ((Bool) -> Void)? = nil
     @State private var usingCustom: Bool
     @State private var customDraft: String
 
-    init(field: ChatForm.Field, answer: Binding<String>, active: Bool) {
+    init(
+        field: ChatForm.Field,
+        answer: Binding<String>,
+        active: Bool,
+        onImmediateSelect: (() -> Void)? = nil,
+        onCustomExpandedChange: ((Bool) -> Void)? = nil
+    ) {
         self.field = field
         _answer = answer
         self.active = active
+        self.onImmediateSelect = onImmediateSelect
+        self.onCustomExpandedChange = onCustomExpandedChange
         let custom = !answer.wrappedValue.isEmpty && !(field.options ?? []).contains(answer.wrappedValue)
         _usingCustom = State(initialValue: custom)
         _customDraft = State(initialValue: custom ? answer.wrappedValue : "")
@@ -428,13 +487,18 @@ private struct ChatCustomChoice: View {
 
     private var selection: Binding<String> {
         Binding(get: { usingCustom ? customOption : answer }, set: { value in
-            usingCustom = value == customOption
-            answer = usingCustom ? customDraft : value
+            let isCustom = value == customOption
+            usingCustom = isCustom
+            onCustomExpandedChange?(isCustom)
+            answer = isCustom ? customDraft : value
+            if !isCustom {
+                onImmediateSelect?()
+            }
         })
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: ChatFormMetrics.optionSpacing) {
             ChatFormRadioGroup(label: field.label, options: (field.options ?? []) + [customOption], selection: selection, active: active)
             if usingCustom {
                 SettingsInputField(NSLocalizedString("输入你的回答", comment: ""), text: Binding(get: { customDraft }, set: {
@@ -442,7 +506,15 @@ private struct ChatCustomChoice: View {
                     answer = customDraft
                 }))
                 .disabled(!active)
+                .onSubmit {
+                    if let submit = onImmediateSelect, active, field.accepts([customDraft]) {
+                        submit()
+                    }
+                }
             }
+        }
+        .onAppear {
+            onCustomExpandedChange?(usingCustom)
         }
     }
 }
