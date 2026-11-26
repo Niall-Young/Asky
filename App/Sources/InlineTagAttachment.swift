@@ -122,10 +122,10 @@ final class InlineTagAttachment: NSTextAttachment {
     private(set) var isHovered: Bool = false
 
     static let pillHeight: CGFloat = 22
+    static let labelFont = NSFont.systemFont(ofSize: 14, weight: .regular)
     static let pillYOffset: CGFloat = {
-        let bodyFont = NSFont.systemFont(ofSize: 14)
-        let bodyHeight = bodyFont.ascender - bodyFont.descender
-        return floor(bodyFont.descender + (bodyHeight - pillHeight) / 2)
+        let bodyHeight = labelFont.ascender - labelFont.descender
+        return floor(labelFont.descender + (bodyHeight - pillHeight) / 2)
     }()
     static let horizontalMargin: CGFloat = 4
     static let trailingPadding: CGFloat = 9
@@ -140,7 +140,6 @@ final class InlineTagAttachment: NSTextAttachment {
     static let thumbCornerRadius: CGFloat = thumbSize / 2
     static let maxPillWidth: CGFloat = 176
     static let cornerRadius: CGFloat = (pillHeight - 1) / 2
-    private static let labelFont = NSFont.systemFont(ofSize: 12.5, weight: .regular)
 
     private struct MarginKey: Hashable {
         let leading: Int
@@ -380,7 +379,8 @@ final class InlineTagAttachment: NSTextAttachment {
             if let context = NSGraphicsContext.current?.cgContext {
                 context.saveGState()
                 let textX = visualX + self.leadingVisualWidth + self.leadingVisualSpacing
-                let baselineY = round((Self.pillHeight - Self.labelFont.capHeight) * 0.5 * 2) / 2
+                // Lock the tag label baseline to the surrounding 14 pt body text baseline.
+                let baselineY = -Self.pillYOffset
                 context.textMatrix = .identity
                 context.textPosition = CGPoint(x: textX, y: baselineY)
                 CTLineDraw(labelLine, context)
