@@ -506,39 +506,44 @@ private struct ChatEmojiExpandButton: View {
     @Environment(\.colorScheme) private var scheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private var discFill: Color {
+    private var stateTint: Color {
         if hasCustomSelection && !isExpanded {
-            return accentColor.opacity(hovered ? 0.28 : 0.22)
+            return accentColor.opacity(hovered ? 0.24 : 0.18)
         }
-        if scheme == .dark {
-            if isExpanded { return .white.opacity(hovered ? 0.26 : 0.20) }
-            return .white.opacity(hovered ? 0.18 : 0.12)
-        } else {
-            if isExpanded { return .black.opacity(hovered ? 0.15 : 0.11) }
-            return .black.opacity(hovered ? 0.10 : 0.06)
+        if isExpanded {
+            return scheme == .dark
+                ? .white.opacity(hovered ? 0.16 : 0.10)
+                : .black.opacity(hovered ? 0.08 : 0.05)
         }
+        return .clear
     }
 
     var body: some View {
         Button(action: action) {
-            ZStack {
-                Circle()
-                    .fill(discFill)
-                    .overlay {
-                        if hasCustomSelection && !isExpanded {
-                            Circle()
-                                .strokeBorder(accentColor.opacity(0.45), lineWidth: 1)
-                        }
+            Image(mingCute: "plus", size: 14)
+                .foregroundStyle(ThemeColor.kText.color(for: scheme).opacity(isExpanded || hovered ? 0.95 : 0.78))
+                .frame(width: 28, height: 28)
+                .background {
+                    Circle().fill(stateTint)
+                }
+                .overlay {
+                    if hasCustomSelection && !isExpanded {
+                        Circle()
+                            .strokeBorder(accentColor.opacity(0.45), lineWidth: 1)
+                            .allowsHitTesting(false)
                     }
-                    .frame(width: 28, height: 28)
-
-                Image(mingCute: "plus", size: 14)
-                    .foregroundStyle(ThemeColor.kText.color(for: scheme).opacity(isExpanded || hovered ? 0.95 : 0.78))
-            }
-            .frame(width: 32, height: 32)
-            .contentShape(Circle())
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: hovered)
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: isExpanded)
+                }
+                .overlay {
+                    Circle()
+                        .fill(.white.opacity(hovered ? 0.12 : 0))
+                        .blendMode(.plusLighter)
+                        .allowsHitTesting(false)
+                }
+                .nativeGlassBackground(in: Circle(), clear: true)
+                .frame(width: 32, height: 32)
+                .contentShape(Circle())
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: hovered)
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: isExpanded)
         }
         .buttonStyle(ChatEmojiPressStyle())
         .onHover { hovered = $0 }
