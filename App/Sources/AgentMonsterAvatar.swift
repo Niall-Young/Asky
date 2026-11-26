@@ -366,6 +366,7 @@ private struct AvatarCustomizationMenu: View {
     let keyboardFocus: Bool
     let didChoose: (Int, Int) -> Void
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.colorSchemeContrast) private var contrast
 
     var body: some View {
         VStack(spacing: 14) {
@@ -433,7 +434,7 @@ private struct AvatarCustomizationMenu: View {
                 .background(RoundedRectangle(cornerRadius: 11).fill(selected ? ThemeColor.kInteractionHover.color(for: scheme) : .clear))
                 .overlay {
                     RoundedRectangle(cornerRadius: 11)
-                        .strokeBorder(ThemeColor.kText.color(for: scheme).opacity(selected ? 0.65 : 0), lineWidth: 1.5)
+                        .strokeBorder(selected ? SettingsPalette.focusBorder(scheme, contrast: contrast) : .clear, lineWidth: 1)
                     if keyboardFocus && focusedRow == row && focusedIndex == index {
                         RoundedRectangle(cornerRadius: 13).strokeBorder(color.tint, lineWidth: 2).padding(-3)
                     }

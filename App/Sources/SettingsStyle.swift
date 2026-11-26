@@ -20,8 +20,10 @@ enum SettingsPalette {
             ? Color(.sRGB, white: 0.96, opacity: 1)
             : Color(.sRGB, red: 0.11, green: 0.115, blue: 0.13, opacity: 1)
     }
-    static func focusBorder(_ scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color.white.opacity(0.62) : Color.black.opacity(0.55)
+    static func focusBorder(_ scheme: ColorScheme, contrast: ColorSchemeContrast = .standard) -> Color {
+        let boost: Double = contrast == .increased ? 0.16 : 0
+        let base: Double = scheme == .dark ? 0.34 : 0.28
+        return (scheme == .dark ? Color.white : Color.black).opacity(min(1, base + boost))
     }
 }
 
@@ -212,14 +214,6 @@ private struct SettingsInputCornerRadiusKey: EnvironmentKey {
     static let defaultValue: CGFloat = 14.5
 }
 
-private struct SettingsInputFocusBorderKey: EnvironmentKey {
-    static let defaultValue: Color? = nil
-}
-
-private struct SettingsInputFocusBorderWidthKey: EnvironmentKey {
-    static let defaultValue: CGFloat? = nil
-}
-
 extension EnvironmentValues {
     var settingsInputFill: Color? {
         get { self[SettingsInputFillKey.self] }
@@ -233,14 +227,6 @@ extension EnvironmentValues {
         get { self[SettingsInputCornerRadiusKey.self] }
         set { self[SettingsInputCornerRadiusKey.self] = newValue }
     }
-    var settingsInputFocusBorder: Color? {
-        get { self[SettingsInputFocusBorderKey.self] }
-        set { self[SettingsInputFocusBorderKey.self] = newValue }
-    }
-    var settingsInputFocusBorderWidth: CGFloat? {
-        get { self[SettingsInputFocusBorderWidthKey.self] }
-        set { self[SettingsInputFocusBorderWidthKey.self] = newValue }
-    }
 }
 
 private struct SettingsInputChrome: ViewModifier {
@@ -249,18 +235,15 @@ private struct SettingsInputChrome: ViewModifier {
     let cornerRadius: CGFloat
     let borderWidth: CGFloat
     @Environment(\.settingsInputFill) private var fill
-    @Environment(\.settingsInputFocusBorder) private var focusBorderOverride
-    @Environment(\.settingsInputFocusBorderWidth) private var focusBorderWidthOverride
+    @Environment(\.colorSchemeContrast) private var contrast
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius)
         let border = ThemeColor.kBorder.color(for: scheme)
-        let focusColor = focusBorderOverride ?? SettingsPalette.focusBorder(scheme)
-        let focusWidth = focusBorderWidthOverride ?? 1.5
         content.background(fill ?? (scheme == .dark ? ThemeColor.kBackgroundNeutral.color(for: scheme)
                             : SettingsPalette.surface(scheme, opaque: true).opacity(0.45)), in: shape)
             .overlay {
-                shape.strokeBorder(focused ? focusColor : border,
-                                   lineWidth: focused ? focusWidth : borderWidth)
+                shape.strokeBorder(focused ? SettingsPalette.focusBorder(scheme, contrast: contrast) : border,
+                                   lineWidth: focused ? 1 : borderWidth)
                     .allowsHitTesting(false)
             }
     }

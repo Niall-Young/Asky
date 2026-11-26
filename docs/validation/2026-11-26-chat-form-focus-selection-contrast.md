@@ -5,9 +5,10 @@
 - **共享表单低对比度色板（`ChatFormPalette`）**：
   - [ChatFormView.swift](../../App/Sources/ChatFormView.swift) 提取 `ChatFormPalette.selectedBorder`（浅色黑 28% / 深色白 34%，高对比度 +16%）、`selectedFill`（浅色白 56% / 深色白 12%）与 `pickerSelectedBorder`（浅色黑 26% / 深色白 32%，高对比度 +16%）。
   - `ChatFormOptionRow` 复用 `ChatFormPalette.selectedBorder`。
-- **聚焦与触发器高亮边框**：
-  - [SettingsStyle.swift](../../App/Sources/SettingsStyle.swift) 为 `SettingsInputChrome` 新增 `settingsInputFocusBorder` 与 `settingsInputFocusBorderWidth` 环境覆写，不影响设置页与日程弹窗既有聚焦样式。
-  - [ChatFormView.swift](../../App/Sources/ChatFormView.swift) 与 [FormPickerOverlay.swift](../../App/Sources/FormPickerOverlay.swift) 为 AI 表单文本输入、自定义输入以及日期 / 时间触发器（含形变快照）应用 `1 pt` 低对比度聚焦边框，与单选 / 多选选中边框完全对齐。
+- **聚焦与触发器高亮边框（全局统一）**：
+  - [SettingsStyle.swift](../../App/Sources/SettingsStyle.swift) 将 `SettingsPalette.focusBorder(_:contrast:)` 直接收敛为浅色黑 28% / 深色白 34%（高对比度 +16%），并将 `SettingsInputChrome` 聚焦线宽由 `1.5 pt` 调整为 `1 pt`；设置页单行/多行输入（含自定义指令编辑框）、搜索框、命令关键词编辑框、日程弹窗与 AI 表单输入/触发器全部统一使用这一低对比度聚焦边框。
+  - [AgentMonsterAvatar.swift](../../App/Sources/AgentMonsterAvatar.swift) 将头像配置面板「造型 / 表情 / 颜色」选中项描边由 `kText 65%` / `1.5 pt` 统一为 `SettingsPalette.focusBorder` / `1 pt`。
+  - [SettingsView.swift](../../App/Sources/SettingsView.swift) 将快捷键录制框（`ShortcutRecorderField`）录制聚焦态描边由 `72% / 65%` / `1.5 pt` 收轻为 `34% / 28%` / `1 pt`，并同步柔化外圈光晕（`12% / 8%`、`2 pt`）。
 - **日期、时间列与范围标签选中态**：
   - [CalendarMonthPicker.swift](../../App/Sources/CalendarMonthPicker.swift) 在 `monochrome`（AI 表单）模式下，将选中日期由纯黑 / 纯白反色实心圆调整为 `ChatFormPalette.selectedFill` + `1 pt` `pickerSelectedBorder` 与常规 `kText` 粗体文字，并同步柔化范围端点与区间底色，保持「当前编辑选中日 > 非活跃范围端点 > 区间内 / 今日 / 悬停」的清晰层次。
   - [ChatFormView.swift](../../App/Sources/ChatFormView.swift) 将 `ChatFormTimeCell`（小时 / 分钟 / 秒钟选中项）与 `ChatFormRangeTabPill`（开始 / 结束活跃标签）统一为 `selectedFill` + `1 pt` `pickerSelectedBorder` 与 `kText` 粗体文字。
@@ -19,6 +20,8 @@
 - `python3 App/Tests/run-agent-reply-regression.py --forms-only --radio-preview`：通过。
 - `python3 App/Tests/run-agent-reply-regression.py --forms-only --time-preview`：通过。
 - `python3 App/Tests/run-agent-reply-regression.py --forms-only --components-preview`：通过。
+- `python3 App/Tests/run-settings-regression.py`：通过（含模型配置、快捷键与通用设置页明暗模式截图）。
+- `python3 App/Tests/run-agent-reply-regression.py --avatar-preview`：头像偏好与切换回归断言通过。
 
 ## 已查看的实际窗口截图
 

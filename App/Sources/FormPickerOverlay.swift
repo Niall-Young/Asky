@@ -410,8 +410,6 @@ private struct FormPickerOverlayContent: View {
 
 private struct FormPickerOverlayTriggerSnapshot: View {
     var controller: FormPickerOverlayController
-    @Environment(\.colorScheme) private var scheme
-    @Environment(\.colorSchemeContrast) private var contrast
 
     var body: some View {
         let _ = controller.revision
@@ -419,8 +417,6 @@ private struct FormPickerOverlayTriggerSnapshot: View {
             trigger
                 .environment(\.settingsInputHeight, ChatFormMetrics.controlHeight)
                 .environment(\.settingsInputCornerRadius, ChatFormMetrics.controlCornerRadius)
-                .environment(\.settingsInputFocusBorder, ChatFormPalette.selectedBorder(scheme, contrast: contrast))
-                .environment(\.settingsInputFocusBorderWidth, 1)
         }
     }
 }

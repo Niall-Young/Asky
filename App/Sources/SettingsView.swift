@@ -294,10 +294,10 @@ final class HotKeyRecorderField: NSView {
         // Outer soft focus ring when recording
         if recording {
             let haloRect = pillRect.insetBy(dx: -1.5, dy: -1.5)
-            let haloColor = (rejected ? warningColor : ink).withAlphaComponent(isDark ? 0.22 : 0.14)
+            let haloColor = (rejected ? warningColor : ink).withAlphaComponent(isDark ? 0.12 : 0.08)
             haloColor.setStroke()
             let haloPath = NSBezierPath(roundedRect: haloRect, xRadius: cornerRadius + 1.5, yRadius: cornerRadius + 1.5)
-            haloPath.lineWidth = 3
+            haloPath.lineWidth = 2
             haloPath.stroke()
         }
 
@@ -311,10 +311,10 @@ final class HotKeyRecorderField: NSView {
 
         // Pill border
         let borderColor: NSColor = recording
-            ? (rejected ? warningColor : ink.withAlphaComponent(isDark ? 0.72 : 0.65))
+            ? (rejected ? warningColor : ink.withAlphaComponent(isDark ? 0.34 : 0.28))
             : (isDark ? NSColor.white.withAlphaComponent(0.15) : NSColor.black.withAlphaComponent(0.13))
         borderColor.setStroke()
-        path.lineWidth = recording ? 1.5 : 1
+        path.lineWidth = 1
         path.stroke()
 
         // Parse active modifiers & key from stored label (or live flags while recording)

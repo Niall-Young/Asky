@@ -16,13 +16,11 @@ enum ChatFormMetrics {
 enum ChatFormPalette {
     /// Softened monochrome border shared by focused inputs, active triggers, and selected options.
     static func selectedBorder(_ scheme: ColorScheme, contrast: ColorSchemeContrast = .standard, active: Bool = true) -> Color {
-        let boost: Double = contrast == .increased ? 0.16 : 0
-        let base: Double
-        if !active {
-            base = scheme == .dark ? 0.16 : 0.14
-        } else {
-            base = scheme == .dark ? 0.34 : 0.28
+        if active {
+            return SettingsPalette.focusBorder(scheme, contrast: contrast)
         }
+        let boost: Double = contrast == .increased ? 0.16 : 0
+        let base: Double = scheme == .dark ? 0.16 : 0.14
         return (scheme == .dark ? Color.white : Color.black).opacity(min(1, base + boost))
     }
 
@@ -76,8 +74,6 @@ struct ChatFormView: View {
     let submit: () -> Void
 
     @State private var singleCustomExpanded = false
-    @Environment(\.colorScheme) private var scheme
-    @Environment(\.colorSchemeContrast) private var contrast
 
     private var isSingleField: Bool { form.fields.count == 1 }
 
@@ -129,8 +125,6 @@ struct ChatFormView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .environment(\.settingsInputHeight, ChatFormMetrics.controlHeight)
         .environment(\.settingsInputCornerRadius, ChatFormMetrics.controlCornerRadius)
-        .environment(\.settingsInputFocusBorder, ChatFormPalette.selectedBorder(scheme, contrast: contrast))
-        .environment(\.settingsInputFocusBorderWidth, 1)
     }
 
     @ViewBuilder private func control(_ field: ChatForm.Field) -> some View {
