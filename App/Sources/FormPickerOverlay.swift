@@ -465,19 +465,7 @@ struct ChatFormPickerTriggerContent<Icon: View>: View {
             }
 
             icon()
-                .foregroundStyle(
-                    highlighted && active
-                        ? ThemeColor.kText.color(for: scheme)
-                        : ThemeColor.kIcon.color(for: scheme)
-                )
-                .frame(width: 26, height: 26)
-                .background(
-                    highlighted && active
-                        ? ThemeColor.kInteractionHover.color(for: scheme)
-                        : .clear,
-                    in: Circle()
-                )
-                .padding(.trailing, -5)
+                .foregroundStyle(ThemeColor.kIcon.color(for: scheme))
         }
         .settingsInputSurface(scheme: scheme, focused: highlighted && active)
     }
