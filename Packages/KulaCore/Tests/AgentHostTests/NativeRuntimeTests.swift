@@ -736,6 +736,8 @@ server.serve_forever()
         #expect(prompt.contains("asky-form 表单中列出、预选、询问目标日历前"))
         #expect(prompt.contains("严禁从记忆或历史对话读取日历名称、列表或默认日历"))
         #expect(prompt.contains("历史对话与记忆既不能替代本轮实时查询"))
+        #expect(prompt.contains("应在表单中加入目标日历单选字段（radio，不设 allowCustom）"))
+        #expect(prompt.contains("并用 defaultValue 预选一个日历"))
         #expect(!prompt.contains("大麦"))
     }
 
