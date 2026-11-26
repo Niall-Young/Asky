@@ -1650,7 +1650,7 @@ private struct ChatFormTimeColumn: View {
 
             ScrollViewReader { proxy in
                 ScrollView(.vertical) {
-                    LazyVStack(spacing: 2) {
+                    VStack(spacing: 2) {
                         ForEach(Array(range), id: \.self) { number in
                             let disabled = isDisabled(number)
                             ChatFormTimeCell(
@@ -1660,13 +1660,6 @@ private struct ChatFormTimeColumn: View {
                             ) {
                                 guard !disabled else { return }
                                 onSelect(number)
-                                if reduceMotion {
-                                    proxy.scrollTo(number, anchor: .center)
-                                } else {
-                                    withAnimation(.easeOut(duration: 0.16)) {
-                                        proxy.scrollTo(number, anchor: .center)
-                                    }
-                                }
                             }
                             .id(number)
                             .background(ChatFormControlMarker(id: "chat-form-unit-\(unit.rawValue)-\(number)"))
@@ -1754,12 +1747,13 @@ private struct ChatFormTimeCell: View {
                             .allowsHitTesting(false)
                     }
                 }
-                .contentShape(shape)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .disabled(disabled)
         .onHover { hovered = !disabled && $0 }
         .padding(.horizontal, 3)
+        .contentShape(Rectangle())
         .accessibilityAddTraits(selected ? [.isSelected] : [])
     }
 }

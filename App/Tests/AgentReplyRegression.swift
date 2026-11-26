@@ -2234,9 +2234,15 @@ enum AgentReplyRegression {
                                      "Selecting start >= end must update start and clear end")
                         precondition(!ChatFormParser.form(in: model.items.last!.text)!.accepts(model.formValues[messageID]!),
                                      "Cleared end must block form submission until re-selected")
+                        // Selecting an off-screen hour (20) after clearing end must also work reliably.
+                        let startHour20 = findMarker("chat-form-unit-hour-20", in: content)
+                        clickView(startHour20, in: window)
+                        try await Task.sleep(for: .milliseconds(120))
+                        precondition(model.formValues[messageID]?["slot"] == ["2026-11-26 20:00 – "],
+                                     "Selecting scrolled hour 20 while end is cleared must update start")
                         let startHour14 = findMarker("chat-form-unit-hour-14", in: content)
                         clickView(startHour14, in: window)
-                        try await Task.sleep(for: .milliseconds(100))
+                        try await Task.sleep(for: .milliseconds(120))
                         precondition(model.formValues[messageID]?["slot"] == ["2026-11-26 14:00 – "],
                                      "Adjusting start while end is cleared must keep end cleared")
                         let endTab = findMarker("chat-form-range-end", in: content)
