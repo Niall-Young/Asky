@@ -1639,6 +1639,7 @@ private struct ChatFormTimeColumn: View {
     let onSelect: (Int) -> Void
 
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.colorSchemeContrast) private var contrast
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -1648,113 +1649,479 @@ private struct ChatFormTimeColumn: View {
                 .foregroundStyle(ThemeColor.kTextSubtlest)
                 .frame(maxWidth: .infinity)
 
-            ScrollViewReader { proxy in
-                ScrollView(.vertical) {
-                    VStack(spacing: 2) {
-                        ForEach(Array(range), id: \.self) { number in
-                            let disabled = isDisabled(number)
-                            ChatFormTimeCell(
-                                text: String(format: "%02d", number),
-                                selected: number == selected,
-                                disabled: disabled
-                            ) {
-                                guard !disabled else { return }
-                                onSelect(number)
-                            }
-                            .id(number)
-                            .background(ChatFormControlMarker(id: "chat-form-unit-\(unit.rawValue)-\(number)"))
-                            .accessibilityIdentifier("chat-form-unit-\(unit.rawValue)-\(number)")
-                        }
-                    }
-                    .padding(.vertical, 6)
-                }
-                .scrollIndicators(.hidden)
-                .frame(height: columnHeight)
-                .mask {
-                    VStack(spacing: 0) {
-                        LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom)
-                            .frame(height: 14)
-                        Color.black
-                        LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom)
-                            .frame(height: 14)
-                    }
-                }
-                .background(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(scheme == .dark ? Color.white.opacity(0.03) : Color.black.opacity(0.03))
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                .onAppear {
-                    if let target = selected ?? initialScrollTarget {
-                        proxy.scrollTo(target, anchor: .center)
-                    }
-                }
-                .onChange(of: selected) { _, target in
-                    guard let target else { return }
-                    if reduceMotion {
-                        proxy.scrollTo(target, anchor: .center)
-                    } else {
-                        withAnimation(.easeOut(duration: 0.16)) {
-                            proxy.scrollTo(target, anchor: .center)
-                        }
-                    }
-                }
-            }
+            ChatFormTimeScrollList(
+                unit: unit,
+                range: range,
+                selected: selected,
+                initialScrollTarget: initialScrollTarget,
+                isDisabled: isDisabled,
+                scheme: scheme,
+                contrast: contrast,
+                reduceMotion: reduceMotion,
+                onSelect: onSelect
+            )
+            .frame(height: columnHeight)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(scheme == .dark ? Color.white.opacity(0.03) : Color.black.opacity(0.03))
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
         .frame(maxWidth: .infinity)
     }
 }
 
-private struct ChatFormTimeCell: View {
-    let text: String
-    let selected: Bool
-    var disabled: Bool = false
-    let action: () -> Void
-    @State private var hovered = false
-    @Environment(\.colorScheme) private var scheme
-    @Environment(\.colorSchemeContrast) private var contrast
+/// Native AppKit scroll column so scrolled time cells always receive direct mouseDown/mouseUp
+/// events without SwiftUI HostingScrollView gesture cancellation on macOS.
+private struct ChatFormTimeScrollList: NSViewRepresentable {
+    let unit: ChatForm.TimeUnit
+    let range: ClosedRange<Int>
+    let selected: Int?
+    let initialScrollTarget: Int?
+    let isDisabled: (Int) -> Bool
+    let scheme: ColorScheme
+    let contrast: ColorSchemeContrast
+    let reduceMotion: Bool
+    let onSelect: (Int) -> Void
 
-    private var shape: RoundedRectangle {
-        RoundedRectangle(cornerRadius: 7, style: .continuous)
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
     }
 
-    private var foreground: Color {
-        if disabled {
-            return ThemeColor("textDisabled").color(for: scheme)
+    func makeNSView(context: Context) -> ContainerView {
+        let container = ContainerView()
+        context.coordinator.attach(to: container)
+        context.coordinator.update(
+            unit: unit,
+            range: range,
+            selected: selected,
+            initialScrollTarget: initialScrollTarget,
+            isDisabled: isDisabled,
+            scheme: scheme,
+            contrast: contrast,
+            reduceMotion: reduceMotion,
+            onSelect: onSelect
+        )
+        return container
+    }
+
+    func updateNSView(_ container: ContainerView, context: Context) {
+        context.coordinator.update(
+            unit: unit,
+            range: range,
+            selected: selected,
+            initialScrollTarget: initialScrollTarget,
+            isDisabled: isDisabled,
+            scheme: scheme,
+            contrast: contrast,
+            reduceMotion: reduceMotion,
+            onSelect: onSelect
+        )
+    }
+
+    final class ContainerView: NSView {
+        let scrollView = ColumnScrollView()
+        let documentView = ColumnDocumentView()
+        private let maskLayer = CAGradientLayer()
+        var onLayout: (() -> Void)?
+
+        override var mouseDownCanMoveWindow: Bool { false }
+
+        override init(frame frameRect: NSRect) {
+            super.init(frame: frameRect)
+            wantsLayer = true
+
+            scrollView.drawsBackground = false
+            scrollView.borderType = .noBorder
+            scrollView.hasVerticalScroller = false
+            scrollView.hasHorizontalScroller = false
+            scrollView.scrollerStyle = .overlay
+            scrollView.autohidesScrollers = true
+            scrollView.verticalScrollElasticity = .automatic
+            scrollView.horizontalScrollElasticity = .none
+            scrollView.documentView = documentView
+            scrollView.contentView.postsBoundsChangedNotifications = true
+            addSubview(scrollView)
+
+            maskLayer.colors = [
+                NSColor.clear.cgColor,
+                NSColor.black.cgColor,
+                NSColor.black.cgColor,
+                NSColor.clear.cgColor,
+            ]
+            maskLayer.startPoint = CGPoint(x: 0.5, y: 0)
+            maskLayer.endPoint = CGPoint(x: 0.5, y: 1)
+            layer?.mask = maskLayer
         }
-        return selected || hovered
-            ? ThemeColor.kText.color(for: scheme)
-            : ThemeColor.kTextSubtle.color(for: scheme)
+
+        required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+        override func layout() {
+            super.layout()
+            scrollView.frame = bounds
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            maskLayer.frame = bounds
+            let h = max(bounds.height, 1)
+            let fade = min(14 / h, 0.45) as NSNumber
+            let endFade = max(1 - (14 / h), 0.55) as NSNumber
+            maskLayer.locations = [0, fade, endFade, 1]
+            CATransaction.commit()
+            onLayout?()
+        }
     }
 
-    var body: some View {
-        Button(action: action) {
-            Text(text)
-                .font(.system(size: 13.5, weight: selected ? .semibold : .regular))
-                .monospacedDigit()
-                .foregroundStyle(foreground)
-                .frame(maxWidth: .infinity)
-                .frame(height: 30)
-                .background(
-                    selected
-                        ? ChatFormPalette.selectedFill(scheme)
-                        : (!disabled && hovered) ? ThemeColor.kInteractionHover.color(for: scheme) : .clear,
-                    in: shape
+    final class ColumnScrollView: NSScrollView {
+        override var mouseDownCanMoveWindow: Bool { false }
+    }
+
+    final class ColumnDocumentView: NSView {
+        override var isFlipped: Bool { true }
+        override var mouseDownCanMoveWindow: Bool { false }
+        var onHoverPoint: ((NSPoint?) -> Void)?
+        private var trackingArea: NSTrackingArea?
+
+        override func updateTrackingAreas() {
+            super.updateTrackingAreas()
+            if let trackingArea { removeTrackingArea(trackingArea) }
+            let area = NSTrackingArea(
+                rect: bounds,
+                options: [.mouseEnteredAndExited, .mouseMoved, .activeInKeyWindow, .inVisibleRect],
+                owner: self,
+                userInfo: nil
+            )
+            addTrackingArea(area)
+            trackingArea = area
+        }
+
+        override func mouseEntered(with event: NSEvent) {
+            onHoverPoint?(convert(event.locationInWindow, from: nil))
+        }
+
+        override func mouseMoved(with event: NSEvent) {
+            onHoverPoint?(convert(event.locationInWindow, from: nil))
+        }
+
+        override func mouseExited(with event: NSEvent) {
+            onHoverPoint?(nil)
+        }
+    }
+
+    final class PassiveLabel: NSTextField {
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    }
+
+    final class TimeRowView: NSView {
+        let number: Int
+        let label: PassiveLabel
+        var isSelected: Bool = false
+        var isDisabled: Bool = false
+        var isHovered: Bool = false
+        var onSelect: ((Int) -> Void)?
+        private var isTrackingPress = false
+        private var scheme: ColorScheme = .light
+        private var contrast: ColorSchemeContrast = .standard
+
+        override var isFlipped: Bool { true }
+        override var mouseDownCanMoveWindow: Bool { false }
+
+        init(number: Int, identifier: String) {
+            self.number = number
+            self.label = PassiveLabel(labelWithString: String(format: "%02d", number))
+            super.init(frame: .zero)
+            wantsLayer = true
+            layer?.cornerRadius = 7
+            layer?.cornerCurve = .continuous
+
+            self.identifier = NSUserInterfaceItemIdentifier(identifier)
+            setAccessibilityElement(true)
+            setAccessibilityRole(.button)
+            setAccessibilityIdentifier(identifier)
+            setAccessibilityLabel(String(format: "%02d", number))
+
+            label.alignment = .center
+            label.lineBreakMode = .byClipping
+            label.isBordered = false
+            label.drawsBackground = false
+            addSubview(label)
+        }
+
+        required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+        override func layout() {
+            super.layout()
+            let size = label.intrinsicContentSize
+            label.frame = NSRect(
+                x: 0,
+                y: round((bounds.height - size.height) / 2),
+                width: bounds.width,
+                height: size.height
+            )
+        }
+
+        func configure(selected: Bool, disabled: Bool, hovered: Bool, scheme: ColorScheme, contrast: ColorSchemeContrast) {
+            self.isSelected = selected
+            self.isDisabled = disabled
+            self.isHovered = hovered
+            self.scheme = scheme
+            self.contrast = contrast
+            setAccessibilitySelected(selected)
+            setAccessibilityEnabled(!disabled)
+            applyStyle()
+        }
+
+        override func viewDidChangeEffectiveAppearance() {
+            super.viewDidChangeEffectiveAppearance()
+            applyStyle()
+        }
+
+        private func applyStyle() {
+            let fg: Color = if isDisabled {
+                ThemeColor("textDisabled").color(for: scheme)
+            } else if isSelected || isHovered {
+                ThemeColor.kText.color(for: scheme)
+            } else {
+                ThemeColor.kTextSubtle.color(for: scheme)
+            }
+            label.font = .monospacedDigitSystemFont(ofSize: 13.5, weight: isSelected ? .semibold : .regular)
+            label.textColor = NSColor(fg)
+
+            let fill: Color = if isSelected {
+                ChatFormPalette.selectedFill(scheme)
+            } else if !isDisabled && isHovered {
+                ThemeColor.kInteractionHover.color(for: scheme)
+            } else {
+                .clear
+            }
+
+            effectiveAppearance.performAsCurrentDrawingAppearance {
+                layer?.backgroundColor = NSColor(fill).cgColor
+                if isSelected {
+                    layer?.borderWidth = 1
+                    layer?.borderColor = NSColor(ChatFormPalette.pickerSelectedBorder(scheme, contrast: contrast)).cgColor
+                } else {
+                    layer?.borderWidth = 0
+                    layer?.borderColor = nil
+                }
+            }
+            needsLayout = true
+        }
+
+        override func mouseDown(with event: NSEvent) {
+            guard !isDisabled else { return }
+            isTrackingPress = true
+        }
+
+        override func mouseUp(with event: NSEvent) {
+            guard isTrackingPress else { return }
+            isTrackingPress = false
+            guard !isDisabled else { return }
+            let local = convert(event.locationInWindow, from: nil)
+            if bounds.contains(local) {
+                onSelect?(number)
+            }
+        }
+
+        override func accessibilityPerformPress() -> Bool {
+            guard !isDisabled else { return false }
+            onSelect?(number)
+            return true
+        }
+    }
+
+    @MainActor
+    final class Coordinator {
+        private static let rowHeight: CGFloat = 30
+        private static let rowSpacing: CGFloat = 2
+        private static let verticalPadding: CGFloat = 6
+        private static let horizontalInset: CGFloat = 3
+
+        private weak var container: ContainerView?
+        private var unit: ChatForm.TimeUnit?
+        private var range: ClosedRange<Int>?
+        private var rows: [TimeRowView] = []
+        private var hoveredNumber: Int?
+        private var selected: Int?
+        private var initialScrollTarget: Int?
+        private var hasPerformedInitialScroll = false
+        private var scheme: ColorScheme = .light
+        private var contrast: ColorSchemeContrast = .standard
+        private var reduceMotion: Bool = false
+        private var isDisabled: (Int) -> Bool = { _ in false }
+        private var onSelect: (Int) -> Void = { _ in }
+        nonisolated(unsafe) private var boundsObserver: NSObjectProtocol?
+
+        deinit {
+            if let boundsObserver {
+                NotificationCenter.default.removeObserver(boundsObserver)
+            }
+        }
+
+        func attach(to container: ContainerView) {
+            self.container = container
+            container.onLayout = { [weak self] in
+                self?.layoutRowsAndInitialScroll()
+            }
+            container.documentView.onHoverPoint = { [weak self] point in
+                self?.updateHover(at: point)
+            }
+            boundsObserver = NotificationCenter.default.addObserver(
+                forName: NSView.boundsDidChangeNotification,
+                object: container.scrollView.contentView,
+                queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.refreshHoverFromCurrentMouse()
+                }
+            }
+        }
+
+        func update(
+            unit: ChatForm.TimeUnit,
+            range: ClosedRange<Int>,
+            selected: Int?,
+            initialScrollTarget: Int?,
+            isDisabled: @escaping (Int) -> Bool,
+            scheme: ColorScheme,
+            contrast: ColorSchemeContrast,
+            reduceMotion: Bool,
+            onSelect: @escaping (Int) -> Void
+        ) {
+            let previousSelected = self.selected
+            let rebuilt = self.unit != unit || self.range != range
+            self.unit = unit
+            self.range = range
+            self.selected = selected
+            self.initialScrollTarget = initialScrollTarget
+            self.isDisabled = isDisabled
+            self.scheme = scheme
+            self.contrast = contrast
+            self.reduceMotion = reduceMotion
+            self.onSelect = onSelect
+
+            if rebuilt {
+                rebuildRows(unit: unit, range: range)
+                hasPerformedInitialScroll = false
+            }
+
+            refreshRowStyles()
+            layoutRowsAndInitialScroll()
+
+            if !rebuilt, hasPerformedInitialScroll, selected != previousSelected, let target = selected {
+                scrollTo(number: target, animated: !reduceMotion)
+            }
+        }
+
+        private func rebuildRows(unit: ChatForm.TimeUnit, range: ClosedRange<Int>) {
+            guard let doc = container?.documentView else { return }
+            for row in rows { row.removeFromSuperview() }
+            rows = range.map { number in
+                let row = TimeRowView(number: number, identifier: "chat-form-unit-\(unit.rawValue)-\(number)")
+                row.onSelect = { [weak self] picked in
+                    guard let self, !self.isDisabled(picked) else { return }
+                    self.onSelect(picked)
+                }
+                doc.addSubview(row)
+                return row
+            }
+        }
+
+        private func refreshRowStyles() {
+            for row in rows {
+                let disabled = isDisabled(row.number)
+                let hovered = !disabled && hoveredNumber == row.number
+                row.configure(
+                    selected: row.number == selected,
+                    disabled: disabled,
+                    hovered: hovered,
+                    scheme: scheme,
+                    contrast: contrast
                 )
-                .overlay {
-                    if selected {
-                        shape.strokeBorder(ChatFormPalette.pickerSelectedBorder(scheme, contrast: contrast), lineWidth: 1)
-                            .allowsHitTesting(false)
+            }
+        }
+
+        private func layoutRowsAndInitialScroll() {
+            guard let container else { return }
+            let width = container.scrollView.contentSize.width
+            let viewportHeight = container.scrollView.contentSize.height
+            guard width > 0 else { return }
+
+            let step = Self.rowHeight + Self.rowSpacing
+            let docHeight = Self.verticalPadding * 2
+                + CGFloat(rows.count) * Self.rowHeight
+                + CGFloat(max(0, rows.count - 1)) * Self.rowSpacing
+            container.documentView.frame = NSRect(x: 0, y: 0, width: width, height: max(docHeight, viewportHeight))
+
+            let rowWidth = max(0, width - Self.horizontalInset * 2)
+            for (index, row) in rows.enumerated() {
+                let y = Self.verticalPadding + CGFloat(index) * step
+                row.frame = NSRect(x: Self.horizontalInset, y: y, width: rowWidth, height: Self.rowHeight)
+            }
+
+            if !hasPerformedInitialScroll, viewportHeight > 0 {
+                hasPerformedInitialScroll = true
+                if let target = selected ?? initialScrollTarget {
+                    scrollTo(number: target, animated: false)
+                }
+            }
+        }
+
+        private func scrollTo(number: Int, animated: Bool) {
+            guard let container,
+                  let index = rows.firstIndex(where: { $0.number == number }) else { return }
+            let scrollView = container.scrollView
+            let clipView = scrollView.contentView
+            let viewportHeight = clipView.bounds.height
+            let docHeight = container.documentView.frame.height
+            guard viewportHeight > 0, docHeight > viewportHeight else { return }
+
+            let step = Self.rowHeight + Self.rowSpacing
+            let rowCenterY = Self.verticalPadding + CGFloat(index) * step + Self.rowHeight / 2
+            let maxOriginY = max(0, docHeight - viewportHeight)
+            let clampedY = min(max(0, round(rowCenterY - viewportHeight / 2)), maxOriginY)
+            let targetOrigin = NSPoint(x: 0, y: clampedY)
+
+            if animated {
+                NSAnimationContext.runAnimationGroup { ctx in
+                    ctx.duration = 0.16
+                    ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                    clipView.animator().setBoundsOrigin(targetOrigin)
+                } completionHandler: { [weak scrollView, weak clipView] in
+                    MainActor.assumeIsolated {
+                        if let scrollView, let clipView {
+                            scrollView.reflectScrolledClipView(clipView)
+                        }
                     }
                 }
-                .contentShape(Rectangle())
+            } else {
+                clipView.scroll(to: targetOrigin)
+                scrollView.reflectScrolledClipView(clipView)
+            }
         }
-        .buttonStyle(.plain)
-        .disabled(disabled)
-        .onHover { hovered = !disabled && $0 }
-        .padding(.horizontal, 3)
-        .contentShape(Rectangle())
-        .accessibilityAddTraits(selected ? [.isSelected] : [])
+
+        private func updateHover(at point: NSPoint?) {
+            let next: Int?
+            if let point, let row = rows.first(where: { $0.frame.contains(point) }), !isDisabled(row.number) {
+                next = row.number
+            } else {
+                next = nil
+            }
+            guard next != hoveredNumber else { return }
+            hoveredNumber = next
+            refreshRowStyles()
+        }
+
+        private func refreshHoverFromCurrentMouse() {
+            guard let container, let window = container.window else { return }
+            let windowPoint = window.mouseLocationOutsideOfEventStream
+            let clipPoint = container.scrollView.contentView.convert(windowPoint, from: nil)
+            guard container.scrollView.contentView.bounds.contains(clipPoint) else {
+                updateHover(at: nil)
+                return
+            }
+            let docPoint = container.documentView.convert(windowPoint, from: nil)
+            updateHover(at: docPoint)
+        }
     }
 }
 

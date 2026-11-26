@@ -2234,12 +2234,30 @@ enum AgentReplyRegression {
                                      "Selecting start >= end must update start and clear end")
                         precondition(!ChatFormParser.form(in: model.items.last!.text)!.accepts(model.formValues[messageID]!),
                                      "Cleared end must block form submission until re-selected")
-                        // Selecting an off-screen hour (20) after clearing end must also work reliably.
+                        // Selecting an off-screen hour (20) after real scrollWheel scrolling must work reliably.
                         let startHour20 = findMarker("chat-form-unit-hour-20", in: content)
-                        clickView(startHour20, in: window)
+                        if let hourScroll = startHour20.enclosingScrollView {
+                            for _ in 0..<8 {
+                                if let cg = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: -24, wheel2: 0, wheel3: 0) {
+                                    cg.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
+                                    if let ns = NSEvent(cgEvent: cg) {
+                                        hourScroll.scrollWheel(with: ns)
+                                    }
+                                }
+                            }
+                            try await Task.sleep(for: .milliseconds(80))
+                        }
+                        let hour20Rect = startHour20.convert(startHour20.bounds, to: nil)
+                        let hour20Point = NSPoint(x: hour20Rect.midX, y: hour20Rect.midY)
+                        for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                            let ev = NSEvent.mouseEvent(with: type, location: hour20Point, modifierFlags: [],
+                                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                                context: nil, eventNumber: 0, clickCount: 1, pressure: type == .leftMouseDown ? 1 : 0)!
+                            window.sendEvent(ev)
+                        }
                         try await Task.sleep(for: .milliseconds(120))
                         precondition(model.formValues[messageID]?["slot"] == ["2026-11-26 20:00 – "],
-                                     "Selecting scrolled hour 20 while end is cleared must update start")
+                                     "Selecting scrolled hour 20 via real scrollWheel + click must update start")
                         let startHour14 = findMarker("chat-form-unit-hour-14", in: content)
                         clickView(startHour14, in: window)
                         try await Task.sleep(for: .milliseconds(120))
