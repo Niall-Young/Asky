@@ -221,6 +221,11 @@ private actor NativeAgentEngine {
             var illustrationsFinished = false
             var emittedPreToolNarration = false
             var imageCorrection: String?
+            var calendarListFetched = false
+            var writableCalendars: [NativeCalendarFormGuard.WritableCalendar]?
+            var calendarFormCorrection: String?
+            var calendarListCorrectionSent = false
+            var calendarFieldCorrectionSent = false
             while true {
                 try Task.checkCancellation()
                 // Conservative byte budget works across CJK and tool payloads without shipping a tokenizer.
@@ -250,6 +255,9 @@ private actor NativeAgentEngine {
                 if let imageCorrection {
                     completionMessages.append(["role": "system", "content": .string(imageCorrection)])
                 }
+                if let calendarFormCorrection {
+                    completionMessages.append(["role": "system", "content": .string(calendarFormCorrection)])
+                }
                 // Keep the tool catalogue frozen within a turn so prompt prefix caching stays intact.
                 // Runtime guards below still block any further web calls once cooled down or finalized.
                 // The UI publishes at completion already. Keep unverified drafts out of both
@@ -278,6 +286,26 @@ private actor NativeAgentEngine {
                     let loaded = sourced.isEmpty ? Set<URL>() : try await imageValidator(Array(sourced))
                     try Task.checkCancellation()
                     let text = NativeReplyImages.removing(images.subtracting(loaded), from: response.text)
+                    if catalogue.contains(where: { $0.name == "calendar_list_calendars" }),
+                       catalogue.contains(where: { $0.name == "calendar_create_event" }),
+                       count < limit {
+                        let canCorrect = !calendarListFetched ? !calendarListCorrectionSent : !calendarFieldCorrectionSent
+                        if canCorrect,
+                           let correction = NativeCalendarFormGuard.correction(
+                               draft: text,
+                               userText: request.text,
+                               calendarListFetched: calendarListFetched,
+                               writableCalendars: writableCalendars
+                           ) {
+                            if !calendarListFetched {
+                                calendarListCorrectionSent = true
+                            } else {
+                                calendarFieldCorrectionSent = true
+                            }
+                            calendarFormCorrection = correction
+                            continue
+                        }
+                    }
                     guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                         throw NativeModelError.failure(.emptyResponse)
                     }
@@ -386,6 +414,11 @@ private actor NativeAgentEngine {
                     } else { result = ["status": "failed", "error": ["message": "工具未启用或不存在"]] }
                     if ["web_search", "web_read_page"].contains(name) {
                         webCoolingDown = webCoolingDown || NativeWebContext.allSourcesCoolingDown(result)
+                    }
+                    if name == "calendar_list_calendars" {
+                        calendarListFetched = true
+                        writableCalendars = NativeCalendarFormGuard.writableCalendars(from: result)
+                        calendarFormCorrection = nil
                     }
                     messages.append(["role": "tool", "tool_call_id": .string(modelID), "content": .string(String(decoding: result.canonicalData(), as: UTF8.self))])
                     file = try await storage.save(sessionID: request.sessionID, messages: messages)

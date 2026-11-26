@@ -661,8 +661,13 @@ server.serve_forever()
         #expect(NativeAgentPrompt.runtimeProtocolPrompt.contains("可直接点击跳转的正文链接"))
         #expect(NativeAgentPrompt.runtimeProtocolPrompt.contains("无需对同一地址重复附 [来源](URL)"))
         #expect(NativeAgentPrompt.runtimeProtocolPrompt.contains("不能只给配图附来源"))
+        #expect(NativeAgentPrompt.runtimeProtocolPrompt.contains("链接文字固定写“来源”"))
+        #expect(NativeAgentPrompt.runtimeProtocolPrompt.contains("禁止把报道、媒体名或文章标题写成句中或段末"))
         #expect(assembled.contains("渲染为来源标签"))
         #expect(assembled.contains("不能只给配图附来源"))
+        let searchReminder = try #require(NativeAgentPrompt.webSearchCapabilities(hasWebSearch: true))
+        #expect(searchReminder.contains("渲染为来源标签"))
+        #expect(searchReminder.contains("[媒体名](URL)"))
         let capabilities = try #require(NativeAgentPrompt.imageCapabilities(hasPageReader: true))
         #expect(capabilities.contains("渲染为来源标签"))
         #expect(capabilities.contains("不能只给配图附来源"))
@@ -948,6 +953,101 @@ server.serve_forever()
         await agent.shutdown()
         #expect(events.contains { if case .error(_, let msg) = $0 { msg == ModelFailureReason.emptyResponse.userMessage } else { false } })
         #expect(events.contains { if case .taskState(_, .failed) = $0 { true } else { false } })
+    }
+
+    @Test func calendarCreationFormGuardEnforcesLiveListAndCalendarRadioField() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let draftWithoutCalendar = """
+        建日程需要标题和时间。你告诉我这两项，我直接建；也可以填下面这个：
+
+        ```asky-form
+        {"id":"title","type":"text","label":"日程标题","required":true}
+        {"id":"slot","type":"datetime_range","label":"时间","required":true}
+        {"id":"location","type":"text","label":"地点（可留空）"}
+        ```
+        """
+        let finalFormWithCalendar = """
+        建日程需要标题和时间。你告诉我这两项，我直接建；也可以填下面这个：
+
+        ```asky-form
+        {"id":"title","type":"text","label":"日程标题","required":true}
+        {"id":"slot","type":"datetime_range","label":"时间","required":true}
+        {"id":"calendar","type":"radio","label":"目标日历","options":["个人","工作"],"defaultValue":"个人","required":true}
+        {"id":"location","type":"text","label":"地点（可留空）"}
+        ```
+        """
+        let script = ModelScript([
+            NativeCompletion(text: draftWithoutCalendar),
+            NativeCompletion(calls: [call("calendar_list_calendars", id: "cal-1")]),
+            NativeCompletion(text: draftWithoutCalendar),
+            NativeCompletion(text: finalFormWithCalendar)
+        ])
+        let tools = [
+            ToolDefinition(name: "calendar_list_calendars", summary: "List calendars", source: .calendar, effect: .read, confirmation: .never, externallyExposable: true),
+            ToolDefinition(name: "calendar_create_event", summary: "Create event", source: .calendar, effect: .write, writeKind: .create, confirmation: .createDirectOtherwiseConfirm, externallyExposable: true)
+        ]
+        let agent = host(root: root, script: script, tools: tools) { req in
+            ExecutionResult(requestID: req.requestID, status: .completed, output: .array([
+                ["application": "Apple Calendar", "id": "p", "name": "个人", "account": "iCloud", "writable": true, "isDefault": true],
+                ["application": "Apple Calendar", "id": "w", "name": "工作", "account": "iCloud", "writable": true, "isDefault": false],
+                ["application": "Apple Calendar", "id": "h", "name": "节假日", "account": "Subscribed", "writable": false, "isDefault": false]
+            ]))
+        }
+
+        let events = await collect(agent, AgentRequest(sessionID: "cal-guard", taskID: "t-cal", text: "我要创建一个日程"))
+        await agent.shutdown()
+
+        let published = events.compactMap { event -> String? in
+            if case .message(_, let text) = event { return text }
+            return nil
+        }
+        #expect(published == [finalFormWithCalendar])
+        #expect(events.filter { if case .toolCall = $0 { return true }; return false }.count == 1)
+
+        let requests = await script.requests
+        #expect(requests.count == 4)
+        let secondSystem = requests[1]["messages"]?.arrayValue?.last?["content"]?.stringValue ?? ""
+        #expect(secondSystem.contains("未调用 calendar_list_calendars"))
+        let fourthSystem = requests[3]["messages"]?.arrayValue?.last?["content"]?.stringValue ?? ""
+        #expect(fourthSystem.contains("个人、工作"))
+        #expect(fourthSystem.contains("「个人」"))
+    }
+
+    @Test func calendarCreationFormGuardAllowsSingleWritableCalendarAndReminderForms() {
+        let singleWritable = [
+            NativeCalendarFormGuard.WritableCalendar(name: "个人", isDefault: true)
+        ]
+        let calendarDraft = """
+        建日程需要标题和时间：
+
+        ```asky-form
+        {"id":"title","type":"text","label":"日程标题","required":true}
+        {"id":"slot","type":"datetime_range","label":"时间","required":true}
+        ```
+        """
+        #expect(NativeCalendarFormGuard.correction(
+            draft: calendarDraft,
+            userText: "我要创建一个日程",
+            calendarListFetched: true,
+            writableCalendars: singleWritable
+        ) == nil)
+
+        let reminderDraft = """
+        要建提醒需要标题和时间：
+
+        ```asky-form
+        {"id":"title","type":"text","label":"提醒事项","required":true}
+        {"id":"when","type":"datetime","label":"提醒时间","required":true}
+        ```
+        """
+        #expect(NativeCalendarFormGuard.correction(
+            draft: reminderDraft,
+            userText: "我要创建一个提醒",
+            calendarListFetched: false,
+            writableCalendars: nil
+        ) == nil)
     }
 }
 
