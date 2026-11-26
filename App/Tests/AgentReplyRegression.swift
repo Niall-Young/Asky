@@ -1808,7 +1808,7 @@ enum AgentReplyRegression {
                      "Single-field radio reply must send the clean selected answer without title/label")
         for _ in 0..<100 where model.isRunning { try await Task.sleep(for: .milliseconds(20)) }
 
-        // 2. Single-field multi with prose: no submit button initially; appears once an option is toggled.
+        // 2. Single-field multi with prose: no title/label, submit button visible from the start, toggling does not auto-submit.
         let multiSource = """
         下面哪些情况你遇到过？可以多选：
         ```asky-form
@@ -1829,8 +1829,8 @@ enum AgentReplyRegression {
         window.contentView = multiView
         try await Task.sleep(for: .milliseconds(200))
         multiView.layoutSubtreeIfNeeded()
-        precondition(!allViews(multiView).contains { $0.identifier?.rawValue == "chat-form-submit" },
-                     "Single-field multi must hide submit button before any selection")
+        precondition(allViews(multiView).contains { $0.identifier?.rawValue == "chat-form-submit" },
+                     "Single-field multi must always render a submit button")
         try capture(multiView, to: "build/form-single-multi-initial-light.png")
 
         let crashOption = allViews(multiView).first { $0.identifier?.rawValue == "chat-form-option-偶发闪退" }!
@@ -1839,9 +1839,9 @@ enum AgentReplyRegression {
         multiView.layoutSubtreeIfNeeded()
         precondition(model.formIsActive(multiMsg.id), "Clicking a multi option must not auto-submit")
         precondition(allViews(multiView).contains { $0.identifier?.rawValue == "chat-form-submit" },
-                     "Single-field multi must show submit button once an option is selected")
+                     "Single-field multi must keep its submit button after selection")
         try capture(multiView, to: "build/form-single-multi-selected-light.png")
-        print("Single-field inline form passed: no title, no label, instant radio submit, and on-demand multi submit")
+        print("Single-field inline form passed: no title, no label, instant radio submit, and multi submit button")
     }
 
     static func formPreview(app: AppModel, model: AgentModel) async throws {

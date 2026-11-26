@@ -9,7 +9,7 @@
 - **单字段表单免标签与免提交按钮**：
   - 当气泡已有正文且表单仅含 1 个字段时，自动隐藏字段标签（保留无障碍标签与输入框占位符；若无正文则回退显示字段标签）。
   - 单字段 `radio` 不显示提交按钮，点击预设选项后立即提交；若开启 `allowCustom: true`，点击「自己填写」展开输入框并支持回车或点击提交。
-  - 单字段 `multi` 初始不显示提交按钮，勾选至少 1 项后再按需展示提交按钮；单字段 `text` 支持回车提交并在有输入时展示提交按钮。
+  - 单字段 `radio` 之外的所有表单（含单字段 `multi`、`text`、日期/时间类以及多字段表单）均保留提交按钮（单字段 `text` 同时支持回车提交）。
 - **同步系统提示词**：
   - `NativeAgentPrompt` 更新为不再输出 `{"title":...}` 头行，引导模型在正文自然提问后直接附单字段或多字段 `asky-form`。
 
@@ -19,7 +19,7 @@
 - `App/Tests/ChatFormParserRegression.swift`：通过（含无标题单/多字段解析、流式逐字解析不泄漏 JSON、历史带标题兼容、单字段纯净回复与多字段无标题回复）。
 - `xcodegen generate` + Debug `xcodebuild -project Asky.xcodeproj -scheme Asky -configuration Debug -derivedDataPath build/DerivedData -skipPackageUpdates build`：成功（`BUILD SUCCEEDED`）。
 - `python3 App/Tests/run-agent-reply-regression.py`：
-  - `--forms-only`：通过（新增 `singleFieldFormRegression`，验证单字段 `radio` 无提交按钮且点击立即提交、单字段 `multi` 初始无提交按钮勾选后按需出现）。
+  - `--forms-only`：通过（新增 `singleFieldFormRegression`，验证单字段 `radio` 无提交按钮且点击立即提交、单字段 `multi` 保留提交按钮且勾选不自动提交）。
   - `--forms-only --radio-preview`：通过。
   - `--forms-only --custom-preview`：通过。
 

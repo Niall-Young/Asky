@@ -85,18 +85,10 @@ struct ChatFormView: View {
 
     private var showsSubmitButton: Bool {
         guard form.isComplete else { return false }
-        guard isSingleField, let field = form.fields.first else { return true }
-        guard active else { return false }
-        switch field.type {
-        case .radio:
-            return field.allowsCustomAnswer && singleCustomExpanded
-        case .multi:
-            return !(values[field.id]?.isEmpty ?? true)
-        case .text:
-            return !(values[field.id]?.first?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
-        case .date, .time, .datetime, .duration, .datetimeRange, .dateRange, .timeRange:
-            return true
+        if isSingleField, let field = form.fields.first, field.type == .radio {
+            return active && field.allowsCustomAnswer && singleCustomExpanded
         }
+        return true
     }
 
     var body: some View {
