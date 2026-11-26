@@ -73,13 +73,119 @@ final class ChatSourceTextView: ChatSelectableTextView, NSTextViewDelegate {
         guard !trimmed.isEmpty else { return false }
         if Int(trimmed) != nil { return true }
         let lower = trimmed.lowercased()
-        if ["来源", "引用", "参考", "出处", "source", "citation", "ref", "reference"].contains(lower) {
+        if ["来源", "图片来源", "图源", "引用", "参考", "出处",
+            "source", "photo source", "image source", "citation", "ref", "reference", "credit"].contains(lower) {
+            return true
+        }
+        if lower.range(
+            of: #"^(?:来源|引用|参考|出处|source|citation|ref|reference)\s*[:：#-]?\s*\d+$"#,
+            options: .regularExpression
+        ) != nil {
             return true
         }
         return lower.range(
-            of: #"^(?:来源|引用|参考|出处|source|citation|ref|reference)\s*[:：#-]?\s*\d+$"#,
+            of: #"^(?:来源|图片来源|图源|引用|参考|出处|source|photo source|image source|citation|ref|reference)\s*[:：]\s*.+$"#,
             options: .regularExpression
         ) != nil
+    }
+
+    static func isTrailingCitationCandidate(label: String, url: URL) -> Bool {
+        guard ChatImageService.supports(url) else { return false }
+        if isCitation(label) { return true }
+        let trimmed = label.trimmingCharacters(in: CharacterSet(charactersIn: "[]【】()（） "))
+        guard !trimmed.isEmpty, trimmed.count <= 32 else { return false }
+        let lower = trimmed.lowercased()
+        if lower.hasPrefix("http://") || lower.hasPrefix("https://") || lower.hasPrefix("www.") {
+            return false
+        }
+        if lower == url.absoluteString.lowercased() { return false }
+        let directPrefixes = [
+            "打开", "访问", "查看", "前往", "下载", "进入", "点击", "官网", "主页",
+            "open ", "visit ", "view ", "download ", "go to "
+        ]
+        if directPrefixes.contains(where: { lower.hasPrefix($0) }) { return false }
+        if let last = trimmed.last, "。！？!?".contains(last) { return false }
+        return true
+    }
+
+    static func endsWithSentenceTerminator(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        let closers: Set<Character> = Set("」』”’\"'）)】]》")
+        var idx = trimmed.endIndex
+        while idx > trimmed.startIndex {
+            let prev = trimmed.index(before: idx)
+            if closers.contains(trimmed[prev]) {
+                idx = prev
+            } else {
+                break
+            }
+        }
+        guard idx > trimmed.startIndex else { return false }
+        let terminatorIdx = trimmed.index(before: idx)
+        let terminator = trimmed[terminatorIdx]
+        guard "。！？!?.".contains(terminator) else { return false }
+        let before = trimmed[..<terminatorIdx].trimmingCharacters(in: .whitespacesAndNewlines)
+        return !before.isEmpty
+    }
+
+    static func trimTrailingCitationOpeners(_ text: String) -> String {
+        var end = text.endIndex
+        let openers: Set<Character> = Set(" \t（([【")
+        while end > text.startIndex {
+            let prev = text.index(before: end)
+            if openers.contains(text[prev]) {
+                end = prev
+            } else {
+                break
+            }
+        }
+        return String(text[..<end])
+    }
+
+    private static let trailingWrapperSet = CharacterSet.whitespaces.union(CharacterSet(charactersIn: "、,，;；/()（）[]【】"))
+
+    static func citationRunFlags(in content: AttributedString) -> [Bool] {
+        let runs = Array(content.runs)
+        var flags = runs.map { run -> Bool in
+            guard run.imageURL == nil, let url = run.link, ChatImageService.supports(url) else { return false }
+            return isCitation(String(content[run.range].characters))
+        }
+
+        // Also treat standalone named web links placed after sentence-ending punctuation
+        // at the end of a paragraph (e.g. "……离职。[虎嗅](url)") as trailing source citations.
+        var candidateIndices: [Int] = []
+        var idx = runs.count - 1
+        var prefixTextBeforeSuffix = ""
+        while idx >= 0 {
+            let run = runs[idx]
+            let text = String(content[run.range].characters)
+            if run.imageURL != nil { break }
+            if let url = run.link {
+                if isTrailingCitationCandidate(label: text, url: url) {
+                    candidateIndices.append(idx)
+                    idx -= 1
+                    continue
+                }
+                break
+            }
+            if text.trimmingCharacters(in: trailingWrapperSet).isEmpty {
+                idx -= 1
+                continue
+            }
+            prefixTextBeforeSuffix = trimTrailingCitationOpeners(text)
+            break
+        }
+        if !candidateIndices.isEmpty {
+            let earlier = idx > 0 ? runs[0..<idx].map { String(content[$0.range].characters) }.joined() : ""
+            let preceding = earlier + prefixTextBeforeSuffix
+            if endsWithSentenceTerminator(preceding) {
+                for candidate in candidateIndices {
+                    flags[candidate] = true
+                }
+            }
+        }
+        return flags
     }
 
     static func isDirectOpenableLink(_ url: URL) -> Bool {
@@ -87,13 +193,11 @@ final class ChatSourceTextView: ChatSelectableTextView, NSTextViewDelegate {
     }
 
     static func sources(in content: AttributedString) -> [URL] {
+        let runs = Array(content.runs)
+        let flags = citationRunFlags(in: content)
         var result: [URL] = []
-        for run in content.runs {
-            guard run.imageURL == nil,
-                  let url = run.link,
-                  ChatImageService.supports(url),
-                  isCitation(String(content[run.range].characters)),
-                  !result.contains(url) else { continue }
+        for (index, run) in runs.enumerated() where flags[index] {
+            guard let url = run.link, !result.contains(url) else { continue }
             result.append(url)
         }
         return result

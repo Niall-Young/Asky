@@ -1025,11 +1025,47 @@ private struct ChatInlineNativeText: NSViewRepresentable {
             result.append(fragment)
         } else {
         let runs = Array(content.runs)
-        let skippedCitations = runs.map { run -> Bool in
-            guard let url = run.link, ChatImageService.supports(url), run.imageURL == nil else { return false }
-            return ChatSourceTextView.isCitation(String(content[run.range].characters))
-        }
+        var runTexts = runs.map { String(content[$0.range].characters) }
+        var skippedCitations = ChatSourceTextView.citationRunFlags(in: content)
         let citationSeparators = CharacterSet.whitespaces.union(CharacterSet(charactersIn: "、,，;；/"))
+        let wrapperPairs: [(open: String, close: String)] = [("（", "）"), ("(", ")"), ("【", "】"), ("[", "]")]
+        var cleanedWrappers = true
+        while cleanedWrappers {
+            cleanedWrappers = false
+            for idx in runs.indices where !skippedCitations[idx] && runs[idx].link == nil && runs[idx].imageURL == nil {
+                guard idx > 0, idx + 1 < runs.count,
+                      skippedCitations[idx - 1], skippedCitations[idx + 1],
+                      runTexts[idx].trimmingCharacters(in: citationSeparators).isEmpty else { continue }
+                skippedCitations[idx] = true
+                cleanedWrappers = true
+            }
+            var idx = 0
+            while idx < runs.count {
+                guard skippedCitations[idx] else { idx += 1; continue }
+                var end = idx
+                while end + 1 < runs.count, skippedCitations[end + 1] { end += 1 }
+                if idx > 0, end + 1 < runs.count,
+                   runs[idx - 1].link == nil, runs[idx - 1].imageURL == nil,
+                   runs[end + 1].link == nil, runs[end + 1].imageURL == nil {
+                    let beforeTrimmed = runTexts[idx - 1].replacingOccurrences(of: #"[ \t]+$"#, with: "", options: .regularExpression)
+                    let afterTrimmed = runTexts[end + 1].replacingOccurrences(of: #"^[ \t]+"#, with: "", options: .regularExpression)
+                    for pair in wrapperPairs where beforeTrimmed.hasSuffix(pair.open) && afterTrimmed.hasPrefix(pair.close) {
+                        runTexts[idx - 1] = String(beforeTrimmed.dropLast(pair.open.count))
+                        runTexts[end + 1] = String(afterTrimmed.dropFirst(pair.close.count))
+                        if runTexts[idx - 1].isEmpty { skippedCitations[idx - 1] = true }
+                        if runTexts[end + 1].isEmpty { skippedCitations[end + 1] = true }
+                        cleanedWrappers = true
+                        break
+                    }
+                }
+                idx = end + 1
+            }
+        }
+        let sources = ChatSourceTextView.sources(in: content)
+        if !sources.isEmpty, let lastVisible = runs.indices.last(where: { !skippedCitations[$0] }),
+           runs[lastVisible].link == nil, runs[lastVisible].imageURL == nil {
+            runTexts[lastVisible] = runTexts[lastVisible].replacingOccurrences(of: #"[ \t]+$"#, with: "", options: .regularExpression)
+        }
         for (runIndex, run) in runs.enumerated() {
             let intent = run.inlinePresentationIntent ?? []
             var font = monospaced ? NSFont.monospacedSystemFont(ofSize: 14, weight: .regular)
@@ -1042,10 +1078,6 @@ private struct ChatInlineNativeText: NSViewRepresentable {
             ]
             // Citation links collapse into the trailing source badge; all other links remain directly clickable in prose.
             if skippedCitations[runIndex] { continue }
-            if run.link == nil, run.imageURL == nil,
-               runIndex > 0, runIndex + 1 < runs.count,
-               skippedCitations[runIndex - 1], skippedCitations[runIndex + 1],
-               String(content[run.range].characters).trimmingCharacters(in: citationSeparators).isEmpty { continue }
             if run.imageURL == nil, let link = run.link, ChatSourceTextView.isDirectOpenableLink(link) {
                 attributes[.link] = link
                 attributes[.foregroundColor] = linkColor
@@ -1073,11 +1105,11 @@ private struct ChatInlineNativeText: NSViewRepresentable {
                 attachment.image = image
                 attachment.bounds = NSRect(x: 0, y: -2, width: min(120, 14 * image.size.width / max(1, image.size.height)), height: 14)
                 let fragment = NSMutableAttributedString(attachment: attachment)
-                attributes[.chatSelectionText] = String(content[run.range].characters)
+                attributes[.chatSelectionText] = runTexts[runIndex]
                 fragment.addAttributes(attributes, range: NSRange(location: 0, length: fragment.length))
                 result.append(fragment)
             } else {
-                var text = String(content[run.range].characters)
+                var text = runTexts[runIndex]
                 if intent.contains(.code) {
                     text = " " + text + " "
                     attributes[.font] = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
@@ -1086,7 +1118,6 @@ private struct ChatInlineNativeText: NSViewRepresentable {
                 result.append(NSAttributedString(string: text, attributes: attributes))
             }
         }
-        let sources = ChatSourceTextView.sources(in: content)
         if let first = sources.first {
             hasSources = true
             result.append(NSAttributedString(string: " ", attributes: [.font: NSFont.systemFont(ofSize: 14)]))

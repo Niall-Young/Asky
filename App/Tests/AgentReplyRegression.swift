@@ -1133,6 +1133,8 @@ enum AgentReplyRegression {
         precondition(ChatSourceTextView.isCitation("[12]"))
         precondition(ChatSourceTextView.isCitation("来源"))
         precondition(ChatSourceTextView.isCitation("来源1"))
+        precondition(ChatSourceTextView.isCitation("来源：虎嗅"))
+        precondition(ChatSourceTextView.isCitation("source: Reuters"))
         precondition(ChatSourceTextView.isCitation("参考"))
         precondition(!ChatSourceTextView.isCitation("打开官网"))
         precondition(!ChatSourceTextView.isCitation("参考文档"))
@@ -1148,6 +1150,18 @@ enum AgentReplyRegression {
         precondition(ChatSourceTextView.sources(in: linked).count == 1, "Repeated citation links in one paragraph share one badge")
         let directOnly = try AttributedString(markdown: "百度官网是 [https://www.baidu.com](https://www.baidu.com) 或 [百度官网](https://www.baidu.com)")
         precondition(ChatSourceTextView.sources(in: directOnly).isEmpty, "Non-citation links must not produce trailing source badges")
+        let trailingMedia = try AttributedString(markdown: "本地生活负责人郭庆也在 11 月初因个人原因离职。[虎嗅](https://www.huxiu.com/article/1)")
+        precondition(ChatSourceTextView.sources(in: trailingMedia) == [URL(string: "https://www.huxiu.com/article/1")!],
+                     "Trailing media-name citation after period must collapse into a source badge")
+        let trailingWrapped = try AttributedString(markdown: "营销开支涨到 840 亿。（[虎嗅](https://www.huxiu.com/article/2)）")
+        precondition(ChatSourceTextView.sources(in: trailingWrapped) == [URL(string: "https://www.huxiu.com/article/2")!],
+                     "Wrapped trailing media-name citation after period must collapse into a source badge")
+        let trailingAction = try AttributedString(markdown: "详情如下。[打开官网](https://example.com/home)")
+        precondition(ChatSourceTextView.sources(in: trailingAction).isEmpty,
+                     "Explicit navigation links after a period must stay direct links")
+        let trailingBareURL = try AttributedString(markdown: "详情如下。https://example.com/home")
+        precondition(ChatSourceTextView.sources(in: trailingBareURL).isEmpty,
+                     "Bare URLs after a period must stay direct links")
 
         let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 640, height: 440),
                               styleMask: [.titled], backing: .buffered, defer: false)
@@ -4753,6 +4767,10 @@ enum AgentReplyRegression {
 
         参考引用样式[来源][ref1]，完整报告见 [百度财报](https://example.com/report) [来源：官方公告](https://example.com/notice)。
 
+        本地生活负责人郭庆也在 11 月初因个人原因离职。[虎嗅](https://www.huxiu.com/article/1)
+
+        2025 年新业务亏了 466 亿，营销开支从 480 亿涨到 840 亿。（[虎嗅](https://www.huxiu.com/article/2)）
+
         [来源](https://example.com/standalone)
 
         来源：[新闻报道](https://example.com/photo-source)
@@ -4777,6 +4795,11 @@ enum AgentReplyRegression {
                      "Expected wrapped Chinese/English citations removed cleanly, got:\n\(strippedShareMarkdown)")
         precondition(strippedShareMarkdown.contains("参考引用样式，完整报告见 [百度财报](https://example.com/report)。"),
                      "Expected reference-style and prefixed citations stripped while keeping descriptive link, got:\n\(strippedShareMarkdown)")
+        precondition(strippedShareMarkdown.contains("本地生活负责人郭庆也在 11 月初因个人原因离职。")
+                     && strippedShareMarkdown.contains("2025 年新业务亏了 466 亿，营销开支从 480 亿涨到 840 亿。")
+                     && !strippedShareMarkdown.contains("虎嗅")
+                     && !strippedShareMarkdown.contains("https://www.huxiu.com"),
+                     "Expected trailing media-name citations stripped cleanly, got:\n\(strippedShareMarkdown)")
         precondition(!strippedShareMarkdown.contains("https://example.com/standalone")
                      && !strippedShareMarkdown.contains("https://example.com/photo-source")
                      && !strippedShareMarkdown.contains("新闻报道"),
@@ -4794,13 +4817,13 @@ enum AgentReplyRegression {
         let sampleReply = """
         ### 本周性能优化建议
 
-        把首屏渲染与异步数据加载拆开后，整体响应会明显更轻快[来源](https://example.com/perf)：
+        把首屏渲染与异步数据加载拆开后，[凤凰网的分析](https://example.com/ifeng)指出整体响应会明显更轻快[来源](https://example.com/perf)：
 
         1. **首屏优先**：先呈现骨架与缓存结果，后台增量刷新远程数据[来源](https://example.com/skeleton)
         2. **减少主线程解码**：将图片缩放与高斯模糊放到独立渲染管线 [1](https://example.com/decode)
         3. **按需预加载**：列表只维护视口前后一屏的原生视图（[source](https://example.com/preload)）
 
-        > 建议先用 Instruments 采样 30 秒，优先解决耗时占比最高的前两个热点。[来源](https://example.com/instruments)
+        > 建议先用 Instruments 采样 30 秒，优先解决耗时占比最高的前两个热点。[虎嗅](https://example.com/huxiu)
 
         ```swift
         let png = ChatShareCardRenderer.renderPNG(text: reply, appearance: .dark)
@@ -4816,6 +4839,24 @@ enum AgentReplyRegression {
             precondition(rep.pixelsWide >= 1190 && rep.pixelsHigh >= 600,
                          "Expected Retina share card dimensions for \(appearance.rawValue), got \(rep.pixelsWide)x\(rep.pixelsHigh)")
             try png.write(to: URL(filePath: "build/share-card-\(appearance.rawValue).png"))
+            // Static share cards must not render inline links in hyperlink blue (skip the top Asky logo header).
+            var linkBluePixels = 0
+            for y in stride(from: 220, to: rep.pixelsHigh - 80, by: 2) {
+                for x in stride(from: 80, to: rep.pixelsWide - 80, by: 2) {
+                    guard let c = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { continue }
+                    if appearance == .light {
+                        if c.blueComponent > 0.65 && c.redComponent < 0.25 && (c.blueComponent - c.redComponent) > 0.45 {
+                            linkBluePixels += 1
+                        }
+                    } else {
+                        if c.blueComponent > 0.85 && c.greenComponent > 0.58 && c.redComponent < 0.55 && (c.blueComponent - c.redComponent) > 0.35 {
+                            linkBluePixels += 1
+                        }
+                    }
+                }
+            }
+            precondition(linkBluePixels == 0,
+                         "Share card \(appearance.rawValue) must not draw clickable link-blue styling, found \(linkBluePixels) pixels")
             print("Share card \(appearance.rawValue): \(rep.pixelsWide)x\(rep.pixelsHigh) (\(png.count) bytes)")
         }
 

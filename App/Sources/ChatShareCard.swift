@@ -180,10 +180,12 @@ struct ChatShareCardContent: View {
     private enum InlineToken {
         case plain(String)
         case protected(String)
+        case link(raw: String, label: String, url: URL)
         case citation
     }
 
     private static let citationSeparators = CharacterSet.whitespaces.union(CharacterSet(charactersIn: "、,，;；/"))
+    private static let trailingWrapperSet = CharacterSet.whitespaces.union(CharacterSet(charactersIn: "、,，;；/()（）[]【】"))
     private static let trailingPunctuation: Set<Character> = Set("。，、；：！？.,;:!?）)】]}》」』”’|")
     private static let wrapperPairs: [(open: String, close: String)] = [
         ("（", "）"), ("(", ")"), ("【", "】"), ("[", "]"),
@@ -304,7 +306,8 @@ struct ChatShareCardContent: View {
     }
 
     private static func stripInlineCitations(from line: String) -> (String, Bool) {
-        let rawTokens = tokenizeLine(line)
+        var rawTokens = tokenizeLine(line)
+        promoteTrailingCitations(in: &rawTokens)
         guard rawTokens.contains(where: { if case .citation = $0 { return true }; return false }) else {
             return (line, false)
         }
@@ -373,6 +376,9 @@ struct ChatShareCardContent: View {
             case .plain(let text), .protected(let text):
                 result.append(text)
                 i += 1
+            case .link(let raw, _, _):
+                result.append(raw)
+                i += 1
             case .citation:
                 var nextPlainIndex: Int?
                 if i + 1 < tokens.count, case .plain = tokens[i + 1] {
@@ -414,11 +420,60 @@ struct ChatShareCardContent: View {
         }
     }
 
+    private static func promoteTrailingCitations(in tokens: inout [InlineToken]) {
+        var candidateIndices: [Int] = []
+        var idx = tokens.count - 1
+        var prefixTextBeforeSuffix = ""
+        var stopIndex: Int?
+        while idx >= 0 {
+            switch tokens[idx] {
+            case .citation:
+                idx -= 1
+                continue
+            case .link(_, let label, let url):
+                if ChatSourceTextView.isTrailingCitationCandidate(label: label, url: url) {
+                    candidateIndices.append(idx)
+                    idx -= 1
+                    continue
+                }
+                return
+            case .plain(let text):
+                if text.trimmingCharacters(in: trailingWrapperSet).isEmpty {
+                    idx -= 1
+                    continue
+                }
+                prefixTextBeforeSuffix = ChatSourceTextView.trimTrailingCitationOpeners(text)
+                stopIndex = idx
+            case .protected:
+                return
+            }
+            if stopIndex != nil { break }
+        }
+        guard !candidateIndices.isEmpty, let stopIndex else { return }
+        var earlier = ""
+        if stopIndex > 0 {
+            for token in tokens[0..<stopIndex] {
+                switch token {
+                case .plain(let text), .protected(let text): earlier.append(text)
+                case .link(_, let label, _): earlier.append(label)
+                case .citation: break
+                }
+            }
+        }
+        if ChatSourceTextView.endsWithSentenceTerminator(earlier + prefixTextBeforeSuffix) {
+            for candidate in candidateIndices {
+                tokens[candidate] = .citation
+            }
+        }
+    }
+
     private static func nextNonEmptyCharacter(in tokens: [InlineToken], startingAt start: Int) -> Character? {
         for idx in start..<tokens.count {
             switch tokens[idx] {
             case .plain(let text), .protected(let text):
                 if let first = text.first { return first }
+            case .link(let raw, _, _):
+                if let first = raw.first { return first }
             case .citation:
                 continue
             }
@@ -520,10 +575,15 @@ struct ChatShareCardContent: View {
             // Inline Markdown link `[label](destination)`.
             if ch == "[", let parsed = parseInlineLink(in: line, from: idx) {
                 flushPlain()
+                let raw = String(line[idx..<parsed.end])
                 if isCitationLink(label: parsed.label, destination: parsed.destination) {
                     tokens.append(.citation)
+                } else if let plainLabel = plainLinkLabel(parsed.label),
+                          let url = URL(string: parsed.destination.trimmingCharacters(in: .whitespacesAndNewlines)),
+                          ChatImageService.supports(url) {
+                    tokens.append(.link(raw: raw, label: plainLabel, url: url))
                 } else {
-                    tokens.append(.protected(String(line[idx..<parsed.end])))
+                    tokens.append(.protected(raw))
                 }
                 idx = parsed.end
                 continue
@@ -666,25 +726,17 @@ struct ChatShareCardContent: View {
         return (label, destination, line.index(after: j))
     }
 
+    private static func plainLinkLabel(_ label: String) -> String? {
+        let parsed = ChatInlineText.parsed(label)
+        guard !parsed.runs.contains(where: { $0.imageURL != nil }) else { return nil }
+        return String(parsed.characters)
+    }
+
     private static func isCitationLink(label: String, destination: String) -> Bool {
         let trimmedDest = destination.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let url = URL(string: trimmedDest), ChatImageService.supports(url) else { return false }
-        let parsed = ChatInlineText.parsed(label)
-        guard !parsed.runs.contains(where: { $0.imageURL != nil }) else { return false }
-        let plain = String(parsed.characters)
-        if ChatSourceTextView.isCitation(plain) { return true }
-        let trimmed = plain.trimmingCharacters(in: CharacterSet(charactersIn: "[]【】()（） "))
-        guard !trimmed.isEmpty else { return false }
-        let lower = trimmed.lowercased()
-        let exactLabels = ["图片来源", "图源", "photo source", "image source", "credit"]
-        if exactLabels.contains(lower) { return true }
-        let prefixLabels = [
-            "来源", "图片来源", "图源", "引用", "参考", "出处",
-            "source", "photo source", "image source", "citation", "ref", "reference"
-        ]
-        return prefixLabels.contains { prefix in
-            lower.hasPrefix(prefix + ":") || lower.hasPrefix(prefix + "：")
-        }
+        guard let url = URL(string: trimmedDest), ChatImageService.supports(url),
+              let plain = plainLinkLabel(label) else { return false }
+        return ChatSourceTextView.isCitation(plain)
     }
 
     /// Extracts all supported remote image URLs from share-card Markdown, ignoring fenced/inline code.
@@ -791,8 +843,7 @@ struct ChatShareCardContent: View {
                 BackgroundColor(codeBackgroundColor)
             }
             .markdownTextStyle(\.link) {
-                ForegroundColor(isDark ? Color(red: 0.45, green: 0.72, blue: 1.0) : Color(red: 0.08, green: 0.42, blue: 0.85))
-                UnderlineStyle(.single)
+                ForegroundColor(primaryTextColor)
             }
             .markdownBlockStyle(\.heading1) { configuration in
                 configuration.label
