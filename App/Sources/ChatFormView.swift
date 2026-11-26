@@ -1658,55 +1658,86 @@ private struct ChatFormTimeCell: View {
 
 // MARK: - Shared Form Trigger, Submit & Popover Controls
 
-/// Prominent monochrome brand submit button matching Asky's primary controls (black-on-white / white-on-black).
+/// Prominent native Liquid Glass submit button matching Asky's primary controls.
 private struct ChatFormSubmitButton: View {
     let title: String
     let action: () -> Void
-    @State private var hovered = false
     @Environment(\.isEnabled) private var enabled
-    @Environment(\.colorScheme) private var scheme
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(_ title: String, action: @escaping () -> Void) {
         self.title = title
         self.action = action
     }
 
-    private var shape: RoundedRectangle {
-        RoundedRectangle(cornerRadius: ChatFormMetrics.controlCornerRadius, style: .continuous)
-    }
-
-    private var backgroundFill: Color {
-        if !enabled {
-            return (scheme == .dark ? Color.white : Color.black).opacity(0.09)
-        }
-        return ThemeColor.kBackgroundPrimary.color(for: scheme).opacity(hovered ? 0.86 : 1)
-    }
-
-    private var foregroundColor: Color {
-        if !enabled {
-            return ThemeColor("textDisabled").color(for: scheme)
-        }
-        return ThemeColor("textInverted").color(for: scheme)
-    }
-
     var body: some View {
-        Button(action: action) {
-            Text(title)
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(foregroundColor)
-                .padding(.horizontal, 18)
-                .frame(height: ChatFormMetrics.controlHeight)
-                .background(backgroundFill, in: shape)
-                .contentShape(shape)
+        ChatFormSubmitPushButton(title: title, action: action)
+            .fixedSize()
+            .actionArrowCursor(enabled: enabled)
+    }
+}
+
+private struct ChatFormSubmitPushButton: NSViewRepresentable {
+    let title: String
+    let action: () -> Void
+
+    @Environment(\.isEnabled) private var enabled
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    func makeCoordinator() -> Coordinator { Coordinator(action: action) }
+
+    func makeNSView(context: Context) -> NSButton {
+        let button = NSButton(title: title, target: context.coordinator, action: #selector(Coordinator.press))
+        button.font = .systemFont(ofSize: 14, weight: .medium)
+        if #available(macOS 26, *) { button.controlSize = .extraLarge } else { button.controlSize = .large }
+        button.identifier = NSUserInterfaceItemIdentifier("chat-form-submit")
+        button.setAccessibilityIdentifier("chat-form-submit")
+        return button
+    }
+
+    func updateNSView(_ button: NSButton, context: Context) {
+        context.coordinator.action = action
+        button.isEnabled = enabled
+        button.title = title
+        button.font = .systemFont(ofSize: 14, weight: .medium)
+        button.identifier = NSUserInterfaceItemIdentifier("chat-form-submit")
+        button.setAccessibilityIdentifier("chat-form-submit")
+        button.setAccessibilityLabel(title)
+        if #available(macOS 26, *) { button.controlSize = .extraLarge } else { button.controlSize = .large }
+        button.isBordered = true
+
+        if #available(macOS 26, *), !SurfaceCompatibility.useLegacyMaterial,
+           !reduceTransparency, contrast != .increased {
+            button.bezelStyle = .glass
+            button.borderShape = .capsule
+            button.tintProminence = .primary
+        } else {
+            button.bezelStyle = .rounded
+            if #available(macOS 26, *) {
+                button.borderShape = .automatic
+                button.tintProminence = .primary
+            }
         }
-        .buttonStyle(ChatFormOptionButtonStyle(active: enabled, reduceMotion: reduceMotion))
-        .onHover { hovered = $0 }
-        .background(ChatFormControlMarker(id: "chat-form-submit"))
-        .actionArrowCursor(enabled: enabled)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.10), value: hovered)
-        .accessibilityLabel(title)
-        .accessibilityIdentifier("chat-form-submit")
+        button.bezelColor = NSColor(SettingsPalette.monochromeTint(scheme))
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSButton, context: Context) -> CGSize? {
+        let intrinsic = nsView.intrinsicContentSize
+        let height: CGFloat
+        if #available(macOS 26, *) {
+            height = max(intrinsic.height, 36)
+        } else {
+            height = max(intrinsic.height, ChatFormMetrics.controlHeight)
+        }
+        return CGSize(width: max(intrinsic.width, 96), height: height)
+    }
+
+    @MainActor
+    final class Coordinator: NSObject {
+        var action: () -> Void
+        init(action: @escaping () -> Void) { self.action = action }
+        @objc func press() { action() }
     }
 }
 
