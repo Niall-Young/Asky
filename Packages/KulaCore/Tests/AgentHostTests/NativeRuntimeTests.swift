@@ -944,6 +944,19 @@ server.serve_forever()
         #expect(!fallback.contains("UnexpectedEdgeError"))
         #expect(!fallback.contains("HTTP"))
 
+        // Chinese AI chat error messages must never end with a Chinese full stop ("。").
+        for reason in ModelFailureReason.allCases {
+            #expect(!reason.userMessage.hasSuffix("。"), "Unexpected trailing period for \(reason): \(reason.userMessage)")
+        }
+        let hostErrors: [AgentHostError] = [
+            .notConfigured, .credentialMissing, .sessionBusy,
+            .handshakeFailed("test"), .protocolMismatch(1), .launchFailed("test")
+        ]
+        for error in hostErrors {
+            let text = error.localizedDescription
+            #expect(!text.hasSuffix("。"), "Unexpected trailing period for \(error): \(text)")
+        }
+
         // Empty model reply emits a natural-language error instead of silently completing with no bubble.
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

@@ -84,7 +84,7 @@
 "实例名称（如 Claude Desktop）" = "Instance name (e.g. Claude Desktop)";
 "尚未请求" = "Not requested";
 "尚未选择" = "No selection";
-"尚未配置模型。请在 设置 › 模型 中填写 API 地址、模型名与 Key。" = "No model is configured. Enter an API URL, model name, and key in Settings › Model Settings.";
+"尚未配置模型。请在 设置 › 模型 中填写 API 地址、模型名与 Key" = "No model is configured. Enter an API URL, model name, and key in Settings › Model Settings.";
 "屏幕录制" = "Screen Recording";
 "工作目录" = "Working directory";
 "已保存" = "Saved";
@@ -704,8 +704,8 @@
 "改为" = "Replace with";
 "草稿" = "Draft";
 
-"尚未配置模型，请在设置 › 模型中填写 API 地址、模型名与 Key。" = "No model is configured. Enter the API address, model name and key in Settings › Intelligence.";
-"模型 API Key 不存在或为空，请在设置 › 模型中重新保存 Key。" = "The model API key is missing or empty. Save it again in Settings › Intelligence.";
+"尚未配置模型，请在设置 › 模型中填写 API 地址、模型名与 Key" = "No model is configured. Enter the API address, model name and key in Settings › Intelligence.";
+"模型 API Key 不存在或为空，请在设置 › 模型中重新保存 Key" = "The model API key is missing or empty. Save it again in Settings › Intelligence.";
 "该会话已有任务在运行。" = "A task is already running in this conversation.";
 "该会话已有任务在运行" = "A task is already running in this conversation";
 "任务已结束" = "The task has ended";
@@ -1096,6 +1096,6 @@
 "整轮回复" = "Full reply";
 "仅此条" = "This bubble";
 "至" = "to";
-"AI 服务当前不可用，请稍后重试或重启 Asky。" = "The AI service is currently unavailable. Try again later or restart Asky.";
-"保存消息失败，请稍后重试。" = "Couldn’t save the message. Please try again later.";
-"AI 服务意外中断，未能完成回复，请重试。" = "The AI service stopped unexpectedly before finishing the reply. Please try again.";
+"AI 服务当前不可用，请稍后重试或重启 Asky" = "The AI service is currently unavailable. Try again later or restart Asky.";
+"保存消息失败，请稍后重试" = "Couldn’t save the message. Please try again later.";
+"AI 服务意外中断，未能完成回复，请重试" = "The AI service stopped unexpectedly before finishing the reply. Please try again.";

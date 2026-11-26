@@ -6,7 +6,10 @@ import Security
 
 @Suite struct KeychainTests {
     @Test func authorizationFailuresHaveActionableMessages() {
-        #expect(Keychain.KeychainError.status(errSecUserCanceled).localizedDescription == CoreLocalization.text("钥匙串授权已取消，请重新发送消息并允许 Asky 访问模型 Key。"))
+        #expect(Keychain.KeychainError.status(errSecUserCanceled).localizedDescription == CoreLocalization.text("钥匙串授权已取消，请重新发送消息并允许 Asky 访问模型 Key"))
+        for status in [errSecUserCanceled, errSecAuthFailed, errSecInteractionNotAllowed, errSecNotAvailable] {
+            #expect(!Keychain.KeychainError.status(status).localizedDescription.hasSuffix("。"))
+        }
         #expect(Keychain.KeychainError.status(errSecAuthFailed).requiresAuthentication)
         #expect(Keychain.KeychainError.status(errSecInteractionNotAllowed).requiresAuthentication)
         #expect(!Keychain.KeychainError.status(errSecUserCanceled).requiresAuthentication)

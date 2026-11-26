@@ -20,10 +20,10 @@ public struct Keychain: Sendable {
             switch self {
             case .status(let status):
                 switch status {
-                case errSecUserCanceled: return CoreLocalization.text("钥匙串授权已取消，请重新发送消息并允许 Asky 访问模型 Key。")
-                case errSecAuthFailed: return CoreLocalization.text("钥匙串授权失败，请重新发送消息并完成模型 Key 的访问授权。")
-                case errSecInteractionNotAllowed: return CoreLocalization.text("钥匙串暂时无法交互，请解锁登录钥匙串后重新发送消息。")
-                default: return CoreLocalization.format("读取模型 Key 失败（钥匙串状态码 %@）。请检查钥匙串授权或在设置 › 模型中重新保存 Key。", String(describing: status))
+                case errSecUserCanceled: return CoreLocalization.text("钥匙串授权已取消，请重新发送消息并允许 Asky 访问模型 Key")
+                case errSecAuthFailed: return CoreLocalization.text("钥匙串授权失败，请重新发送消息并完成模型 Key 的访问授权")
+                case errSecInteractionNotAllowed: return CoreLocalization.text("钥匙串暂时无法交互，请解锁登录钥匙串后重新发送消息")
+                default: return CoreLocalization.format("读取模型 Key 失败（钥匙串状态码 %@）。请检查钥匙串授权或在设置 › 模型中重新保存 Key", String(describing: status))
                 }
             }
         }

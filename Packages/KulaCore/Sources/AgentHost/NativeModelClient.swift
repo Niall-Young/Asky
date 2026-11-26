@@ -35,7 +35,7 @@ public struct NativeCompletion: Sendable {
     }
 }
 
-public enum ModelFailureReason: Sendable, Equatable {
+public enum ModelFailureReason: Sendable, Equatable, CaseIterable {
     case invalidURL
     case authentication
     case insufficientQuota
@@ -68,61 +68,61 @@ public enum ModelFailureReason: Sendable, Equatable {
     public var userMessage: String {
         switch self {
         case .invalidURL:
-            CoreLocalization.text("模型 API 地址格式有误，请在「设置 › 模型」中检查后重试。")
+            CoreLocalization.text("模型 API 地址格式有误，请在「设置 › 模型」中检查后重试")
         case .authentication:
-            CoreLocalization.text("API Key 无效或已失效，请在「设置 › 模型」中检查并更新。")
+            CoreLocalization.text("API Key 无效或已失效，请在「设置 › 模型」中检查并更新")
         case .insufficientQuota:
-            CoreLocalization.text("模型服务账户余额或额度不足，请充值或检查套餐后重试。")
+            CoreLocalization.text("模型服务账户余额或额度不足，请充值或检查套餐后重试")
         case .permissionDenied:
-            CoreLocalization.text("当前 API Key 没有权限访问该模型或服务，请检查账号权限或地区限制。")
+            CoreLocalization.text("当前 API Key 没有权限访问该模型或服务，请检查账号权限或地区限制")
         case .modelNotFound:
-            CoreLocalization.text("找不到对应的模型或接口地址，请在「设置 › 模型」中核对 API 地址与模型名称。")
+            CoreLocalization.text("找不到对应的模型或接口地址，请在「设置 › 模型」中核对 API 地址与模型名称")
         case .contextTooLong:
-            CoreLocalization.text("当前对话内容或附件过长，超出了模型的处理上限，请精简内容或开启新对话后重试。")
+            CoreLocalization.text("当前对话内容或附件过长，超出了模型的处理上限，请精简内容或开启新对话后重试")
         case .contentFiltered:
-            CoreLocalization.text("当前内容触发了模型服务的安全限制，无法生成回复，请调整表述后重试。")
+            CoreLocalization.text("当前内容触发了模型服务的安全限制，无法生成回复，请调整表述后重试")
         case .unsupportedImage:
-            CoreLocalization.text("当前模型不支持处理图片附件，请切换支持视觉的模型或移除图片后重试。")
+            CoreLocalization.text("当前模型不支持处理图片附件，请切换支持视觉的模型或移除图片后重试")
         case .unsupportedTools:
-            CoreLocalization.text("当前模型不支持工具调用，请在「设置 › 模型」中更换支持工具调用的模型。")
+            CoreLocalization.text("当前模型不支持工具调用，请在「设置 › 模型」中更换支持工具调用的模型")
         case .rateLimited:
-            CoreLocalization.text("请求过于频繁，模型服务暂时限流，请稍后再试。")
+            CoreLocalization.text("请求过于频繁，模型服务暂时限流，请稍后再试")
         case .badRequest:
-            CoreLocalization.text("模型服务无法处理本次请求，请检查模型设置或调整内容后重试。")
+            CoreLocalization.text("模型服务无法处理本次请求，请检查模型设置或调整内容后重试")
         case .timeout:
-            CoreLocalization.text("连接或等待 AI 响应超时，请检查网络状况后重试。")
+            CoreLocalization.text("连接或等待 AI 响应超时，请检查网络状况后重试")
         case .serverUnavailable:
-            CoreLocalization.text("模型服务暂时不可用或出现故障，请稍后重试。")
+            CoreLocalization.text("模型服务暂时不可用或出现故障，请稍后重试")
         case .outputLengthLimit:
-            CoreLocalization.text("本次回复达到模型的生成长度上限，未能完整输出，请尝试拆分为更小的问题后重试。")
+            CoreLocalization.text("本次回复达到模型的生成长度上限，未能完整输出，请尝试拆分为更小的问题后重试")
         case .outputInterrupted:
-            CoreLocalization.text("AI 生成过程中意外中断，未能完成回复，请重试。")
+            CoreLocalization.text("AI 生成过程中意外中断，未能完成回复，请重试")
         case .emptyResponse:
-            CoreLocalization.text("AI 未能生成有效回复，请重试。")
+            CoreLocalization.text("AI 未能生成有效回复，请重试")
         case .responseTooLarge:
-            CoreLocalization.text("AI 返回的内容过大，超出了单次处理上限，请缩小问题范围后重试。")
+            CoreLocalization.text("AI 返回的内容过大，超出了单次处理上限，请缩小问题范围后重试")
         case .invalidToolCall:
-            CoreLocalization.text("AI 返回的操作指令有误，无法继续执行，请重试。")
+            CoreLocalization.text("AI 返回的操作指令有误，无法继续执行，请重试")
         case .malformedResponse:
-            CoreLocalization.text("模型返回了无法识别的内容，请检查 API 地址是否为兼容的对话接口，或稍后重试。")
+            CoreLocalization.text("模型返回了无法识别的内容，请检查 API 地址是否为兼容的对话接口，或稍后重试")
         case .compactionFailed:
-            CoreLocalization.text("整理较长对话的上下文时出现异常，请重试或开启新对话。")
+            CoreLocalization.text("整理较长对话的上下文时出现异常，请重试或开启新对话")
         case .toolRoundLimit:
-            CoreLocalization.text("自动操作步骤已达上限，已暂停执行，你可以补充说明后继续。")
+            CoreLocalization.text("自动操作步骤已达上限，已暂停执行，你可以补充说明后继续")
         case .providerError:
-            CoreLocalization.text("模型服务返回异常，暂时无法生成回复，请稍后重试。")
+            CoreLocalization.text("模型服务返回异常，暂时无法生成回复，请稍后重试")
         case .networkOffline:
-            CoreLocalization.text("网络连接已断开，请检查网络或代理设置后重试。")
+            CoreLocalization.text("网络连接已断开，请检查网络或代理设置后重试")
         case .cannotFindHost:
-            CoreLocalization.text("找不到模型服务器，请检查网络连接或 API 地址是否填写正确。")
+            CoreLocalization.text("找不到模型服务器，请检查网络连接或 API 地址是否填写正确")
         case .cannotConnect:
-            CoreLocalization.text("无法连接到模型服务，请检查网络、代理或服务是否正常运行。")
+            CoreLocalization.text("无法连接到模型服务，请检查网络、代理或服务是否正常运行")
         case .tlsFailure:
-            CoreLocalization.text("与模型服务的安全连接失败，请检查系统时间、代理或网络环境。")
+            CoreLocalization.text("与模型服务的安全连接失败，请检查系统时间、代理或网络环境")
         case .networkError:
-            CoreLocalization.text("网络连接出现异常，暂时无法请求模型服务，请稍后重试。")
+            CoreLocalization.text("网络连接出现异常，暂时无法请求模型服务，请稍后重试")
         case .unknown:
-            CoreLocalization.text("AI 暂时遇到故障，无法生成回复，请稍后重试。")
+            CoreLocalization.text("AI 暂时遇到故障，无法生成回复，请稍后重试")
         }
     }
 }

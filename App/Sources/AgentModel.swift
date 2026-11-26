@@ -502,6 +502,14 @@ final class AgentModel {
         }
     }
 
+    static func sanitizedErrorText(_ text: String) -> String {
+        var result = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        while result.last == "。" {
+            result.removeLast()
+        }
+        return result
+    }
+
     private static func item(_ m: StoredMessage) -> ChatItem {
         let p = m.presentation
         let kind: ChatItem.Kind
@@ -513,7 +521,8 @@ final class AgentModel {
         case "error": kind = .error
         default: kind = .notice
         }
-        return ChatItem(id: m.id, kind: kind, text: m.text,
+        let text = kind == .error ? Self.sanitizedErrorText(m.text) : m.text
+        return ChatItem(id: m.id, kind: kind, text: text,
             needsPermissionSettings: p?.needsPermissionSettings ?? false,
             toolName: p?.toolName, toolError: p?.toolError, workSeconds: p?.workSeconds,
             createdAt: m.createdAt,
@@ -585,6 +594,9 @@ final class AgentModel {
 
     private func appendTrimmed(_ item: ChatItem) {
         var item = item
+        if item.kind == .error {
+            item.text = Self.sanitizedErrorText(item.text)
+        }
         if item.kind != .user, let taskID {
             item.responseID = taskID
             item.completedAt = nil
@@ -749,11 +761,11 @@ final class AgentModel {
         if formSubmission != nil, isRunning { return false }
         let text = input.isEmpty ? NSLocalizedString("请分析这些附件", comment: "") : input
         guard let agent = app.agent else {
-            appendTrimmed(ChatItem(id: UUID().uuidString, kind: .error, text: app.agentUnavailableReason ?? NSLocalizedString("AI 服务当前不可用，请稍后重试或重启 Asky。", comment: "")))
+            appendTrimmed(ChatItem(id: UUID().uuidString, kind: .error, text: app.agentUnavailableReason ?? NSLocalizedString("AI 服务当前不可用，请稍后重试或重启 Asky", comment: "")))
             return false
         }
         guard app.modelConfiguration != nil else {
-            appendTrimmed(ChatItem(id: UUID().uuidString, kind: .error, text: NSLocalizedString("尚未配置模型。请在 设置 › 模型 中填写 API 地址、模型名与 Key。", comment: "")))
+            appendTrimmed(ChatItem(id: UUID().uuidString, kind: .error, text: NSLocalizedString("尚未配置模型。请在 设置 › 模型 中填写 API 地址、模型名与 Key", comment: "")))
             return false
         }
 
@@ -772,7 +784,7 @@ final class AgentModel {
                                            attachments: submittedAttachments, presentation: presentation)
                 appendTrimmed(Self.item(message))
             } catch {
-                appendTrimmed(ChatItem(id: UUID().uuidString, kind: .error, text: NSLocalizedString("保存消息失败，请稍后重试。", comment: "")))
+                appendTrimmed(ChatItem(id: UUID().uuidString, kind: .error, text: NSLocalizedString("保存消息失败，请稍后重试", comment: "")))
                 return false
             }
             if fromComposer { clearComposerAfterSend() }
@@ -822,7 +834,7 @@ final class AgentModel {
             }
             appendTrimmed(Self.item(message))
         } catch {
-            appendTrimmed(ChatItem(id: UUID().uuidString, kind: .error, text: NSLocalizedString("保存消息失败，请稍后重试。", comment: "")))
+            appendTrimmed(ChatItem(id: UUID().uuidString, kind: .error, text: NSLocalizedString("保存消息失败，请稍后重试", comment: "")))
             return false
         }
         if fromComposer { clearComposerAfterSend() }
@@ -988,7 +1000,7 @@ final class AgentModel {
         case .error(_, let msg):
             appendTrimmed(ChatItem(id: UUID().uuidString, kind: .error, text: msg))
         case .runtimeExited:
-            if taskID != nil { appendTrimmed(ChatItem(id: UUID().uuidString, kind: .error, text: NSLocalizedString("AI 服务意外中断，未能完成回复，请重试。", comment: ""))) }
+            if taskID != nil { appendTrimmed(ChatItem(id: UUID().uuidString, kind: .error, text: NSLocalizedString("AI 服务意外中断，未能完成回复，请重试", comment: ""))) }
         }
     }
 
