@@ -13,6 +13,32 @@ enum ChatFormMetrics {
     static let replyPartSpacing: CGFloat = 12
 }
 
+enum ChatFormPalette {
+    /// Softened monochrome border shared by focused inputs, active triggers, and selected options.
+    static func selectedBorder(_ scheme: ColorScheme, contrast: ColorSchemeContrast = .standard, active: Bool = true) -> Color {
+        let boost: Double = contrast == .increased ? 0.16 : 0
+        let base: Double
+        if !active {
+            base = scheme == .dark ? 0.16 : 0.14
+        } else {
+            base = scheme == .dark ? 0.34 : 0.28
+        }
+        return (scheme == .dark ? Color.white : Color.black).opacity(min(1, base + boost))
+    }
+
+    /// Softened translucent surface fill for selected picker items (calendar day, time cell, range tab).
+    static func selectedFill(_ scheme: ColorScheme) -> Color {
+        scheme == .dark ? Color.white.opacity(0.12) : Color.white.opacity(0.56)
+    }
+
+    /// Softened 1pt border for selected picker items on Liquid Glass surfaces.
+    static func pickerSelectedBorder(_ scheme: ColorScheme, contrast: ColorSchemeContrast = .standard) -> Color {
+        let boost: Double = contrast == .increased ? 0.16 : 0
+        let base: Double = scheme == .dark ? 0.32 : 0.26
+        return (scheme == .dark ? Color.white : Color.black).opacity(min(1, base + boost))
+    }
+}
+
 struct ChatReplyView: View {
     let text: String
     var isStreaming = false
@@ -50,6 +76,8 @@ struct ChatFormView: View {
     let submit: () -> Void
 
     @State private var singleCustomExpanded = false
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.colorSchemeContrast) private var contrast
 
     private var isSingleField: Bool { form.fields.count == 1 }
 
@@ -109,6 +137,8 @@ struct ChatFormView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .environment(\.settingsInputHeight, ChatFormMetrics.controlHeight)
         .environment(\.settingsInputCornerRadius, ChatFormMetrics.controlCornerRadius)
+        .environment(\.settingsInputFocusBorder, ChatFormPalette.selectedBorder(scheme, contrast: contrast))
+        .environment(\.settingsInputFocusBorderWidth, 1)
     }
 
     @ViewBuilder private func control(_ field: ChatForm.Field) -> some View {
@@ -319,13 +349,7 @@ private struct ChatFormOptionRow: View {
     }
 
     private var selectedBorderColor: Color {
-        let boost: Double = contrast == .increased ? 0.16 : 0
-        if !active {
-            let base: Double = scheme == .dark ? 0.16 : 0.14
-            return (scheme == .dark ? Color.white : Color.black).opacity(min(1, base + boost))
-        }
-        let base: Double = scheme == .dark ? 0.34 : 0.28
-        return (scheme == .dark ? Color.white : Color.black).opacity(min(1, base + boost))
+        ChatFormPalette.selectedBorder(scheme, contrast: contrast, active: active)
     }
 
     private var unselectedBorderColor: Color {
@@ -1477,6 +1501,7 @@ private struct ChatFormRangeTabPill: View {
 
     @State private var hovered = false
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.colorSchemeContrast) private var contrast
 
     private var shape: RoundedRectangle {
         RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -1484,7 +1509,7 @@ private struct ChatFormRangeTabPill: View {
 
     private var fill: Color {
         if active {
-            return scheme == .dark ? Color.white.opacity(0.11) : Color.white.opacity(0.68)
+            return ChatFormPalette.selectedFill(scheme)
         }
         if hovered {
             return ThemeColor.kInteractionHover.color(for: scheme)
@@ -1510,7 +1535,7 @@ private struct ChatFormRangeTabPill: View {
                 .background(fill, in: shape)
                 .overlay {
                     if active {
-                        shape.strokeBorder(ThemeColor.kBorder.color(for: scheme), lineWidth: 1)
+                        shape.strokeBorder(ChatFormPalette.pickerSelectedBorder(scheme, contrast: contrast), lineWidth: 1)
                             .allowsHitTesting(false)
                     }
                 }
@@ -1606,6 +1631,11 @@ private struct ChatFormTimeCell: View {
     let action: () -> Void
     @State private var hovered = false
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    private var shape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: 7, style: .continuous)
+    }
 
     var body: some View {
         Button(action: action) {
@@ -1613,19 +1643,25 @@ private struct ChatFormTimeCell: View {
                 .font(.system(size: 13.5, weight: selected ? .semibold : .regular))
                 .monospacedDigit()
                 .foregroundStyle(
-                    selected
-                        ? ThemeColor("textInverted").color(for: scheme)
-                        : hovered ? ThemeColor.kText.color(for: scheme) : ThemeColor.kTextSubtle.color(for: scheme)
+                    selected || hovered
+                        ? ThemeColor.kText.color(for: scheme)
+                        : ThemeColor.kTextSubtle.color(for: scheme)
                 )
                 .frame(maxWidth: .infinity)
                 .frame(height: 30)
                 .background(
                     selected
-                        ? ThemeColor.kBackgroundPrimary.color(for: scheme)
+                        ? ChatFormPalette.selectedFill(scheme)
                         : hovered ? ThemeColor.kInteractionHover.color(for: scheme) : .clear,
-                    in: RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    in: shape
                 )
-                .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                .overlay {
+                    if selected {
+                        shape.strokeBorder(ChatFormPalette.pickerSelectedBorder(scheme, contrast: contrast), lineWidth: 1)
+                            .allowsHitTesting(false)
+                    }
+                }
+                .contentShape(shape)
         }
         .buttonStyle(.plain)
         .onHover { hovered = $0 }

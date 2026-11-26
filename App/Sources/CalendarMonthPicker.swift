@@ -118,10 +118,11 @@ private struct CalendarDayCell: View {
     let action: () -> Void
     @State private var hovered = false
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.colorSchemeContrast) private var contrast
 
     private var foreground: Color {
         if selected {
-            return monochrome ? ThemeColor("textInverted").color(for: scheme) : .white
+            return monochrome ? ThemeColor.kText.color(for: scheme) : .white
         }
         if isRangeEndpoint {
             return monochrome ? ThemeColor.kText.color(for: scheme) : Color.primary
@@ -137,10 +138,10 @@ private struct CalendarDayCell: View {
 
     private var circleFill: Color {
         if selected {
-            return monochrome ? ThemeColor.kBackgroundPrimary.color(for: scheme) : Color.accentColor
+            return monochrome ? ChatFormPalette.selectedFill(scheme) : Color.accentColor
         }
         if isRangeEndpoint {
-            return scheme == .dark ? Color.white.opacity(0.22) : Color.black.opacity(0.14)
+            return scheme == .dark ? Color.white.opacity(0.12) : Color.black.opacity(0.08)
         }
         if hovered {
             return ThemeColor.kInteractionHover.color(for: scheme)
@@ -150,7 +151,7 @@ private struct CalendarDayCell: View {
 
     private var rangeFill: Color {
         guard isInRange else { return .clear }
-        return scheme == .dark ? Color.white.opacity(0.09) : Color.black.opacity(0.065)
+        return scheme == .dark ? Color.white.opacity(0.06) : Color.black.opacity(0.045)
     }
 
     var body: some View {
@@ -169,9 +170,14 @@ private struct CalendarDayCell: View {
                     Circle().fill(circleFill)
                 }
                 .overlay {
-                    if monochrome && isToday && !selected && !isRangeEndpoint {
+                    if monochrome && selected {
+                        Circle()
+                            .strokeBorder(ChatFormPalette.pickerSelectedBorder(scheme, contrast: contrast), lineWidth: 1)
+                            .allowsHitTesting(false)
+                    } else if monochrome && isToday && !isRangeEndpoint {
                         Circle()
                             .strokeBorder(ThemeColor("borderPrimary").color(for: scheme), lineWidth: 1)
+                            .allowsHitTesting(false)
                     }
                 }
                 .contentShape(Rectangle())
