@@ -1,5 +1,20 @@
 import AppKit
 
+extension NSWindow {
+    /// End active text editing before dispatching a left click outside the editor,
+    /// preserving the clicked control's action while leaving read-only text views alone.
+    func endEditingIfOutsideClick(_ event: NSEvent) {
+        guard event.type == .leftMouseDown,
+              let editor = firstResponder as? NSTextView,
+              editor.isEditable else { return }
+        let input: NSView? = editor.isFieldEditor ? editor.delegate as? NSView : editor
+        if let input,
+           !input.bounds.contains(input.convert(event.locationInWindow, from: nil)) {
+            makeFirstResponder(nil)
+        }
+    }
+}
+
 /// End editing before dispatching an outside click, preserving the clicked control's action.
 @MainActor
 final class SettingsEditingWindow: NSWindow {
@@ -11,15 +26,11 @@ final class SettingsEditingWindow: NSWindow {
             return
         }
         if event.type == .leftMouseDown {
-            if let editor = firstResponder as? NSTextView {
-                let input: NSView? = editor.isFieldEditor ? editor.delegate as? NSView : editor
-                if let input,
-                   !input.bounds.contains(input.convert(event.locationInWindow, from: nil)) {
-                    makeFirstResponder(nil)
-                }
-            } else if let recorder = firstResponder as? HotKeyRecorderField,
-                      !recorder.bounds.contains(recorder.convert(event.locationInWindow, from: nil)) {
+            if let recorder = firstResponder as? HotKeyRecorderField,
+               !recorder.bounds.contains(recorder.convert(event.locationInWindow, from: nil)) {
                 makeFirstResponder(nil)
+            } else {
+                endEditingIfOutsideClick(event)
             }
         }
         super.sendEvent(event)

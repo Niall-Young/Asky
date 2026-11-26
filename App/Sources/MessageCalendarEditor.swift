@@ -369,6 +369,11 @@ final class CalendarEditorWindow: NSWindow {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
 
+    override func sendEvent(_ event: NSEvent) {
+        endEditingIfOutsideClick(event)
+        super.sendEvent(event)
+    }
+
     override func cancelOperation(_ sender: Any?) {
         onCancel?()
     }

@@ -1923,16 +1923,47 @@ enum AgentReplyRegression {
             if let field = view as? NSTextField, field.isEditable { return field }
             return view.subviews.compactMap { editableField($0) }.first
         }
+        func allViews(_ view: NSView) -> [NSView] {
+            [view] + view.subviews.flatMap(allViews)
+        }
         let answerField = editableField(window.contentView!)
         if let field = answerField, window.makeFirstResponder(field), let editor = field.currentEditor() {
             editor.insertText("原生输入回归")
             try await Task.sleep(for: .milliseconds(100))
             precondition(model.formValues[messageID]?["title"] == ["原生输入回归"])
+            func sendLeftClick(at point: NSPoint) {
+                let down = NSEvent.mouseEvent(with: .leftMouseDown, location: point, modifierFlags: [],
+                    timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                    context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+                let up = NSEvent.mouseEvent(with: .leftMouseUp, location: point, modifierFlags: [],
+                    timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                    context: nil, eventNumber: 0, clickCount: 1, pressure: 0)!
+                window.sendEvent(down)
+                window.sendEvent(up)
+            }
+            let fieldRect = field.convert(field.bounds, to: nil)
+            sendLeftClick(at: NSPoint(x: fieldRect.midX, y: fieldRect.midY))
+            precondition(field.currentEditor() != nil && window.firstResponder === field.currentEditor(),
+                         "Clicking inside the focused form field must keep focus")
+            let blankPoint = NSPoint(x: 16, y: window.contentLayoutRect.midY)
+            sendLeftClick(at: blankPoint)
+            try await Task.sleep(for: .milliseconds(80))
+            precondition(field.currentEditor() == nil && (window.firstResponder as? NSTextView)?.isEditable != true,
+                         "Clicking blank space in AgentWindow must blur the focused form field")
+            precondition(model.formValues[messageID]?["title"] == ["原生输入回归"],
+                         "Blurring the form field by clicking blank space must preserve its text")
+            if let composer = allViews(window.contentView!).compactMap({ $0 as? NSTextView })
+                .first(where: { $0.isEditable && !$0.isFieldEditor }),
+               window.makeFirstResponder(composer) {
+                try await Task.sleep(for: .milliseconds(80))
+                precondition(window.firstResponder === composer, "Composer should focus before outside-click blur check")
+                sendLeftClick(at: blankPoint)
+                try await Task.sleep(for: .milliseconds(80))
+                precondition(window.firstResponder !== composer && (window.firstResponder as? NSTextView)?.isEditable != true,
+                             "Clicking blank space in AgentWindow must also blur the focused composer")
+            }
         } else { preconditionFailure("The complete reply must expose an editable native form") }
         try capture("complete")
-        func allViews(_ view: NSView) -> [NSView] {
-            [view] + view.subviews.flatMap(allViews)
-        }
         precondition(!allViews(window.contentView!).contains { $0 is NSPopUpButton },
                      "Chat forms must never render select dropdowns (NSPopUpButton)")
         let _ = allViews(window.contentView!).first { $0.identifier?.rawValue == "chat-form-submit" }

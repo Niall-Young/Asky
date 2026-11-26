@@ -691,7 +691,11 @@ struct ComposerTextEditor: NSViewRepresentable {
         editor.autoresizingMask = [.width]
         editor.delegate = context.coordinator
         editor.focusChanged = { [weak coordinator = context.coordinator] focused in
-            DispatchQueue.main.async { coordinator?.parent.isFocused = focused }
+            coordinator?.pendingResign = !focused
+            DispatchQueue.main.async {
+                coordinator?.parent.isFocused = focused
+                if !focused { coordinator?.pendingResign = false }
+            }
         }
         editor.onMarkedTextChanged = { [weak coordinator = context.coordinator] composing in
             coordinator?.handleMarkedTextChanged(composing)
@@ -759,7 +763,7 @@ struct ComposerTextEditor: NSViewRepresentable {
             }
         }
 
-        if isFocused, editor.window?.firstResponder !== editor {
+        if isFocused, !context.coordinator.pendingResign, editor.window?.firstResponder !== editor {
             editor.window?.makeFirstResponder(editor)
         }
         context.coordinator.updateHeight()
@@ -778,6 +782,7 @@ struct ComposerTextEditor: NSViewRepresentable {
         var lastColorScheme: ColorScheme?
         var lastSelectionColor: Color?
         var lastMarkedText = false
+        var pendingResign = false
         var appliedInsertionIDs: Set<UUID> = []
 
         init(_ parent: ComposerTextEditor) { self.parent = parent }
