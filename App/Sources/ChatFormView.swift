@@ -435,7 +435,6 @@ private struct ChatFormOptionRow: View {
                     Image(mingCute: "checkmark", size: 10)
                         .foregroundStyle(ThemeColor("textInverted").color(for: scheme))
                 }
-                .scaleEffect(selected || reduceMotion ? 1 : 0.82)
                 .opacity(selected ? 1 : 0)
             }
         case .multiple:
@@ -464,7 +463,6 @@ private struct ChatFormOptionButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         let pressed = active && configuration.isPressed
         configuration.label
-            .scaleEffect(pressed && !reduceMotion ? 0.992 : 1)
             .opacity(pressed ? 0.92 : 1)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.09), value: pressed)
     }
