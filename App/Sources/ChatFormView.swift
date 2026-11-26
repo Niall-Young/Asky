@@ -4,9 +4,13 @@ import Theme
 
 enum ChatFormMetrics {
     static let controlHeight: CGFloat = 34
+    static let controlHorizontalPadding: CGFloat = 12
     static let controlCornerRadius: CGFloat = 10
-    static let optionMinHeight: CGFloat = 38
-    static let optionCornerRadius: CGFloat = 10
+    static let trailingIconSize: CGFloat = 15
+    static let optionIndicatorSize: CGFloat = 14
+    static let optionMinHeight: CGFloat = controlHeight
+    static let optionVerticalPadding: CGFloat = 6
+    static let optionCornerRadius: CGFloat = controlCornerRadius
     static let optionSpacing: CGFloat = 6
     static let labelControlSpacing: CGFloat = 6
     static let fieldSpacing: CGFloat = 14
@@ -394,10 +398,10 @@ private struct ChatFormOptionRow: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
 
                 trailingIndicator
-                    .frame(width: 18, height: 18)
+                    .frame(width: ChatFormMetrics.trailingIconSize, height: ChatFormMetrics.trailingIconSize)
             }
-            .padding(.horizontal, 13)
-            .padding(.vertical, 9)
+            .padding(.horizontal, ChatFormMetrics.controlHorizontalPadding)
+            .padding(.vertical, ChatFormMetrics.optionVerticalPadding)
             .frame(maxWidth: .infinity, minHeight: ChatFormMetrics.optionMinHeight, alignment: .leading)
             .background(backgroundFill, in: shape)
             .overlay {
@@ -432,26 +436,28 @@ private struct ChatFormOptionRow: View {
                 Color.clear
                 ZStack {
                     Circle().fill(selectedBadgeFill)
-                    Image(mingCute: "checkmark", size: 10)
+                    Image(mingCute: "checkmark", size: 8.5)
                         .foregroundStyle(ThemeColor("textInverted").color(for: scheme))
                 }
+                .frame(width: ChatFormMetrics.optionIndicatorSize, height: ChatFormMetrics.optionIndicatorSize)
                 .opacity(selected ? 1 : 0)
             }
         case .multiple:
-            let box = RoundedRectangle(cornerRadius: 5, style: .continuous)
+            let box = RoundedRectangle(cornerRadius: 4, style: .continuous)
             ZStack {
                 if selected {
                     box.fill(selectedBadgeFill)
-                    Image(mingCute: "checkmark", size: 10.5)
+                    Image(mingCute: "checkmark", size: 8.5)
                         .foregroundStyle(ThemeColor("textInverted").color(for: scheme))
                 } else {
                     box.fill(scheme == .dark ? Color.white.opacity(0.03) : Color.white.opacity(0.45))
                     box.strokeBorder(
                         (scheme == .dark ? Color.white : Color.black).opacity(hovered && active ? 0.42 : 0.22),
-                        lineWidth: 1.25
+                        lineWidth: 1.2
                     )
                 }
             }
+            .frame(width: ChatFormMetrics.optionIndicatorSize, height: ChatFormMetrics.optionIndicatorSize)
         }
     }
 }
