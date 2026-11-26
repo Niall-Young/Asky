@@ -52,13 +52,21 @@ struct ChatReplyView: View {
             }
             return false
         }
+        let lastPartID = parts.last?.id
         VStack(alignment: .leading, spacing: ChatFormMetrics.replyPartSpacing) {
             ForEach(parts) { part in
                 switch part.content {
                 case .markdown(let text): ChatMarkdownView(text: text).equatable()
                 case .form(let form):
                     if !isStreaming {
-                        ChatFormView(form: form, values: values, active: active, hasProse: hasProse, submit: submit)
+                        ChatFormView(
+                            form: form,
+                            isTrailingPart: part.id == lastPartID,
+                            values: values,
+                            active: active,
+                            hasProse: hasProse,
+                            submit: submit
+                        )
                     }
                 }
             }
@@ -68,6 +76,7 @@ struct ChatReplyView: View {
 
 struct ChatFormView: View {
     let form: ChatForm
+    var isTrailingPart: Bool = true
     @Binding var values: [String: [String]]
     let active: Bool
     var hasProse: Bool = true
@@ -118,6 +127,7 @@ struct ChatFormView: View {
                         .disabled(!active || !form.accepts(values))
                 }
                 .padding(.top, 2)
+                .padding(.bottom, isTrailingPart ? max(0, AgentLayout.messageHorizontalInset - AgentLayout.messageVerticalInset) : 0)
             }
         }
         .font(.system(size: 14))
