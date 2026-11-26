@@ -2168,11 +2168,13 @@ private struct ChatFormSubmitPushButton: NSViewRepresentable {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
 
+    private static let buttonFont = NSFont.systemFont(ofSize: 14, weight: .medium)
+
     func makeCoordinator() -> Coordinator { Coordinator(action: action) }
 
     func makeNSView(context: Context) -> NSButton {
         let button = NSButton(title: title, target: context.coordinator, action: #selector(Coordinator.press))
-        button.font = .systemFont(ofSize: 14, weight: .medium)
+        button.font = Self.buttonFont
         if #available(macOS 26, *) { button.controlSize = .extraLarge } else { button.controlSize = .large }
         button.identifier = NSUserInterfaceItemIdentifier("chat-form-submit")
         button.setAccessibilityIdentifier("chat-form-submit")
@@ -2181,39 +2183,43 @@ private struct ChatFormSubmitPushButton: NSViewRepresentable {
 
     func updateNSView(_ button: NSButton, context: Context) {
         context.coordinator.action = action
-        button.isEnabled = enabled
-        button.title = title
-        button.font = .systemFont(ofSize: 14, weight: .medium)
+        if button.isEnabled != enabled { button.isEnabled = enabled }
+        if button.title != title { button.title = title }
+        if button.font != Self.buttonFont { button.font = Self.buttonFont }
         button.identifier = NSUserInterfaceItemIdentifier("chat-form-submit")
         button.setAccessibilityIdentifier("chat-form-submit")
         button.setAccessibilityLabel(title)
-        if #available(macOS 26, *) { button.controlSize = .extraLarge } else { button.controlSize = .large }
-        button.isBordered = true
+        let targetControlSize: NSControl.ControlSize = if #available(macOS 26, *) { .extraLarge } else { .large }
+        if button.controlSize != targetControlSize { button.controlSize = targetControlSize }
+        if !button.isBordered { button.isBordered = true }
 
         if #available(macOS 26, *), !SurfaceCompatibility.useLegacyMaterial,
            !reduceTransparency, contrast != .increased {
-            button.bezelStyle = .glass
-            button.borderShape = .capsule
-            button.tintProminence = .primary
+            if button.bezelStyle != .glass { button.bezelStyle = .glass }
+            if button.borderShape != .capsule { button.borderShape = .capsule }
+            if button.tintProminence != .primary { button.tintProminence = .primary }
         } else {
-            button.bezelStyle = .rounded
+            if button.bezelStyle != .rounded { button.bezelStyle = .rounded }
             if #available(macOS 26, *) {
-                button.borderShape = .automatic
-                button.tintProminence = .primary
+                if button.borderShape != .automatic { button.borderShape = .automatic }
+                if button.tintProminence != .primary { button.tintProminence = .primary }
             }
         }
         button.bezelColor = NSColor(SettingsPalette.monochromeTint(scheme))
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSButton, context: Context) -> CGSize? {
-        let intrinsic = nsView.intrinsicContentSize
+        // AppKit's macOS 26 .glass/.extraLarge NSButton reports an unstable intrinsicContentSize
+        // across key/firstResponder transitions (e.g. 25pt vs 37pt), which shifts the form layout
+        // vertically by 1pt whenever an input field gains or loses focus. Keep dimensions deterministic.
+        let titleWidth = ceil((title as NSString).size(withAttributes: [.font: Self.buttonFont]).width)
         let height: CGFloat
         if #available(macOS 26, *) {
-            height = max(intrinsic.height, 36)
+            height = 36
         } else {
-            height = max(intrinsic.height, ChatFormMetrics.controlHeight)
+            height = ChatFormMetrics.controlHeight
         }
-        return CGSize(width: max(intrinsic.width, 96), height: height)
+        return CGSize(width: max(titleWidth + 32, 96), height: height)
     }
 
     @MainActor

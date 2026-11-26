@@ -1941,6 +1941,68 @@ enum AgentReplyRegression {
             [view] + view.subviews.flatMap(allViews)
         }
         let answerField = editableField(window.contentView!)
+        if let field = answerField {
+            func measureFormGeometry() -> (field: NSRect, submit: NSRect, clipY: CGFloat, docH: CGFloat) {
+                window.contentView?.layoutSubtreeIfNeeded()
+                let scroll = allViews(window.contentView!).compactMap { $0 as? NSScrollView }.first {
+                    field.isDescendant(of: $0)
+                }
+                let submit = allViews(window.contentView!).first { $0.identifier?.rawValue == "chat-form-submit" }
+                return (
+                    field.convert(field.bounds, to: nil),
+                    submit.map { $0.convert($0.bounds, to: nil) } ?? .zero,
+                    scroll?.contentView.bounds.origin.y ?? 0,
+                    scroll?.documentView?.bounds.height ?? 0
+                )
+            }
+            func sendFocusClick(at point: NSPoint) {
+                let down = NSEvent.mouseEvent(with: .leftMouseDown, location: point, modifierFlags: [],
+                    timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                    context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+                let up = NSEvent.mouseEvent(with: .leftMouseUp, location: point, modifierFlags: [],
+                    timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                    context: nil, eventNumber: 0, clickCount: 1, pressure: 0)!
+                window.sendEvent(down)
+                window.sendEvent(up)
+            }
+            func assertNoVerticalShift(_ a: (field: NSRect, submit: NSRect, clipY: CGFloat, docH: CGFloat),
+                                       _ b: (field: NSRect, submit: NSRect, clipY: CGFloat, docH: CGFloat),
+                                       _ label: String) {
+                precondition(abs(a.field.minY - b.field.minY) < 0.1 && abs(a.field.height - b.field.height) < 0.1,
+                             "Form field must not shift vertically on \(label): \(a.field) -> \(b.field)")
+                precondition(abs(a.submit.minY - b.submit.minY) < 0.1 && abs(a.submit.height - b.submit.height) < 0.1,
+                             "Form submit button must not shift vertically on \(label): \(a.submit) -> \(b.submit)")
+                precondition(abs(a.clipY - b.clipY) < 0.1 && abs(a.docH - b.docH) < 0.1,
+                             "Transcript scroll/document height must not shift on \(label): clipY \(a.clipY)->\(b.clipY), docH \(a.docH)->\(b.docH)")
+            }
+            // Verify focusing and blurring a form input causes zero vertical layout shift even in a scrollable transcript.
+            window.setContentSize(NSSize(width: 600, height: 700))
+            window.center()
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
+            try await Task.sleep(for: .milliseconds(250))
+            if let composer = allViews(window.contentView!).compactMap({ $0 as? NSTextView })
+                .first(where: { $0.isEditable && !$0.isFieldEditor }) {
+                window.makeFirstResponder(composer)
+                try await Task.sleep(for: .milliseconds(120))
+            }
+            let atComposer = measureFormGeometry()
+            sendFocusClick(at: NSPoint(x: atComposer.field.midX, y: atComposer.field.midY))
+            try await Task.sleep(for: .milliseconds(150))
+            let atField = measureFormGeometry()
+            assertNoVerticalShift(atComposer, atField, "composer->field focus")
+            sendFocusClick(at: NSPoint(x: 16, y: window.contentLayoutRect.midY))
+            try await Task.sleep(for: .milliseconds(150))
+            let atBlur = measureFormGeometry()
+            assertNoVerticalShift(atField, atBlur, "field->blur")
+            sendFocusClick(at: NSPoint(x: atBlur.field.midX, y: atBlur.field.midY))
+            try await Task.sleep(for: .milliseconds(150))
+            let atRefocus = measureFormGeometry()
+            assertNoVerticalShift(atBlur, atRefocus, "blur->field refocus")
+            window.makeFirstResponder(nil)
+            window.setContentSize(NSSize(width: 760, height: (testingCustom || testingRadio) ? 1020 : 840))
+            try await Task.sleep(for: .milliseconds(150))
+        }
         if let field = answerField, window.makeFirstResponder(field), let editor = field.currentEditor() {
             editor.insertText("原生输入回归")
             try await Task.sleep(for: .milliseconds(100))
