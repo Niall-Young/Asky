@@ -91,6 +91,97 @@ enum SettingsWindow {
     }
 }
 
+/// Owns the live Settings window lifecycle and closes it when clicking outside,
+/// unless a modal sheet, file panel, dialog, or menu tracking loop is active.
+@MainActor
+final class SettingsWindowController {
+    private let app: AppModel
+    private let outsideClickDismissal = OutsideClickDismissal()
+    private var observers: [NSObjectProtocol] = []
+    private(set) var window: NSWindow?
+
+    init(app: AppModel) {
+        self.app = app
+    }
+
+    var isVisible: Bool { window?.isVisible == true }
+
+    @discardableResult
+    func show(presentation: WindowPresentation) -> NSWindow {
+        let created = window == nil
+        let target: NSWindow
+        if let existing = window {
+            target = existing
+        } else {
+            let made = SettingsWindow.make(app: app)
+            made.level = .normal
+            made.collectionBehavior = [.moveToActiveSpace, .primary]
+            made.isReleasedWhenClosed = false
+            made.center()
+            installObservers(for: made)
+            window = made
+            target = made
+        }
+        WindowDiagnostics.shared.record("open-settings", window: target, includeEvent: true,
+                                        includeStack: true, extra: [("created", created ? "1" : "0")])
+        presentation.show(target)
+        updateOutsideClickDismissal()
+        return target
+    }
+
+    func close() {
+        outsideClickDismissal.hide()
+        guard let window, window.isVisible || window.isMiniaturized else { return }
+        window.close()
+    }
+
+    func shouldKeepOpen(at point: NSPoint) -> Bool {
+        guard let window, window.isVisible, !window.isMiniaturized else { return false }
+        if window.attachedSheet != nil
+            || NSApp.modalWindow != nil
+            || RunLoop.current.currentMode == .eventTracking
+            || AppDialogPresenter.shared.isPresenting(in: window)
+            || AppDialogPresenter.shared.activeStandalonePanel != nil {
+            return true
+        }
+        // Preserve macOS resize-edge hit targets just outside the window frame.
+        if window.frame.insetBy(dx: -5, dy: -5).contains(point) { return true }
+        if let children = window.childWindows,
+           children.contains(where: { $0.isVisible && !$0.ignoresMouseEvents && $0.alphaValue > 0 && $0.frame.contains(point) }) {
+            return true
+        }
+        return false
+    }
+
+    private func installObservers(for window: NSWindow) {
+        let center = NotificationCenter.default
+        let hideNames: [Notification.Name] = [
+            NSWindow.willCloseNotification,
+            NSWindow.willMiniaturizeNotification,
+        ]
+        observers = hideNames.map { name in
+            center.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.outsideClickDismissal.hide() }
+            }
+        }
+        observers.append(center.addObserver(forName: NSWindow.didDeminiaturizeNotification, object: window, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.updateOutsideClickDismissal() }
+        })
+    }
+
+    private func updateOutsideClickDismissal() {
+        guard let window, window.isVisible, !window.isMiniaturized else {
+            outsideClickDismissal.hide()
+            return
+        }
+        outsideClickDismissal.show(contains: { [weak self] point in
+            self?.shouldKeepOpen(at: point) ?? false
+        }, dismiss: { [weak self] in
+            self?.close()
+        })
+    }
+}
+
 /// Own the backdrop outside NSSplitView: adding it to the split view would make
 /// AppKit treat the glass as an extra pane and apply independent pane materials.
 @MainActor

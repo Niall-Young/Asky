@@ -73,6 +73,11 @@ enum SettingsRegression {
                     try await assertClearHistoryDialog(model)
                     exit(0)
                 }
+                if CommandLine.arguments.contains("--outside-click") {
+                    defer { try? FileManager.default.removeItem(at: root) }
+                    try await assertOutsideClickDismissal(model)
+                    exit(0)
+                }
                 if CommandLine.arguments.contains("--choice-menu") {
                     defer { try? FileManager.default.removeItem(at: root) }
                     let window = SettingsWindow.make(app: model)
@@ -1618,5 +1623,85 @@ enum SettingsRegression {
         precondition(conversations.list(limit: 10).isEmpty, "Confirming must clear conversation history")
         window.close()
         print("Settings clear-history Liquid Glass dialog regression passed in light and dark")
+    }
+
+    private static func assertOutsideClickDismissal(_ model: AppModel) async throws {
+        AppDialogPresenter.installIfNeeded()
+        let controller = SettingsWindowController(app: model)
+        let presentation = WindowPresentation()
+        let window = controller.show(presentation: presentation)
+        window.setFrameOrigin(NSPoint(x: 420, y: 180))
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        try await Task.sleep(for: .milliseconds(250))
+
+        precondition(controller.isVisible, "Settings window should be visible after show")
+        let insidePoint = NSPoint(x: window.frame.midX, y: window.frame.midY)
+        let resizeEdgePoint = NSPoint(x: window.frame.minX - 3, y: window.frame.midY)
+        let outsidePoint = NSPoint(x: max(20, window.frame.minX - 120), y: window.frame.midY)
+        precondition(controller.shouldKeepOpen(at: insidePoint), "Inside point must keep Settings open")
+        precondition(controller.shouldKeepOpen(at: resizeEdgePoint), "Resize edge must keep Settings open")
+        precondition(!controller.shouldKeepOpen(at: outsidePoint), "Outside point must allow dismissal")
+
+        let background = NSWindow(contentRect: NSRect(x: outsidePoint.x - 60, y: outsidePoint.y - 60, width: 120, height: 120),
+                                  styleMask: [.titled], backing: .buffered, defer: false)
+        background.isReleasedWhenClosed = false
+        background.orderBack(nil)
+        defer { background.close(); controller.close() }
+
+        func postMouseDown(in targetWindow: NSWindow, at screenPoint: NSPoint) {
+            let local = targetWindow.convertPoint(fromScreen: screenPoint)
+            guard let event = NSEvent.mouseEvent(
+                with: .leftMouseDown,
+                location: local,
+                modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime,
+                windowNumber: targetWindow.windowNumber,
+                context: nil,
+                eventNumber: 0,
+                clickCount: 1,
+                pressure: 1
+            ) else { fatalError("Unable to create synthetic mouse event") }
+            NSApp.postEvent(event, atStart: false)
+        }
+
+        // Clicking inside Settings keeps it open.
+        postMouseDown(in: window, at: insidePoint)
+        try await Task.sleep(for: .milliseconds(100))
+        precondition(controller.isVisible, "Clicking inside Settings must not close it")
+
+        // Clicking outside Settings closes it.
+        postMouseDown(in: background, at: outsidePoint)
+        try await Task.sleep(for: .milliseconds(100))
+        precondition(!controller.isVisible, "Clicking outside Settings must close it")
+
+        // Re-showing brings Settings back and re-arms outside-click dismissal.
+        _ = controller.show(presentation: presentation)
+        window.makeKeyAndOrderFront(nil)
+        try await Task.sleep(for: .milliseconds(150))
+        precondition(controller.isVisible, "Settings must reopen cleanly after outside-click dismissal")
+
+        // An active in-window AppDialog must prevent outside clicks from closing Settings.
+        let alert = AppDialog.make()
+        alert.messageText = "测试弹窗"
+        alert.addButton(withTitle: "好")
+        let dialogTask = Task { await AppDialog.present(alert, for: window) }
+        for _ in 0..<40 where !AppDialogPresenter.shared.isPresenting(in: window) {
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        precondition(AppDialogPresenter.shared.isPresenting(in: window), "AppDialog must present in Settings")
+        precondition(controller.shouldKeepOpen(at: outsidePoint), "Active AppDialog must block outside-click dismissal")
+        postMouseDown(in: background, at: outsidePoint)
+        try await Task.sleep(for: .milliseconds(100))
+        precondition(controller.isVisible, "Outside click must not close Settings while AppDialog is active")
+        AppDialogPresenter.shared.dismiss(alert)
+        _ = await dialogTask.value
+        try await Task.sleep(for: .milliseconds(100))
+
+        // After the dialog is dismissed, clicking outside closes Settings again.
+        postMouseDown(in: background, at: outsidePoint)
+        try await Task.sleep(for: .milliseconds(100))
+        precondition(!controller.isVisible, "Outside click must close Settings once AppDialog finishes")
+        print("Settings outside-click dismissal regression passed")
     }
 }

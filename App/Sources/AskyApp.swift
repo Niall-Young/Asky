@@ -31,7 +31,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var hotKey: HotKey?
     private var newAgentHotKey: HotKey?
     private var statusItem: NSStatusItem?
-    private var settingsWindow: NSWindow?
+    private var settingsWindow: SettingsWindowController!
     private var pressure: MemoryPressureMonitor?
     private let termination = ApplicationTermination()
     private let dockVisibility = DockVisibilityController()
@@ -133,6 +133,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         do { try model.initializeLaunchAtLogin() }
         catch { NSLog("Unable to initialize launch at login: %@", error.localizedDescription) }
         model.onOpenSettings = { [weak self] in self?.openSettings() }
+        settingsWindow = SettingsWindowController(app: model)
         dockVisibility.showDockIcon = model.preferences.showDockIcon
         model.onDockIconVisibilityChange = { [weak self] visible in
             self?.dockVisibility.showDockIcon = visible
@@ -149,6 +150,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self?.agentWindow.restoreAfterAuthentication()
         }
         launcherModel.onAskAI = { [weak self] prompt in
+            self?.settingsWindow.close()
             self?.launcher.hide()
             self?.agentWindow.show(prompt: prompt)
         }
@@ -243,12 +245,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         guard model != nil else { return true }
-        WindowDiagnostics.shared.record("app-reopen", window: settingsWindow, extra: [
+        WindowDiagnostics.shared.record("app-reopen", window: settingsWindow?.window, extra: [
             ("hasVisible", flag ? "1" : "0"),
             ("settingsVisible", settingsWindow?.isVisible == true ? "1" : "0"),
         ])
         if let settingsWindow, settingsWindow.isVisible {
-            windowPresentation.show(settingsWindow)
+            settingsWindow.show(presentation: windowPresentation)
         } else {
             openLauncher()
         }
@@ -261,6 +263,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         #endif
         guard let model else { return .terminateNow }
         return termination.request { [self] in
+            settingsWindow?.close()
             clipboard?.stop()
             clipboardWindow?.hide()
             clipboardHotKey?.unregister()
@@ -275,14 +278,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func registerHotKey(code: UInt32, modifiers: UInt32) -> Bool {
         let previous = model.preferences
+        let action: () -> Void = { [weak self] in
+            self?.settingsWindow.close()
+            self?.launcher.toggle()
+        }
         hotKey?.unregister()
         do {
-            hotKey = try HotKey(keyCode: code, modifiers: modifiers) { [weak self] in self?.launcher.toggle() }
+            hotKey = try HotKey(keyCode: code, modifiers: modifiers, action: action)
             model.hotKeyStatus = NSLocalizedString("已注册", comment: "")
             return true
         } catch {
             model.hotKeyStatus = NSLocalizedString("组合键已被占用或无法注册，请选择其他快捷键。", comment: "")
-            hotKey = try? HotKey(keyCode: previous.hotKeyCode, modifiers: previous.hotKeyModifiers) { [weak self] in self?.launcher.toggle() }
+            hotKey = try? HotKey(keyCode: previous.hotKeyCode, modifiers: previous.hotKeyModifiers, action: action)
             return false
         }
     }
@@ -290,6 +297,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func registerClipboardHotKey(code: UInt32, modifiers: UInt32) -> Bool {
         let previous = model.preferences
         let action: () -> Void = { [weak self] in
+            self?.settingsWindow.close()
             self?.launcher.hide()
             self?.clipboardWindow.toggle()
         }
@@ -437,33 +445,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    @objc private func openLauncher() { clipboardWindow.hide(); launcher.show() }
-    @objc private func openClipboard() { launcher.hide(); clipboardWindow.show() }
+    @objc private func openLauncher() { settingsWindow.close(); clipboardWindow.hide(); launcher.show() }
+    @objc private func openClipboard() { settingsWindow.close(); launcher.hide(); clipboardWindow.show() }
     @objc private func openAgent() {
+        settingsWindow.close()
         launcher.hide()
         agentWindow.show()
     }
 
     private func openNewAgentConversation() {
+        settingsWindow.close()
         launcher.hide()
         clipboardWindow.hide()
         agentWindow.showNewConversation()
     }
 
     @objc private func openSettings() {
-        let created = settingsWindow == nil
-        WindowDiagnostics.shared.record("open-settings", window: settingsWindow, includeEvent: true,
-                                        includeStack: true, extra: [("created", created ? "1" : "0")])
-        if settingsWindow == nil {
-            let w = SettingsWindow.make(app: model)
-            w.level = .normal
-            w.collectionBehavior = [.moveToActiveSpace, .primary]
-            w.isReleasedWhenClosed = false
-            w.center()
-            settingsWindow = w
-        }
         launcher.hide()
         clipboardWindow.hide()
-        if let settingsWindow { windowPresentation.show(settingsWindow) }
+        settingsWindow.show(presentation: windowPresentation)
     }
 }
