@@ -71,6 +71,8 @@ private final class ComposerTextView: NSTextView {
     var pasteAttachment: () -> Bool = { false }
     var pasteLongText: (String) -> InlineTagKind? = { _ in nil }
     var onMarkedTextChanged: ((Bool) -> Void)?
+    var onUserInteract: () -> Void = {}
+    var isCompact = false
     var shortcuts = SettingsPreferences()
     var submit: () -> Void = {}
     var focusChanged: (Bool) -> Void = { _ in }
@@ -153,9 +155,9 @@ private final class ComposerTextView: NSTextView {
     }
 
     override func scrollToVisible(_ rect: NSRect) -> Bool {
-        // While the composer is still below maxEditorHeight it grows to fit all lines;
-        // suppress intermediate clip-view scrolling so line 1 never vanishes before resize.
-        if naturalContentHeight() <= Self.maxEditorHeight {
+        // While the composer is compact or still below maxEditorHeight, suppress
+        // intermediate clip-view scrolling so line 1 stays pinned and visible.
+        if isCompact || naturalContentHeight() <= Self.maxEditorHeight {
             pinScrollToTop()
             return false
         }
@@ -342,6 +344,7 @@ private final class ComposerTextView: NSTextView {
     }
 
     override func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
+        onUserInteract()
         super.setMarkedText(string, selectedRange: selectedRange, replacementRange: replacementRange)
         onMarkedTextChanged?(hasMarkedText())
     }
@@ -485,6 +488,7 @@ private final class ComposerTextView: NSTextView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        onUserInteract()
         let pt = convert(event.locationInWindow, from: nil)
         if let (tag, index, rect) = tagAt(windowPoint: event.locationInWindow),
            isPointInCloseButton(pt, tag: tag, rect: rect) {
@@ -561,6 +565,13 @@ private final class ComposerTextView: NSTextView {
         storage.endEditing()
     }
 
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if let agentWindow = window as? AgentWindow {
+            agentWindow.registerComposerTextView(self)
+        }
+    }
+
     override func becomeFirstResponder() -> Bool {
         let accepted = super.becomeFirstResponder()
         if accepted {
@@ -599,6 +610,7 @@ private final class ComposerTextView: NSTextView {
     }
 
     override func keyDown(with event: NSEvent) {
+        onUserInteract()
         if !hasMarkedText(), shortcuts.shortcut(.send).matches(event) { submit(); return }
         if !hasMarkedText(), shortcuts.shortcut(.newline).matches(event) {
             insertNewlineIgnoringFieldEditor(nil); return
@@ -619,6 +631,7 @@ private final class ComposerTextView: NSTextView {
     }
 
     override func paste(_ sender: Any?) {
+        onUserInteract()
         if pasteAttachment() { return }
         guard let string = NSPasteboard.general.string(forType: .string), !string.isEmpty else { return }
         if let collapsed = pasteLongText(string) {
@@ -629,6 +642,7 @@ private final class ComposerTextView: NSTextView {
     }
 
     override func pasteAsPlainText(_ sender: Any?) {
+        onUserInteract()
         guard let string = NSPasteboard.general.string(forType: .string), !string.isEmpty else { return }
         insertPlainString(string)
     }
@@ -646,11 +660,14 @@ private final class ComposerTextView: NSTextView {
 struct ComposerTextEditor: NSViewRepresentable {
     @Binding var height: CGFloat
     @Binding var isFocused: Bool
+    var isCompact = false
     var resetRevision: Int
+    var focusRevision: Int = 0
     var pendingInsertions: [ComposerTagInsertion]
     var consumeInsertions: ([UUID]) -> Void
     var onSegmentsChanged: ([MessageSegment]) -> Void
     var onMarkedTextChanged: (Bool) -> Void = { _ in }
+    var onUserInteract: () -> Void = {}
     var pasteAttachment: () -> Bool
     var pasteLongText: (String) -> InlineTagKind?
     var submit: () -> Void
@@ -708,8 +725,8 @@ struct ComposerTextEditor: NSViewRepresentable {
         scroll.documentView = editor
         context.coordinator.editor = editor
         DispatchQueue.main.async { [weak editor] in
-            guard let editor else { return }
-            editor.window?.makeFirstResponder(editor)
+            guard let editor, let window = editor.window, !(window is AgentWindow) else { return }
+            window.makeFirstResponder(editor)
         }
         return scroll
     }
@@ -723,6 +740,8 @@ struct ComposerTextEditor: NSViewRepresentable {
         }
         editor.pasteAttachment = pasteAttachment
         editor.pasteLongText = pasteLongText
+        editor.onUserInteract = onUserInteract
+        editor.isCompact = isCompact
         editor.shortcuts = shortcuts
         editor.submit = submit
 
@@ -763,7 +782,13 @@ struct ComposerTextEditor: NSViewRepresentable {
             }
         }
 
-        if isFocused, !context.coordinator.pendingResign, editor.window?.firstResponder !== editor {
+        if context.coordinator.lastFocusRevision != focusRevision {
+            context.coordinator.lastFocusRevision = focusRevision
+            context.coordinator.pendingResign = false
+            if let window = editor.window, window.firstResponder !== editor {
+                window.makeFirstResponder(editor)
+            }
+        } else if isFocused, !context.coordinator.pendingResign, editor.window?.firstResponder !== editor {
             editor.window?.makeFirstResponder(editor)
         }
         context.coordinator.updateHeight()
@@ -779,6 +804,7 @@ struct ComposerTextEditor: NSViewRepresentable {
         var parent: ComposerTextEditor
         fileprivate weak var editor: ComposerTextView?
         var lastResetRevision = 0
+        var lastFocusRevision = 0
         var lastColorScheme: ColorScheme?
         var lastSelectionColor: Color?
         var lastMarkedText = false
@@ -810,6 +836,14 @@ struct ComposerTextEditor: NSViewRepresentable {
 
         func updateHeight() {
             guard let editor, let scroll = editor.enclosingScrollView else { return }
+            if parent.isCompact {
+                if scroll.hasVerticalScroller {
+                    scroll.hasVerticalScroller = false
+                    scroll.tile()
+                }
+                editor.pinScrollToTop()
+                return
+            }
             let natural = editor.naturalContentHeight()
             let needsScroll = natural > ComposerTextView.maxEditorHeight
             let scrollerChanged = scroll.hasVerticalScroller != needsScroll

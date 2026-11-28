@@ -95,6 +95,50 @@ enum AgentReplyRegression {
         print("Composer tag height regression passed: empty=\(emptyScrollHeight), tagOnly=\(tagOnlyHeight), plain=\(plainTextHeight), text+tag=\(textWithTagHeight), baseline=\(plainBaseline)->\(textWithTagBaseline), twoLine=\(twoLinePlainHeight)->\(twoLineTagHeight)")
     }
 
+    static func composerFocusRegression(app: AppModel) async throws {
+        let model = AgentModel(app: app)
+        let controller = AgentWindowController(model: model, presentation: WindowPresentation())
+        controller.show()
+        let window = NSApp.windows.first { $0.title == "Asky AI" }!
+        defer { window.orderOut(nil) }
+        try await Task.sleep(for: .milliseconds(300))
+
+        guard let editor = window.firstResponder as? NSTextView else {
+            preconditionFailure("Expected ComposerTextView to be focused on initial show()")
+        }
+
+        // Unfocusing manually must stay unfocused until an explicit focus trigger.
+        window.makeFirstResponder(nil)
+        try await Task.sleep(for: .milliseconds(150))
+        precondition(window.firstResponder !== editor, "ComposerTextView must stay unfocused after explicit resign")
+
+        // Closing and reopening the window must directly focus the composer again.
+        window.close()
+        try await Task.sleep(for: .milliseconds(150))
+        controller.show()
+        try await Task.sleep(for: .milliseconds(300))
+        precondition(window.firstResponder === editor, "Expected ComposerTextView to be focused after close + show()")
+
+        // Unfocusing while visible and calling show() again must directly focus the composer.
+        window.makeFirstResponder(nil)
+        try await Task.sleep(for: .milliseconds(150))
+        precondition(window.firstResponder !== editor, "ComposerTextView must stay unfocused before re-show")
+        controller.show()
+        try await Task.sleep(for: .milliseconds(200))
+        precondition(window.firstResponder === editor, "Expected ComposerTextView to be focused on show() while visible")
+
+        // Adding a quote after unfocusing must re-focus the composer without pendingResign race.
+        window.makeFirstResponder(nil)
+        model.addQuote("引用测试文本", sourceMessageID: "focus-src-1")
+        for _ in 0..<100 where !model.pendingTagInsertions.isEmpty {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        try await Task.sleep(for: .milliseconds(100))
+        precondition(window.firstResponder === editor, "Expected ComposerTextView to be focused after addQuote()")
+
+        print("Composer focus regression passed: initial show, close+reopen, visible re-show, and quote focus verified")
+    }
+
     static func composerInlineTagStylesRegression(app: AppModel, capturePrefix: String?) async throws {
         let tmpDir = FileManager.default.temporaryDirectory.appending(path: "Asky-tag-styles-\(UUID())")
         try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
@@ -4455,6 +4499,10 @@ enum AgentReplyRegression {
         }
         if CommandLine.arguments.contains("--composer-backspace") {
             try await composerBackspaceRegression(app: app)
+            return
+        }
+        if CommandLine.arguments.contains("--composer-focus") {
+            try await composerFocusRegression(app: app)
             return
         }
         if CommandLine.arguments.contains("--inline-tag-alignment") {

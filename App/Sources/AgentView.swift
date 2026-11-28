@@ -4,19 +4,55 @@ import Contracts
 import Theme
 import ToolService
 
-private final class AgentWindow: NSWindow {
+final class AgentWindow: NSWindow {
+    private weak var composerTextView: NSTextView?
+    private var pendingComposerFocus = false
+
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
+
+    func registerComposerTextView(_ textView: NSTextView) {
+        composerTextView = textView
+        initialFirstResponder = textView
+        if pendingComposerFocus {
+            applyComposerFocus()
+        }
+    }
+
+    func requestComposerFocus() {
+        pendingComposerFocus = true
+        applyComposerFocus()
+    }
+
+    override func becomeKey() {
+        super.becomeKey()
+        if pendingComposerFocus {
+            applyComposerFocus()
+        }
+    }
+
+    override func close() {
+        pendingComposerFocus = false
+        super.close()
+    }
 
     override func sendEvent(_ event: NSEvent) {
         endEditingIfOutsideClick(event)
         super.sendEvent(event)
     }
+
+    private func applyComposerFocus() {
+        guard let editor = composerTextView, editor.window === self else { return }
+        let focused = firstResponder === editor || makeFirstResponder(editor)
+        if focused && isKeyWindow {
+            pendingComposerFocus = false
+        }
+    }
 }
 
 @MainActor
 final class AgentWindowController {
-    private var window: NSWindow?
+    private var window: AgentWindow?
     private let presentation: WindowPresentation
     private var restoreAuthenticationWindow = false
     let model: AgentModel
@@ -66,6 +102,9 @@ final class AgentWindowController {
             w.center()
             window = w
         }
+        if model.pendingDeleteMessage == nil {
+            window?.requestComposerFocus()
+        }
         bringToFront()
         if let prompt {
             if model.isRunning {
@@ -92,6 +131,9 @@ final class AgentWindowController {
     func restoreAfterAuthentication() {
         defer { restoreAuthenticationWindow = false }
         guard restoreAuthenticationWindow, let window, window.isVisible, !window.isMiniaturized else { return }
+        if model.pendingDeleteMessage == nil {
+            window.requestComposerFocus()
+        }
         bringToFront()
     }
 
@@ -120,6 +162,11 @@ enum AgentLayout {
     /// so single-line bubbles form a true capsule and multi-line bubbles reuse the same radius.
     static let bubbleCornerRadius: CGFloat = 21.5
     static let composerCornerRadius: CGFloat = 22
+    static let compactComposerHeight: CGFloat = 44
+    static let composerBottomPadding: CGFloat = 12
+    static let compactComposerHorizontalPadding: CGFloat = 24
+    static let compactComposerWidthInset: CGFloat = 24
+    static var compactComposerOuterHeight: CGFloat { compactComposerHeight + composerBottomPadding }
     static let linkedBubbleCornerRadius: CGFloat = 4
     static let linkedBubbleSpacing: CGFloat = 4
     static let groupInternalSpacing: CGFloat = 12
@@ -307,6 +354,7 @@ struct AgentView: View {
     var setPinned: (Bool) -> Void = { _ in }
     @State private var composerHeight: CGFloat = 94
     @State private var emptyComposerHeight: CGFloat = 94
+    @State private var composerCompact = ComposerCompactState()
     @State private var showingApprovalMenu = false
     @State private var bubblePopover = ChatBubblePopoverController()
     @State private var formPickerOverlay = FormPickerOverlayController()
@@ -336,7 +384,12 @@ struct AgentView: View {
                         .background(WindowDragArea())
                         .transition(conversationTransition).zIndex(1)
                 } else {
-                    Transcript(model: model, bottomInset: effectiveComposerHeight, bubblePopover: bubblePopover)
+                    Transcript(
+                        model: model,
+                        bottomInset: effectiveComposerHeight,
+                        bubblePopover: bubblePopover,
+                        composerCompact: composerCompact
+                    )
                         .id("continuous-transcript")
                         .transition(conversationTransition).zIndex(1)
                 }
@@ -344,14 +397,10 @@ struct AgentView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .clipped()
             .animation(navigationAnimation, value: isEmptyConversation)
-            ProgressiveHeaderBlur(reversed: true)
-                .frame(height: effectiveComposerHeight)
-                .allowsHitTesting(false)
-                .accessibilityHidden(true)
-            Composer(model: model, showingApprovalMenu: $showingApprovalMenu)
-                .frame(maxWidth: AgentLayout.contentMaxWidth)
-                .padding(.horizontal, AgentLayout.contentHorizontalPadding).padding(.bottom, 12)
+            ComposerBottomBlur(expandedHeight: effectiveComposerHeight, compactState: composerCompact)
+            Composer(model: model, showingApprovalMenu: $showingApprovalMenu, compactState: composerCompact)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                    guard !composerCompact.isCompact else { return }
                     composerHeight = height
                     if isComposerEmpty { emptyComposerHeight = height }
                 }
@@ -387,7 +436,16 @@ struct AgentView: View {
         ))
         .environment(\.formPickerOverlay, formPickerOverlay)
         .onChange(of: showingApprovalMenu) { _, shown in
-            if shown { formPickerOverlay.dismiss() }
+            if shown {
+                formPickerOverlay.dismiss()
+                composerCompact.expand()
+            }
+        }
+        .onChange(of: isEmptyConversation) { _, empty in
+            if empty { composerCompact.expand() }
+        }
+        .onChange(of: composerCompact.isCompact) { _, compact in
+            if compact, showingApprovalMenu { showingApprovalMenu = false }
         }
         .onChange(of: bubblePopover.target) { _, target in
             if target != nil { formPickerOverlay.dismiss() }
@@ -759,10 +817,56 @@ private struct TranscriptHistoryLoadingRow: View {
     }
 }
 
+@MainActor @Observable
+private final class ComposerCompactState {
+    private(set) var isCompact = false
+    var canCollapse = true
+
+    func collapse() {
+        guard canCollapse, !isCompact else { return }
+        isCompact = true
+    }
+
+    func expand() {
+        if isCompact { isCompact = false }
+    }
+}
+
+private enum ComposerMorphMotion {
+    static func animation(isCompact: Bool, reduceMotion: Bool) -> Animation {
+        if reduceMotion { return .easeOut(duration: 0.14) }
+        return isCompact
+            ? .spring(response: 0.38, dampingFraction: 0.80, blendDuration: 0.1)
+            : .spring(response: 0.34, dampingFraction: 0.76, blendDuration: 0.1)
+    }
+}
+
+private struct ComposerBottomBlur: View {
+    let expandedHeight: CGFloat
+    let compactState: ComposerCompactState
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var activeHeight: CGFloat {
+        compactState.isCompact ? AgentLayout.compactComposerOuterHeight : expandedHeight
+    }
+
+    var body: some View {
+        ProgressiveHeaderBlur(reversed: true)
+            .frame(height: activeHeight)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+            .animation(
+                ComposerMorphMotion.animation(isCompact: compactState.isCompact, reduceMotion: reduceMotion),
+                value: compactState.isCompact
+            )
+    }
+}
+
 private struct Transcript: View {
     let model: AgentModel
     let bottomInset: CGFloat
     let bubblePopover: ChatBubblePopoverController
+    let composerCompact: ComposerCompactState
     // Value snapshots let an outgoing transcript finish fading after model.open
     // clears/replaces the active conversation. The live model still owns actions.
     private let items: [ChatItem]
@@ -778,10 +882,16 @@ private struct Transcript: View {
     @State private var scrollActivity = TranscriptScrollActivity()
     @State private var historyLoader = TranscriptHistoryLoader()
 
-    init(model: AgentModel, bottomInset: CGFloat, bubblePopover: ChatBubblePopoverController) {
+    init(
+        model: AgentModel,
+        bottomInset: CGFloat,
+        bubblePopover: ChatBubblePopoverController,
+        composerCompact: ComposerCompactState
+    ) {
         self.model = model
         self.bottomInset = bottomInset
         self.bubblePopover = bubblePopover
+        self.composerCompact = composerCompact
         items = model.items
         streaming = model.streaming
         hasOlder = model.hasOlder
@@ -839,6 +949,7 @@ private struct Transcript: View {
                 completedReplyID: latestCompletedReplyID,
                 viewport: viewport,
                 scrollActivity: scrollActivity,
+                composerCompact: composerCompact,
                 bottomInset: bottomInset,
                 replyNavigation: model.replyNavigation,
                 hasNewer: model.hasNewer,
@@ -985,6 +1096,7 @@ private struct CompatibleTranscriptScroll<Content: View>: View {
     let completedReplyID: String?
     let viewport: TranscriptViewport
     let scrollActivity: TranscriptScrollActivity
+    let composerCompact: ComposerCompactState
     let bottomInset: CGFloat
     var replyNavigation: AgentModel.ReplyNavigation?
     var hasNewer = false
@@ -995,9 +1107,9 @@ private struct CompatibleTranscriptScroll<Content: View>: View {
 
     var body: some View {
         if #available(macOS 15, *), !SurfaceCompatibility.useMacOS14Compatibility {
-            ModernTranscriptScroll(submittedMessageID: submittedMessageID, isWaiting: isWaiting, completedReplyID: completedReplyID, viewport: viewport, scrollActivity: scrollActivity, bottomInset: bottomInset, replyNavigation: replyNavigation, hasNewer: hasNewer, loadLatest: loadLatest, onNearTop: onNearTop, onNearBottom: onNearBottom, content: content)
+            ModernTranscriptScroll(submittedMessageID: submittedMessageID, isWaiting: isWaiting, completedReplyID: completedReplyID, viewport: viewport, scrollActivity: scrollActivity, composerCompact: composerCompact, bottomInset: bottomInset, replyNavigation: replyNavigation, hasNewer: hasNewer, loadLatest: loadLatest, onNearTop: onNearTop, onNearBottom: onNearBottom, content: content)
         } else {
-            LegacyTranscriptScroll(submittedMessageID: submittedMessageID, isWaiting: isWaiting, completedReplyID: completedReplyID, viewport: viewport, scrollActivity: scrollActivity, bottomInset: bottomInset, replyNavigation: replyNavigation, hasNewer: hasNewer, loadLatest: loadLatest, onNearTop: onNearTop, onNearBottom: onNearBottom, content: content)
+            LegacyTranscriptScroll(submittedMessageID: submittedMessageID, isWaiting: isWaiting, completedReplyID: completedReplyID, viewport: viewport, scrollActivity: scrollActivity, composerCompact: composerCompact, bottomInset: bottomInset, replyNavigation: replyNavigation, hasNewer: hasNewer, loadLatest: loadLatest, onNearTop: onNearTop, onNearBottom: onNearBottom, content: content)
         }
     }
 }
@@ -1163,6 +1275,11 @@ private final class TranscriptViewport {
     private var lastAutoLoadAt: TimeInterval = 0
 
     var isAnimatingReply: Bool { animatingReply }
+    var isReturningToBottom: Bool { returningToBottom }
+    var isScrollable: Bool {
+        guard let scroll, let document = scroll.documentView else { return false }
+        return document.bounds.height - scroll.contentView.bounds.height > 1
+    }
 
     var shouldSyncPreserveOnBoundsChange: Bool {
         !animatingReply && anchorMode == .preservePosition && !readingAnchors.isEmpty
@@ -1640,10 +1757,16 @@ private final class TranscriptBottomState {
 
 private struct TranscriptReturnToBottomOverlay: View {
     let bottomState: TranscriptBottomState
+    let composerCompact: ComposerCompactState
     let hasNewer: Bool
     let bottomInset: CGFloat
     let action: () -> Void
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var visualBottomInset: CGFloat {
+        composerCompact.isCompact ? AgentLayout.compactComposerOuterHeight : bottomInset
+    }
 
     var body: some View {
         if !bottomState.isAtBottom || hasNewer {
@@ -1655,7 +1778,11 @@ private struct TranscriptReturnToBottomOverlay: View {
             .buttonStyle(AgentHeaderButtonStyle(colorScheme: colorScheme))
             .accessibilityLabel(NSLocalizedString("回到底部", comment: ""))
             .help(NSLocalizedString("回到底部", comment: ""))
-            .padding(.bottom, bottomInset + 8)
+            .padding(.bottom, visualBottomInset + 8)
+            .animation(
+                ComposerMorphMotion.animation(isCompact: composerCompact.isCompact, reduceMotion: reduceMotion),
+                value: composerCompact.isCompact
+            )
         }
     }
 }
@@ -1667,6 +1794,7 @@ private struct ModernTranscriptScroll<Content: View>: View {
     let completedReplyID: String?
     let viewport: TranscriptViewport
     let scrollActivity: TranscriptScrollActivity
+    let composerCompact: ComposerCompactState
     let bottomInset: CGFloat
     var replyNavigation: AgentModel.ReplyNavigation?
     var hasNewer = false
@@ -1685,8 +1813,28 @@ private struct ModernTranscriptScroll<Content: View>: View {
             content.background {
                 TranscriptPosition(viewport: viewport, scrollActivity: scrollActivity,
                                    initialReplyID: isWaiting ? nil : completedReplyID,
-                                   onChange: { [bottomState] in bottomState.update($0) },
-                                   onUserScroll: { bottomTask?.cancel(); submissionTask?.cancel(); replyTask?.cancel(); viewport.followsLatestContent = false; viewport.readerMoved = true },
+                                   onChange: { [bottomState, composerCompact, hasNewer] atBottom in
+                                       let wasAtBottom = bottomState.isAtBottom
+                                       bottomState.update(atBottom)
+                                       if !wasAtBottom && atBottom && !hasNewer {
+                                           composerCompact.expand()
+                                       }
+                                   },
+                                   onUserScroll: {
+                                       bottomTask?.cancel()
+                                       submissionTask?.cancel()
+                                       replyTask?.cancel()
+                                       viewport.followsLatestContent = false
+                                       viewport.readerMoved = true
+                                       if viewport.isScrollable {
+                                           composerCompact.collapse()
+                                       }
+                                   },
+                                   onUserScrollEnd: { [bottomState, composerCompact, hasNewer] in
+                                       if bottomState.isAtBottom && !hasNewer {
+                                           composerCompact.expand()
+                                       }
+                                   },
                                    onNearTop: onNearTop,
                                    onNearBottom: onNearBottom)
             }
@@ -1694,7 +1842,7 @@ private struct ModernTranscriptScroll<Content: View>: View {
         .coordinateSpace(name: "transcriptScroll")
         .environment(\.transcriptVisibleInsets, EdgeInsets(top: AgentLayout.headerHeight + 8, leading: 0, bottom: bottomInset + 8, trailing: 0))
         .scrollIndicators(.hidden)
-        .onDisappear { bottomTask?.cancel(); submissionTask?.cancel(); replyTask?.cancel(); viewport.followsLatestContent = false; viewport.cancelReadingAnchor(); scrollActivity.reset() }
+        .onDisappear { bottomTask?.cancel(); submissionTask?.cancel(); replyTask?.cancel(); viewport.followsLatestContent = false; viewport.cancelReadingAnchor(); scrollActivity.reset(); composerCompact.expand() }
         .onChange(of: replyNavigation) { _, request in
             guard let request else { return }
             bottomTask?.cancel()
@@ -1721,8 +1869,14 @@ private struct ModernTranscriptScroll<Content: View>: View {
             switch phase {
             case .interacting, .decelerating:
                 scrollActivity.beginScrolling()
+                if phase == .interacting, viewport.isScrollable {
+                    composerCompact.collapse()
+                }
             case .idle:
                 scrollActivity.endScrolling()
+                if bottomState.isAtBottom && !hasNewer {
+                    composerCompact.expand()
+                }
             default:
                 break
             }
@@ -1742,10 +1896,11 @@ private struct ModernTranscriptScroll<Content: View>: View {
             bottomTask = alignTranscriptContent(viewport: viewport, replyID: isWaiting ? nil : completedReplyID)
         }
         .overlay(alignment: .bottom) {
-            TranscriptReturnToBottomOverlay(bottomState: bottomState, hasNewer: hasNewer, bottomInset: bottomInset) {
+            TranscriptReturnToBottomOverlay(bottomState: bottomState, composerCompact: composerCompact, hasNewer: hasNewer, bottomInset: bottomInset) {
                 bottomTask?.cancel()
                 submissionTask?.cancel()
                 replyTask?.cancel()
+                composerCompact.expand()
                 loadLatest()
                 bottomTask = viewport.returnToBottom(reduceMotion: reduceMotion)
             }
@@ -1758,6 +1913,7 @@ private struct ModernTranscriptScroll<Content: View>: View {
                 submissionTask?.cancel()
                 replyTask?.cancel()
                 viewport.readerMoved = false
+                composerCompact.expand()
                 submissionTask = alignTranscriptContent(viewport: viewport, replyID: nil)
             }
         }
@@ -1771,12 +1927,14 @@ private struct TranscriptPosition: NSViewRepresentable {
     let initialReplyID: String?
     var onChange: (Bool) -> Void
     var onUserScroll: () -> Void
+    var onUserScrollEnd: () -> Void = {}
     var onNearTop: () -> Void
     var onNearBottom: () -> Void
     func makeNSView(context: Context) -> ObserverView { ObserverView() }
     func updateNSView(_ view: ObserverView, context: Context) {
         view.onChange = onChange
         view.onUserScroll = onUserScroll
+        view.onUserScrollEnd = onUserScrollEnd
         view.onNearTop = onNearTop
         view.onNearBottom = onNearBottom
         view.viewport = viewport
@@ -1790,6 +1948,7 @@ private struct TranscriptPosition: NSViewRepresentable {
         private static let autoLoadThreshold: CGFloat = 72
         var onChange: ((Bool) -> Void)?
         var onUserScroll: (() -> Void)?
+        var onUserScrollEnd: (() -> Void)?
         var onNearTop: (() -> Void)?
         var onNearBottom: (() -> Void)?
         var viewport: TranscriptViewport?
@@ -1828,8 +1987,11 @@ private struct TranscriptPosition: NSViewRepresentable {
             syncAlignmentIfFollowing(layoutIfNeeded: false)
             if viewport?.shouldSyncPreserveOnBoundsChange == true {
                 viewport?.restoreReadingPosition(layoutIfNeeded: false)
-            } else if viewport?.readerMoved == true {
-                viewport?.noteScrollActivity()
+            } else if let viewport, viewport.readerMoved {
+                viewport.noteScrollActivity()
+                if !viewport.isAnimatingReply, !viewport.isReturningToBottom, viewport.isScrollable, !viewport.isAtBottom {
+                    onUserScroll?()
+                }
             }
             scheduleUpdate()
         }
@@ -1846,6 +2008,7 @@ private struct TranscriptPosition: NSViewRepresentable {
         @objc private func userScrollEnded(_ notification: Notification) {
             scrollActivity?.endScrolling()
             viewport?.handleUserLiveScrollEnded()
+            onUserScrollEnd?()
         }
 
         func attachAndSync(layoutIfNeeded: Bool) {
@@ -1902,6 +2065,7 @@ private struct LegacyTranscriptScroll<Content: View>: View {
     let completedReplyID: String?
     let viewport: TranscriptViewport
     let scrollActivity: TranscriptScrollActivity
+    let composerCompact: ComposerCompactState
     let bottomInset: CGFloat
     var replyNavigation: AgentModel.ReplyNavigation?
     var hasNewer = false
@@ -1920,8 +2084,28 @@ private struct LegacyTranscriptScroll<Content: View>: View {
             content.background {
                 TranscriptPosition(viewport: viewport, scrollActivity: scrollActivity,
                                    initialReplyID: isWaiting ? nil : completedReplyID,
-                                   onChange: { [bottomState] in bottomState.update($0) },
-                                   onUserScroll: { bottomTask?.cancel(); submissionTask?.cancel(); replyTask?.cancel(); viewport.followsLatestContent = false; viewport.readerMoved = true },
+                                   onChange: { [bottomState, composerCompact, hasNewer] atBottom in
+                                       let wasAtBottom = bottomState.isAtBottom
+                                       bottomState.update(atBottom)
+                                       if !wasAtBottom && atBottom && !hasNewer {
+                                           composerCompact.expand()
+                                       }
+                                   },
+                                   onUserScroll: {
+                                       bottomTask?.cancel()
+                                       submissionTask?.cancel()
+                                       replyTask?.cancel()
+                                       viewport.followsLatestContent = false
+                                       viewport.readerMoved = true
+                                       if viewport.isScrollable {
+                                           composerCompact.collapse()
+                                       }
+                                   },
+                                   onUserScrollEnd: { [bottomState, composerCompact, hasNewer] in
+                                       if bottomState.isAtBottom && !hasNewer {
+                                           composerCompact.expand()
+                                       }
+                                   },
                                    onNearTop: onNearTop,
                                    onNearBottom: onNearBottom)
             }
@@ -1929,7 +2113,7 @@ private struct LegacyTranscriptScroll<Content: View>: View {
         .coordinateSpace(name: "transcriptScroll")
         .environment(\.transcriptVisibleInsets, EdgeInsets(top: AgentLayout.headerHeight + 8, leading: 0, bottom: bottomInset + 8, trailing: 0))
         .scrollIndicators(.hidden)
-        .onDisappear { bottomTask?.cancel(); submissionTask?.cancel(); replyTask?.cancel(); viewport.followsLatestContent = false; viewport.cancelReadingAnchor(); scrollActivity.reset() }
+        .onDisappear { bottomTask?.cancel(); submissionTask?.cancel(); replyTask?.cancel(); viewport.followsLatestContent = false; viewport.cancelReadingAnchor(); scrollActivity.reset(); composerCompact.expand() }
         .onChange(of: replyNavigation) { _, request in
             guard let request else { return }
             bottomTask?.cancel()
@@ -1957,10 +2141,11 @@ private struct LegacyTranscriptScroll<Content: View>: View {
             bottomTask = alignTranscriptContent(viewport: viewport, replyID: isWaiting ? nil : completedReplyID)
         }
         .overlay(alignment: .bottom) {
-            TranscriptReturnToBottomOverlay(bottomState: bottomState, hasNewer: hasNewer, bottomInset: bottomInset) {
+            TranscriptReturnToBottomOverlay(bottomState: bottomState, composerCompact: composerCompact, hasNewer: hasNewer, bottomInset: bottomInset) {
                 bottomTask?.cancel()
                 submissionTask?.cancel()
                 replyTask?.cancel()
+                composerCompact.expand()
                 loadLatest()
                 bottomTask = viewport.returnToBottom(reduceMotion: reduceMotion)
             }
@@ -1972,6 +2157,7 @@ private struct LegacyTranscriptScroll<Content: View>: View {
                 submissionTask?.cancel()
                 replyTask?.cancel()
                 viewport.readerMoved = false
+                composerCompact.expand()
                 submissionTask = alignTranscriptContent(viewport: viewport, replyID: nil)
             }
         }
@@ -2786,37 +2972,137 @@ private struct ChatBubble: View {
 private struct Composer: View {
     @Bindable var model: AgentModel
     @Binding var showingApprovalMenu: Bool
+    let compactState: ComposerCompactState
     @State private var importing = false
     @State private var editorHeight: CGFloat = 28
     @State private var editorFocused = false
     @State private var hasMarkedText = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    private var isCompact: Bool { compactState.isCompact }
+    private var expandedEditorHeight: CGFloat { (model.isComposerEmpty && !hasMarkedText) ? 28 : editorHeight }
+    private var activeEditorHeight: CGFloat { isCompact ? 28 : expandedEditorHeight }
+    private var targetHeight: CGFloat { isCompact ? AgentLayout.compactComposerHeight : expandedEditorHeight + 54 }
+    private var composerShape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: AgentLayout.composerCornerRadius, style: .circular)
+    }
+    private var useNativeLiquidGlass: Bool {
+        !SurfaceCompatibility.useLegacyMaterial && !reduceTransparency && contrast != .increased
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        glassShell
+            .accessibilityIdentifier("agent-composer-shell")
+            .frame(maxWidth: isCompact ? AgentLayout.contentMaxWidth - AgentLayout.compactComposerWidthInset : AgentLayout.contentMaxWidth)
+            .padding(.horizontal, isCompact ? AgentLayout.compactComposerHorizontalPadding : AgentLayout.contentHorizontalPadding)
+            .padding(.bottom, AgentLayout.composerBottomPadding)
+            .animation(ComposerMorphMotion.animation(isCompact: isCompact, reduceMotion: reduceMotion), value: isCompact)
+            .onChange(of: hasMarkedText) { _, composing in
+                compactState.canCollapse = !composing
+                if composing { compactState.expand() }
+            }
+            .onChange(of: model.quoteFocusRevision) { _, _ in
+                compactState.expand()
+                editorFocused = true
+            }
+            .onChange(of: model.pendingTagInsertions) { _, insertions in
+                if !insertions.isEmpty { compactState.expand() }
+            }
+            .fileImporter(isPresented: $importing, allowedContentTypes: [.data, .image, .text], allowsMultipleSelection: true) { r in
+                switch r {
+                case .success(let urls): urls.forEach { model.attach(fileURL: $0) }
+                case .failure(let error): model.reportAttachmentError(error)
+                }
+            }
+            .dropDestination(for: URL.self) { urls, _ in
+                if !urls.isEmpty { compactState.expand() }
+                urls.forEach { model.attach(fileURL: $0) }
+                return !urls.isEmpty
+            }
+    }
+
+    @ViewBuilder
+    private var glassShell: some View {
+        if #available(macOS 26, *), useNativeLiquidGlass {
+            GlassEffectContainer {
+                // Keep one live Liquid Glass surface alive as its bounds morph smoothly
+                // between the 2-row rounded composer and the 44 pt single-line capsule.
+                composerShape
+                    .fill(.clear)
+                    .frame(height: targetHeight)
+                    .glassEffect(.regular, in: composerShape)
+                    .overlay(alignment: .bottom) {
+                        composerForeground
+                            .frame(height: targetHeight)
+                            .clipShape(composerShape)
+                    }
+                    .glassEffect(.identity)
+            }
+        } else {
+            composerForeground
+                .frame(height: targetHeight)
+                .clipShape(composerShape)
+                .nativeGlassBackground(in: composerShape)
+        }
+    }
+
+    private var composerForeground: some View {
+        ZStack(alignment: .bottom) {
+            if isCompact {
+                Color.clear
+                    .contentShape(composerShape)
+                    .onTapGesture {
+                        compactState.expand()
+                        editorFocused = true
+                    }
+            }
+
             ComposerTextEditor(
                 height: $editorHeight,
                 isFocused: $editorFocused,
+                isCompact: isCompact,
                 resetRevision: model.composerResetRevision,
+                focusRevision: model.quoteFocusRevision,
                 pendingInsertions: model.pendingTagInsertions,
                 consumeInsertions: { model.consumeTagInsertions($0) },
                 onSegmentsChanged: { model.syncDraft(segments: $0) },
                 onMarkedTextChanged: { hasMarkedText = $0 },
-                pasteAttachment: { model.pasteAttachments() },
+                onUserInteract: { compactState.expand() },
+                pasteAttachment: {
+                    compactState.expand()
+                    return model.pasteAttachments()
+                },
                 pasteLongText: { model.collapsePastedTextIfNeeded($0) },
                 submit: submitDraft,
                 shortcuts: model.shortcutPreferences
             )
             .environment(\.chatSelectionColor, model.avatarColor.tint)
-            .frame(height: (model.isComposerEmpty && !hasMarkedText) ? 28 : editorHeight)
-            .padding(.horizontal, 4)
-            HStack {
-                Button { importing = true } label: {
+            .frame(height: activeEditorHeight)
+            .padding(.leading, isCompact ? 36 : 4)
+            .padding(.trailing, isCompact ? 36 : 4)
+            .padding(.bottom, isCompact ? 8 : 44)
+
+            HStack(spacing: 8) {
+                Button {
+                    compactState.expand()
+                    importing = true
+                } label: {
                     Image(mingCute: "plus", size: 14).frame(width: 28, height: 28)
                 }
                 .buttonStyle(AgentIconButtonStyle(cornerRadius: 14))
                 .accessibilityLabel(NSLocalizedString("选择文件或图片", comment: ""))
-                Spacer()
+
+                Spacer(minLength: 0)
+
                 ApprovalModePicker(model: model, showing: $showingApprovalMenu)
+                    .opacity(isCompact ? 0 : 1)
+                    .scaleEffect(isCompact ? 0.86 : 1, anchor: .trailing)
+                    .blur(radius: isCompact && !reduceMotion ? 3 : 0)
+                    .allowsHitTesting(!isCompact)
+                    .accessibilityHidden(isCompact)
+
                 let primaryAction = model.composerPrimaryAction
                 let showsStop = primaryAction == .stop
                 Button { if showsStop { model.stop() } else { submitDraft() } } label: {
@@ -2827,23 +3113,12 @@ private struct Composer: View {
                 .accessibilityLabel(showsStop ? NSLocalizedString("停止生成", comment: "") : NSLocalizedString("发送消息", comment: ""))
             }
             .padding(.horizontal, 8)
-        }
-        .padding(.top, 10).padding(.bottom, 8)
-        .nativeGlassBackground(in: RoundedRectangle(cornerRadius: AgentLayout.composerCornerRadius, style: .circular))
-        .onChange(of: model.quoteFocusRevision) { _, _ in editorFocused = true }
-        .fileImporter(isPresented: $importing, allowedContentTypes: [.data, .image, .text], allowsMultipleSelection: true) { r in
-            switch r {
-            case .success(let urls): urls.forEach { model.attach(fileURL: $0) }
-            case .failure(let error): model.reportAttachmentError(error)
-            }
-        }
-        .dropDestination(for: URL.self) { urls, _ in
-            urls.forEach { model.attach(fileURL: $0) }
-            return !urls.isEmpty
+            .padding(.bottom, 8)
         }
     }
 
     private func submitDraft() {
+        compactState.expand()
         model.send()
         if model.isComposerEmpty { editorHeight = 28 }
     }
