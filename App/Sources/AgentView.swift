@@ -836,8 +836,8 @@ private enum ComposerMorphMotion {
     static func animation(isCompact: Bool, reduceMotion: Bool) -> Animation {
         if reduceMotion { return .easeOut(duration: 0.14) }
         return isCompact
-            ? .spring(response: 0.38, dampingFraction: 0.80, blendDuration: 0.1)
-            : .spring(response: 0.34, dampingFraction: 0.76, blendDuration: 0.1)
+            ? .spring(response: 0.25, dampingFraction: 0.64)
+            : .spring(response: 0.24, dampingFraction: 0.60)
     }
 }
 
